@@ -3,6 +3,14 @@ name: Staging Android EAS Build (gated)
 on:
   push:
     branches: [main]
+    # CI/docs/delivery-only merges must not consume an extra cloud build.
+    paths:
+      - 'App.tsx'
+      - 'app.json'
+      - 'eas.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/**'
   workflow_dispatch:
 
 permissions:
@@ -74,10 +82,69 @@ jobs:
         run: eas build --platform android --profile android-preview --non-interactive --wait --json > "$RUNNER_TEMP/eas-build.json"
       - name: Verify finished APK and staging manifest
         run: node scripts/verify-release.mjs verify-build "$RUNNER_TEMP/eas-build.json" "$RUNNER_TEMP/build-manifest.json"
-      - name: Retain verified manifest for private M0.4 delivery
+      - name: Retain verified EAS manifest for Drive delivery
         uses: actions/upload-artifact@v4
         with:
           name: heremate-android-staging-manifest
           path: ${{ runner.temp }}/build-manifest.json
           if-no-files-found: error
           retention-days: 7
+
+  publish-android-to-private-drive:
+    needs: build-android-staging
+    if: >-
+      github.repository == 'chaithawat03/HereMate' &&
+      github.ref == 'refs/heads/main' &&
+      vars.STAGING_EAS_ENABLED == 'true' &&
+      vars.STAGING_DRIVE_ENABLED == 'true'
+    environment: staging-drive
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download EAS manifest from this successful workflow run
+        uses: actions/download-artifact@v4
+        with:
+          name: heremate-android-staging-manifest
+          path: ${{ runner.temp }}/staging-build
+      - name: Authenticate to Google Cloud via short-lived GitHub OIDC
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ vars.GOOGLE_WIF_SERVICE_ACCOUNT }}
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+      - name: Read only owner OAuth credentials from Secret Manager
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          gcloud secrets versions access latest --project="$GCP_PROJECT_ID" --secret=heremate-staging-drive-oauth > "$RUNNER_TEMP/drive-oauth.json"
+          test -s "$RUNNER_TEMP/drive-oauth.json"
+      - name: Upload APK and verified manifest privately with owner OAuth
+        env:
+          DRIVE_OAUTH_SECRET_JSON_FILE: ${{ runner.temp }}/drive-oauth.json
+          DRIVE_FOLDER_ID: ${{ vars.DRIVE_FOLDER_ID }}
+          DRIVE_EXPECTED_OWNER_EMAIL: ${{ vars.DRIVE_EXPECTED_OWNER_EMAIL }}
+        run: |
+          set -euo pipefail
+          node scripts/publish-staging-drive.mjs "$RUNNER_TEMP/staging-build/build-manifest.json" "$RUNNER_TEMP/drive-delivery-receipt.json"
+      - name: Retain non-secret Drive receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: heremate-private-drive-delivery-receipt
+          path: ${{ runner.temp }}/drive-delivery-receipt.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove temporary owner OAuth token material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/drive-oauth.json"
