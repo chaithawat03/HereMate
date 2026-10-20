@@ -8,7 +8,7 @@
 - Production deployment is not authorized.
 
 ## First-time setup by owner
-1. The existing Expo Project is smartyyys-team/heremate. Confirm the immutable Expo Project UUID with authenticated Expo access. Link the existing project, not a duplicate. In a reviewed PR, add expo.extra.eas.projectId to app.json and update/review its pinned security snapshot.
+1. The existing Expo Project is smartyyys-team/heremate. **Verified by owner in Cloud Shell**: existing @smartyyys-team/heremate linked successfully, immutable EAS Project UUID `93bb1566-2f29-4898-bba3-30f93b8deb6e`. This PR pins `expo.extra.eas.projectId` in `app.json` and updates *only that one reviewed app.json source blob* in the staging-only security snapshot. Do not create a duplicate Expo project.
 2. Create an Expo token and store it as EXPO_TOKEN in GitHub environment staging-eas. Do not send it in chat or commit it.
 3. Set up Android EAS signing credentials (managed keystore) via secure interactive Cloud Shell for the first build; subsequent CI builds can use non-interactive mode.
 4. Configure GitHub environment staging-eas, restricted to main; repo variable STAGING_EAS_PROJECT_ID must equal the verified UUID.
