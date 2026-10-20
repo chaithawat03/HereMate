@@ -1,0 +1,26 @@
+name: M0 Foundation CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run configuration contract tests
+        run: node --test tests/m0.test.mjs
+      - name: Verify test script syntax
+        run: node --check tests/m0.test.mjs
