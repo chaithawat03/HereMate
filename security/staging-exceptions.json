@@ -1,0 +1,28 @@
+{
+  "environment": "staging",
+  "sourceScope": "synthetic-data-only",
+  "approvedOn": "2026-10-20",
+  "expiresOn": "2026-11-20",
+  "trackingIssue": "https://github.com/chaithawat03/HereMate/issues/5",
+  "allowed": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "reason": "Expo Metro transitive dependency allowed only for synthetic-data M0.1 staging foundation and expires automatically."
+    },
+    {
+      "id": "GHSA-86w9-cpqp-85rv",
+      "package": "node-forge",
+      "reason": "Expo code-signing transitive dependency allowed only for synthetic-data M0.1 staging foundation and expires automatically."
+    }
+  ],
+  "sourceHashes": {
+    "App.tsx": "07bde593327f4b75be7c88964fabfe8113fe98f8",
+    "app.json": "a472aa18e0c1e52fd312a976e57045a92a2b43e6",
+    "eas.json": "f9437fba0f48d54b5427739f87219f594c221c66",
+    "index.ts": "8f76389f5564c1aef7c2c53f5deddba5a421d3e1",
+    "package.json": "804e2c824c4a26e090eff4c53fb36de8c0d8de01",
+    "package-lock.json": "4d01361322e4b404bede1f8bc3fdf071d645f560",
+    "src/domain/demo.ts": "05f2cac75a853133bddc093efd039ac2b65f7d4c"
+  }
+}

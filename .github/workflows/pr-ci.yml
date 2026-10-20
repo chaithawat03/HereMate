@@ -1,4 +1,4 @@
-name: M0 Foundation CI
+name: PR CI
 
 on:
   pull_request:
@@ -12,15 +12,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout PR
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Run configuration contract tests
-        run: node --test tests/m0.test.mjs
-      - name: Verify test script syntax
-        run: node --check tests/m0.test.mjs
+      - run: node --test tests/m0.test.mjs
+      - run: node --check tests/m0.test.mjs
+
+  mobile:
+    needs: foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install exact locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: TypeScript strict typecheck
+        run: npm run typecheck
+      - name: Unit and configuration tests
+        run: npm test
+      - name: Validate Expo configuration without secrets
+        run: |
+          ./node_modules/.bin/expo config --json > /tmp/heremate-expo-config.json
+          node -e "const c=require('/tmp/heremate-expo-config.json'); if(c.owner !== 'smartyyys-team' || c.slug !== 'heremate')process.exit(1)"
+      - name: Test staging security exception (fail closed)
+        run: node --test tests/security-staging.test.mjs
+      - name: Audit dependencies with approved M0.1 staging exception only
+        run: node scripts/check-staging-audit.mjs
