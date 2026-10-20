@@ -41,7 +41,7 @@ jobs:
         run: npm test
       - name: Validate Expo configuration without secrets
         run: |
-          npm run config > /tmp/heremate-expo-config.json
+          ./node_modules/.bin/expo config --json > /tmp/heremate-expo-config.json
           node -e "const c=require('/tmp/heremate-expo-config.json'); if(c.owner !== 'smartyyys-team' || c.slug !== 'heremate')process.exit(1)"
       - name: Audit production dependencies (high severity)
         run: npm audit --omit=dev --audit-level=high
