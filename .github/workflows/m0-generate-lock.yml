@@ -1,0 +1,31 @@
+name: M0 Temporary Lockfile Bootstrap
+
+# Trusted, temporary bootstrap ONLY on this named source branch.
+# Remove before merging; token push itself does not trigger recursive CI.
+on:
+  push:
+    branches: [feat/m0-1-expo-native-shell]
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: github.repository == 'chaithawat03/HereMate' && github.ref == 'refs/heads/feat/m0-1-expo-native-shell'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve SDK 57 lockfile without running install scripts
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Commit package-lock.json only on development branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "chore(m0): lock Expo SDK 57 dependencies"
+          git push origin HEAD:feat/m0-1-expo-native-shell

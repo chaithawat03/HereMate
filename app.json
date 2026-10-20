@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "HereMate",
+    "slug": "heremate",
+    "owner": "smartyyys-team",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "heremate",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.chaithawat03.heremate"
+    },
+    "android": {
+      "package": "com.chaithawat03.heremate",
+      "predictiveBackGestureEnabled": false
+    },
+    "extra": {
+      "environment": "staging"
+    }
+  }
+}
