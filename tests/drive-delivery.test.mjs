@@ -82,7 +82,7 @@ test('delivery workflow is manual opt-in, WIF auth, no Production or public Driv
   assert.match(w,/environment: staging-drive/);
   assert.match(w,/id-token: write/);
   assert.match(w,/google-github-actions\/auth@v3/);
-  assert.match(w,/secretmanager/);
+  assert.match(w,/gcloud secrets versions access/);
   assert.match(w,/scripts\/publish-staging-drive.mjs/);
   assert.doesNotMatch(w,/GOOGLE_DRIVE_REFRESH_TOKEN|drive\.readonly|drive\.metadata\.readonly/);
   assert.match(w,/^    environment: staging-eas/m);
