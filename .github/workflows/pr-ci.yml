@@ -43,5 +43,7 @@ jobs:
         run: |
           ./node_modules/.bin/expo config --json > /tmp/heremate-expo-config.json
           node -e "const c=require('/tmp/heremate-expo-config.json'); if(c.owner !== 'smartyyys-team' || c.slug !== 'heremate')process.exit(1)"
-      - name: Audit production dependencies (high severity)
-        run: npm audit --omit=dev --audit-level=high
+      - name: Test staging security exception (fail closed)
+        run: node --test tests/security-staging.test.mjs
+      - name: Audit dependencies with approved M0.1 staging exception only
+        run: node scripts/check-staging-audit.mjs
