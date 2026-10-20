@@ -1,0 +1,83 @@
+name: Staging Android EAS Build (gated)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heremate-staging-eas-main
+  cancel-in-progress: false
+
+jobs:
+  verify-reviewed-merge:
+    if: >-
+      github.repository == 'chaithawat03/HereMate' &&
+      github.ref == 'refs/heads/main' &&
+      vars.STAGING_EAS_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require reviewed green PR merge, not arbitrary main push
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/verify-release.mjs verify-merge
+      - name: Test release and exception guards without credentials
+        run: node --test tests/m0.test.mjs tests/security-staging.test.mjs tests/release-gates.test.mjs
+      - name: Validate existing Expo project identity (never create)
+        env:
+          STAGING_EAS_PROJECT_ID: ${{ vars.STAGING_EAS_PROJECT_ID }}
+        run: node scripts/verify-release.mjs validate-config
+
+  build-android-staging:
+    needs: verify-reviewed-merge
+    if: >-
+      github.repository == 'chaithawat03/HereMate' &&
+      github.ref == 'refs/heads/main' &&
+      vars.STAGING_EAS_ENABLED == 'true'
+    environment: staging-eas
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install exact locked packages
+        run: npm ci --no-audit --no-fund
+      - name: Verify staging-only dependency audit before Expo access
+        run: node scripts/check-staging-audit.mjs
+      - name: Configure authenticated Expo EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Cloud-build internal Android APK and await result
+        run: eas build --platform android --profile android-preview --non-interactive --wait --json > "$RUNNER_TEMP/eas-build.json"
+      - name: Verify finished APK and staging manifest
+        run: node scripts/verify-release.mjs verify-build "$RUNNER_TEMP/eas-build.json" "$RUNNER_TEMP/build-manifest.json"
+      - name: Retain verified manifest for private M0.4 delivery
+        uses: actions/upload-artifact@v4
+        with:
+          name: heremate-android-staging-manifest
+          path: ${{ runner.temp }}/build-manifest.json
+          if-no-files-found: error
+          retention-days: 7
