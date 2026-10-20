@@ -92,7 +92,7 @@ function listQuery(folderId,name) {
   const q="'"+folderId+"' in parents and name = '"+name.replaceAll("'","\\'")+"' and trashed = false";
   return 'https://www.googleapis.com/drive/v3/files?' + new URLSearchParams({
     q,fields:'nextPageToken,files(id,name,size,md5Checksum,parents,appProperties,webViewLink,shared)',
-    page_size:'100'
+    pageSize:'100'
   });
 }
 
