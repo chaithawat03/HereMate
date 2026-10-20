@@ -48,7 +48,12 @@ test('EAS workflow has opt-in and staging safety gates',()=>{
  assert.match(workflow,/environment: staging-eas/);
  assert.match(workflow,/--platform android --profile android-preview/);
  assert.match(workflow,/--wait --json/);
- assert.doesNotMatch(workflow,/GOOGLE_DRIVE_REFRESH_TOKEN|id-token:\s*write/);
+ assert.doesNotMatch(workflow,/GOOGLE_DRIVE_REFRESH_TOKEN/);
+ const buildSection=workflow.split('  build-android-staging:')[1]?.split('  publish-android-to-private-drive:')[0];
+ const deliverSection=workflow.split('  publish-android-to-private-drive:')[1];
+ assert.ok(buildSection && deliverSection);
+ assert.doesNotMatch(buildSection,/id-token:\s*write/);
+ assert.match(deliverSection,/id-token:\s*write/);
 });
 
 test('HereMate existing Expo project UUID is pinned and matches owner',()=>{
