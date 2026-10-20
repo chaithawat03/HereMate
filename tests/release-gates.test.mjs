@@ -50,3 +50,10 @@ test('EAS workflow has opt-in and staging safety gates',()=>{
  assert.match(workflow,/--wait --json/);
  assert.doesNotMatch(workflow,/GOOGLE_DRIVE_REFRESH_TOKEN|id-token:\s*write/);
 });
+
+test('HereMate existing Expo project UUID is pinned and matches owner',()=>{
+ assert.equal(app.expo.owner,'smartyyys-team');
+ assert.equal(app.expo.slug,'heremate');
+ assert.equal(app.expo.extra.eas.projectId,'93bb1566-2f29-4898-bba3-30f93b8deb6e');
+ assert.equal(checkEasConfig(app,eas,app.expo.extra.eas.projectId).projectId,'93bb1566-2f29-4898-bba3-30f93b8deb6e');
+});
