@@ -28,7 +28,7 @@ test('Guest preview requires explicit staging flag and is never a production pro
   assert.match(guest,/assertFirebaseStagingIdentity\(\)/);
 });
 test('anonymous login is user-initiated, persists using React Native AsyncStorage',()=>{
-  assert.match(guest,/getReactNativePersistence\(createAsyncStorage\('heremate-staging-auth'\)\)/);
+  assert.match(guest,/getReactNativePersistence\\(AsyncStorage\\)/);
   assert.match(guest,/signInAnonymously\(auth\)/);
   assert.match(guest,/signOut\(auth\)/);
   assert.match(guest,/onAuthStateChanged/);
