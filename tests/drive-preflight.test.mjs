@@ -63,3 +63,23 @@ test('workflow_dispatch preflight cannot enter EAS build or Drive publishing',()
  assert.doesNotMatch(verify,/id-token: write/);
  assert.doesNotMatch(build,/id-token: write/);
 });
+
+test('scheduled OAuth health job is read-only and never triggers EAS build/upload',()=>{
+ const w=readFileSync(new URL('../.github/workflows/staging-eas-build.yml',import.meta.url),'utf8');
+ assert.match(w,/schedule:\s*\n\s*-\s*cron:\s*'17 7 \* \* \*'/);
+ const check=w.split('  preflight-private-drive:')[1]?.split('  verify-reviewed-merge:')[0];
+ const verify=w.split('  verify-reviewed-merge:')[1]?.split('  build-android-staging:')[0];
+ const build=w.split('  build-android-staging:')[1]?.split('  publish-android-to-private-drive:')[0];
+ const publish=w.split('  publish-android-to-private-drive:')[1];
+ assert.ok(check && verify && build && publish);
+ assert.match(check,/github\.event_name == 'schedule'/);
+ assert.match(check,/environment: staging-drive/);
+ assert.doesNotMatch(check,/eas build|publish-staging-drive\.mjs|upload-artifact@/);
+ for(const section of [verify,build,publish]) {
+   assert.match(section,/github\.event_name == 'push'/);
+   assert.match(section,/github\.event_name == 'workflow_dispatch'/);
+   assert.match(section,/inputs\.run_mode == 'build'/);
+   assert.doesNotMatch(section,/github\.event_name != 'workflow_dispatch'/);
+ }
+ assert.match(publish,/vars\.STAGING_DRIVE_ENABLED == 'true'/);
+});

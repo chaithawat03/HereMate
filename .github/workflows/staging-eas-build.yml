@@ -11,6 +11,9 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'src/**'
+  # Daily read-only OAuth/WIF health check. NEVER creates an EAS build.
+  schedule:
+    - cron: '17 7 * * *'
   workflow_dispatch:
     inputs:
       run_mode:
@@ -36,8 +39,8 @@ jobs:
     if: >-
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
-      github.event_name == 'workflow_dispatch' &&
-      inputs.run_mode == 'preflight'
+      (github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' && inputs.run_mode == 'preflight'))
     environment: staging-drive
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -95,7 +98,8 @@ jobs:
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
       vars.STAGING_EAS_ENABLED == 'true' &&
-      (github.event_name != 'workflow_dispatch' || inputs.run_mode == 'build')
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.run_mode == 'build'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -126,7 +130,8 @@ jobs:
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
       vars.STAGING_EAS_ENABLED == 'true' &&
-      (github.event_name != 'workflow_dispatch' || inputs.run_mode == 'build')
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.run_mode == 'build'))
     environment: staging-eas
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -167,7 +172,8 @@ jobs:
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
       vars.STAGING_EAS_ENABLED == 'true' &&
-      (github.event_name != 'workflow_dispatch' || inputs.run_mode == 'build') &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.run_mode == 'build')) &&
       vars.STAGING_DRIVE_ENABLED == 'true'
     environment: staging-drive
     runs-on: ubuntu-latest
