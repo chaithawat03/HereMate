@@ -95,8 +95,6 @@ jobs:
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
       vars.STAGING_EAS_ENABLED == 'true' &&
-      (github.event_name != 'workflow_dispatch' || inputs.run_mode == 'build') &&
-      (github.event_name != 'workflow_dispatch' || inputs.run_mode == 'build') &&
       (github.event_name != 'workflow_dispatch' || inputs.run_mode == 'build')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -127,7 +125,8 @@ jobs:
     if: >-
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
-      vars.STAGING_EAS_ENABLED == 'true'
+      vars.STAGING_EAS_ENABLED == 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.run_mode == 'build')
     environment: staging-eas
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -168,6 +167,7 @@ jobs:
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
       vars.STAGING_EAS_ENABLED == 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.run_mode == 'build') &&
       vars.STAGING_DRIVE_ENABLED == 'true'
     environment: staging-drive
     runs-on: ubuntu-latest
