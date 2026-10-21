@@ -70,11 +70,33 @@ export async function refreshAccessToken(credentials, fetcher=fetch) {
   return data.access_token;
 }
 
+// Artifact links returned by Expo are HTTPS URLs on expo.dev. Expo may
+// redirect them to cloud object storage or a CDN. Trust only a final HTTPS
+// endpoint hosted by Expo or a recognized storage/CDN provider; do not
+// silently accept arbitrary redirects or downgrade to HTTP.
+export function validateEasArtifactDestination(origin, resolved) {
+  let start, target;
+  try { start=new URL(origin); target=new URL(resolved); }
+  catch { fail('malformed EAS artifact download URL'); }
+  if(start.protocol!=='https:' || start.hostname!=='expo.dev' ||
+      !/^\/artifacts\/eas\/[^/]+\.apk$/.test(start.pathname) ||
+      start.username || start.password) fail('unapproved EAS artifact origin');
+  const host=target.hostname.toLowerCase();
+  const approved=host==='expo.dev' ||
+    host.endsWith('.expo.dev') ||
+    host==='storage.googleapis.com' ||
+    /^([a-z0-9-]+\.)?s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com$/.test(host) ||
+    /^[a-z0-9-]+\.cloudfront\.net$/.test(host) ||
+    (host==='eascdn.net' || host.endsWith('.eascdn.net')) ||
+    /^[a-z0-9-]+\.blob\.core\.windows\.net$/.test(host);
+  if(target.protocol!=='https:' || target.username || target.password || !approved)
+    fail('unexpected EAS download redirect host: '+host+' (URL and query not logged)');
+}
+
 async function downloadApk(url,path,fetcher=fetch) {
   const r=await fetcher(url,{redirect:'follow'});
   assertHttp(r,'EAS APK download failed');
-  const final=new URL(r.url || url);
-  if (final.protocol !== 'https:' || !['expo.dev','storage.googleapis.com'].includes(final.hostname)) fail('unexpected EAS download redirect');
+  validateEasArtifactDestination(url,r.url || url);
   if (!r.body) fail('empty EAS response');
   let size=0,sha=createHash('sha256'),md5=createHash('md5');
   await pipeline(Readable.fromWeb(r.body),new Transform({transform(chunk,_enc,done){
