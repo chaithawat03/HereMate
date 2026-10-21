@@ -15,7 +15,7 @@ const fail = reason => { throw new Error('M0.4 PRIVATE DRIVE DELIVERY BLOCKED: '
 
 export function validateBuildManifest(data, sha) {
   if (!SHA.test(sha || '') || data?.sha !== sha || !UUID.test(data?.buildId || '')) fail('unexpected source SHA or EAS build ID');
-  if (data?.platform !== 'android' || data?.profile !== 'android-preview' || data?.status !== 'finished') fail('non-staging or unfinished EAS artifact');
+  if (data?.platform !== 'android' || data?.profile !== 'android-guest-staging' || data?.status !== 'finished') fail('non-staging or unfinished EAS artifact');
   const url = new URL(data.artifactUrl || 'https://invalid.example');
   if (url.protocol !== 'https:' || !['expo.dev', 'storage.googleapis.com'].includes(url.hostname) || !url.pathname.endsWith('.apk')) fail('unapproved APK origin or extension');
   return { ...data, artifactUrl: url.href };
@@ -194,7 +194,7 @@ export async function publish({buildManifestPath,credentialsPath,outPath,tempApk
       hashes:apkHash,props,mimeType:'application/vnd.android.package-archive',fetcher});
     const delivered={
       schemaVersion:1,app:'HereMate',environment:'staging',productionAuthorized:false,
-      expoProjectId:EAS_PROJECT_ID,sourceSha:sha,easBuildId:build.buildId,profile:'android-preview',
+      expoProjectId:EAS_PROJECT_ID,sourceSha:sha,easBuildId:build.buildId,profile:build.profile,
       apk:{fileName:apkName,bytes:apkHash.size,sha256:apkHash.sha256,md5:apkHash.md5,driveFileId:apk.id,driveUrl:apk.url},
       security:{exception:'STAGING ONLY; NOT PATCHED',expiresOn:'2026-11-20',
         advisories:['GHSA-vfj7-8cjw-p6xm','GHSA-86w9-cpqp-85rv']},
