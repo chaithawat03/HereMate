@@ -26,7 +26,7 @@
     "src/config/firebaseStaging.ts": "cb9bc13e938e0066c1903488a912ea644545fcbf",
     "src/types/firebase-auth-react-native.d.ts": "f3d93ec8d12a535516d87fa9eba07e1eed29bfc6",
     "firebase/firestore.rules": "6b9a282d103711c38bfc8ee3b65522e0f211e8b1",
-    ".github/workflows/staging-eas-build.yml": "fc7d1582d85f682976234b50acaa33b441f15bfe",
+    ".github/workflows/staging-eas-build.yml": "508f4ef1eb61b30db619dad462f466f9df2fb655",
     "scripts/verify-release.mjs": "81e25e72e596a77d578d3686fa79c3a7fd5053b0"
   }
 }
