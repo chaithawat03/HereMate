@@ -6,11 +6,13 @@ const block=(reason)=>{throw Error('STAGING RELEASE BLOCKED: '+reason)};
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function checkEasConfig(app,eas,projectId){
-  const exp=app?.expo, p=eas?.build?.['android-preview'];
+  const exp=app?.expo, p=eas?.build?.['android-preview'], guest=eas?.build?.['android-guest-staging'];
   if(exp?.owner!=='smartyyys-team'||exp?.slug!=='heremate')block('wrong Expo owner/slug');
   if(exp?.extra?.environment!=='staging'||exp?.android?.package!=='com.chaithawat03.heremate')block('wrong staging application');
   if(eas?.build?.production!==undefined||p?.distribution!=='internal'||p.android?.buildType!=='apk'||p.env?.EXPO_PUBLIC_ENVIRONMENT!=='staging')block('not an Android staging APK profile');
   if(!eas?.build?.['ios-simulator']?.ios?.simulator)block('iOS simulator profile missing');
+  if(guest?.distribution!=='internal'||guest?.android?.buildType!=='apk'||guest?.env?.EXPO_PUBLIC_ENVIRONMENT!=='staging'||guest?.env?.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST!=='true')block('Guest Android staging APK profile missing or unsafe');
+  if(eas?.build?.['android-preview']?.env?.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST=== 'true')block('existing Demo profile must remain unchanged');
   if(!uuid.test(projectId||'')||exp?.extra?.eas?.projectId!==projectId)block('existing Expo project UUID not yet verified in app.json');
   return {owner:exp.owner,slug:exp.slug,projectId};
 }
@@ -37,7 +39,7 @@ export async function checkReviewedMerge({sha,ref,repo,token,fetcher=fetch}){
 export function verifyBuild(output,sha){
   const build=Array.isArray(output)?(output.length===1?output[0]:null):output;
   if(!uuid.test(build?.id||'')||String(build.status).toLowerCase()!=='finished'||String(build.platform).toLowerCase()!=='android')block('Android EAS build not finished');
-  if(build.buildProfile!=='android-preview')block('unexpected EAS build profile');
+  if(build.buildProfile!=='android-guest-staging')block('unexpected EAS build profile');
   if(build.gitCommitHash&&build.gitCommitHash!==sha)block('source commit mismatch');
   const url=build.artifacts?.applicationArchiveUrl||build.artifacts?.buildUrl;
   if(typeof url!=='string'||!/^https:\/\//.test(url))block('missing APK artifact URL');

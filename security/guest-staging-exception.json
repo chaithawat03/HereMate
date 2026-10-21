@@ -1,0 +1,32 @@
+{
+  "environment": "staging",
+  "sourceScope": "anonymous-guest-staging-only",
+  "approvedOn": "2026-10-21",
+  "expiresOn": "2026-11-20",
+  "trackingIssue": "https://github.com/chaithawat03/HereMate/issues/12",
+  "allowed": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "reason": "Owner accepts inherited Expo Metro High advisory for time-limited staging Anonymous Guest physical test only. No real GPS or passwords."
+    },
+    {
+      "id": "GHSA-86w9-cpqp-85rv",
+      "package": "node-forge",
+      "reason": "Owner accepts inherited Expo code-signing High advisory for time-limited staging Anonymous Guest physical test only. No production."
+    }
+  ],
+  "sourceHashes": {
+    "App.tsx": "88b87980bdceee23cd67bd9e58b22ca320330d63",
+    "eas.json": "36873d800fafc8c85837270bd66fbbbeea2def52",
+    "package.json": "305f700d025eedf48c6b2fd894135176b8c857d2",
+    "package-lock.json": "dacd7c5b9b4c9542db7ef02286426eb9b1e58e71",
+    "src/auth/firebaseGuest.ts": "3e6b8656b79b17c419cbd12041b9aa17bea3b4f4",
+    "src/auth/GuestAuthGate.tsx": "a23dac8c2c9754f32f553976b6749c69ed54ca3e",
+    "src/config/firebaseStaging.ts": "cb9bc13e938e0066c1903488a912ea644545fcbf",
+    "src/types/firebase-auth-react-native.d.ts": "f3d93ec8d12a535516d87fa9eba07e1eed29bfc6",
+    "firebase/firestore.rules": "6b9a282d103711c38bfc8ee3b65522e0f211e8b1",
+    ".github/workflows/staging-eas-build.yml": "508f4ef1eb61b30db619dad462f466f9df2fb655",
+    "scripts/verify-release.mjs": "81e25e72e596a77d578d3686fa79c3a7fd5053b0"
+  }
+}

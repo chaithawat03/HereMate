@@ -3,6 +3,7 @@ import { readFileSync, appendFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {verifyGuestSnapshot,evaluateGuestAudit} from './check-guest-staging-audit.mjs';
 
 const HIGH = new Set(['high','critical']);
 const error = message => { throw new Error('STAGING AUDIT BLOCKED: ' + message); };
@@ -66,9 +67,14 @@ export function evaluateAudit(report, policy, now, app, eas) {
 
 function run() {
   const policy = JSON.parse(readFileSync(new URL('../security/staging-exceptions.json',import.meta.url),'utf8'));
-  verifyM01Snapshot(policy);
   const app = JSON.parse(readFileSync(new URL('../app.json',import.meta.url),'utf8'));
   const eas = JSON.parse(readFileSync(new URL('../eas.json',import.meta.url),'utf8'));
+  const guest = Boolean(eas?.build?.['android-guest-staging']);
+  // Preserve original M0.1 snapshot and allowlist for synthetic Demo builds.
+  // Guest builds use a SEPARATE explicitly accepted narrow risk policy.
+  const guestPolicy = guest ? JSON.parse(readFileSync(new URL('../security/guest-staging-exception.json',import.meta.url),'utf8')) : null;
+  if(guest)verifyGuestSnapshot(guestPolicy);
+  else verifyM01Snapshot(policy);
   let raw;
   try {
     raw = execFileSync('npm',['audit','--omit=dev','--audit-level=high','--json'],{encoding:'utf8',maxBuffer:24*1024*1024});
@@ -76,8 +82,8 @@ function run() {
     if (e.status !== 1 || !String(e.stdout||'').trim()) throw e;
     raw = e.stdout;
   }
-  const result=evaluateAudit(JSON.parse(raw),policy,new Date(),app,eas);
-  const summary = 'STAGING ONLY: '+result.highPackages+' High-affected dependency records. Accepted root advisories: '+(result.advisories.join(', ')||'none')+'. Expires: '+result.expiresOn+'. NOT PATCHED; PRODUCTION NOT AUTHORIZED.';
+  const result=guest ? evaluateGuestAudit(JSON.parse(raw),guestPolicy,new Date(),app,eas) : evaluateAudit(JSON.parse(raw),policy,new Date(),app,eas);
+  const summary = 'STAGING ONLY '+(guest?'ANONYMOUS GUEST TRIAL':'SYNTHETIC DEMO')+': '+(guest?result.highAffectedPackages:result.highPackages)+' High-affected dependency records. Accepted root advisories: '+((guest?result.rootAdvisories:result.advisories).join(', ')||'none')+'. Expires: '+result.expiresOn+'. NOT PATCHED; PHONE/GPS/PRODUCTION NOT AUTHORIZED.';
   console.log(summary);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,'\n### Staging-only Security Exception\n'+summary+'\n');
 }

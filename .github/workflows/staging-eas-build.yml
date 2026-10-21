@@ -118,7 +118,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/verify-release.mjs verify-merge
       - name: Test release and exception guards without credentials
-        run: node --test tests/m0.test.mjs tests/security-staging.test.mjs tests/release-gates.test.mjs
+        run: node --test tests/m0.test.mjs tests/security-staging.test.mjs tests/security-guest-staging.test.mjs tests/release-gates.test.mjs
       - name: Validate existing Expo project identity (never create)
         env:
           STAGING_EAS_PROJECT_ID: ${{ vars.STAGING_EAS_PROJECT_ID }}
@@ -154,8 +154,8 @@ jobs:
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
-      - name: Cloud-build internal Android APK and await result
-        run: eas build --platform android --profile android-preview --non-interactive --wait --json > "$RUNNER_TEMP/eas-build.json"
+      - name: Cloud-build internal Android Guest staging APK and await result
+        run: eas build --platform android --profile android-guest-staging --non-interactive --wait --json > "$RUNNER_TEMP/eas-build.json"
       - name: Verify finished APK and staging manifest
         run: node scripts/verify-release.mjs verify-build "$RUNNER_TEMP/eas-build.json" "$RUNNER_TEMP/build-manifest.json"
       - name: Retain verified EAS manifest for Drive delivery

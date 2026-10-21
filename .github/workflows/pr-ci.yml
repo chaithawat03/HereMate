@@ -20,6 +20,10 @@ jobs:
           node-version: '24'
       - run: node --test tests/m0.test.mjs
       - run: node --check tests/m0.test.mjs
+      - name: Verify owner-approved Guest-only trial exception, exact hashes and expiry
+        run: node --test tests/security-guest-staging.test.mjs
+      - name: Verify opt-in Android Guest Login source and profile isolation (no Firebase credentials)
+        run: node --test tests/m0-5-guest-auth.test.mjs
       - name: Validate registered Firebase Staging identifiers (no backend access)
         run: node --test tests/m0-5-firebase-config.test.mjs
       - name: Validate Firestore Auth adapters and deny-all client rules (offline)
@@ -89,6 +93,35 @@ jobs:
         run: |
           ./node_modules/.bin/expo config --json > /tmp/heremate-expo-config.json
           node -e "const c=require('/tmp/heremate-expo-config.json'); if(c.owner !== 'smartyyys-team' || c.slug !== 'heremate')process.exit(1)"
+      - name: Android and iOS Guest-enabled native Metro export smoke (no credentials)
+        env:
+          EXPO_PUBLIC_ENVIRONMENT: staging
+          EXPO_PUBLIC_ENABLE_FIREBASE_GUEST: 'true'
+        run: |
+          ./node_modules/.bin/expo export --platform all --output-dir "$RUNNER_TEMP/heremate-guest-export"
+          node - "$RUNNER_TEMP/heremate-guest-export" <<'JS'
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const root=process.argv[2];
+          const bundles={android:[],ios:[]};
+          const scan=dir=>{
+            for(const item of fs.readdirSync(dir,{withFileTypes:true})){
+              const p=path.join(dir,item.name);
+              if(item.isDirectory())scan(p);
+              else if(item.name.endsWith('.hbc')){
+                const platform=p.split(path.sep).find(segment=>segment==='android'||segment==='ios');
+                if(platform) bundles[platform].push({path:p,size:fs.statSync(p).size});
+              }
+            }
+          };
+          scan(root);
+          for(const platform of ['android','ios']) {
+            if(bundles[platform].length!==1 || bundles[platform][0].size<100000)
+              throw Error(platform+' guest Hermes bundle missing or unexpectedly small');
+          }
+          if(!fs.existsSync(path.join(root,'metadata.json'))) throw Error('Metro metadata missing');
+          console.log('Guest-enabled Android/iOS Hermes bundles present, staging flag set and Metro compilation succeeded');
+          JS
       - name: Test EAS release and build gates
         run: node --test tests/release-gates.test.mjs
       - name: Android/iOS JavaScript Metro export smoke
@@ -101,5 +134,7 @@ jobs:
         run: node --test tests/drive-preflight.test.mjs
       - name: Validate Expo APK redirect trust boundaries (no network)
         run: node --test tests/drive-redirect.test.mjs
+      - name: Inventory Guest staging dependencies (diagnostic, not waiver)
+        run: node scripts/report-guest-dependency-audit.mjs
       - name: Audit dependencies with approved M0.1 staging exception only
         run: node scripts/check-staging-audit.mjs
