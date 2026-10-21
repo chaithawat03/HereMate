@@ -41,6 +41,7 @@ export function LocalLocationPanel() {
       if (shouldCancelForAppState(next, permissionPendingRef.current)) stop();
     });
     return () => {
+      listener.remove();
       activeRef.current = false;
       permissionPendingRef.current = false;
       resumeWhenActiveRef.current?.();

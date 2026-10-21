@@ -19,5 +19,6 @@ test('permission resolves before watcher and waits for active foreground',()=>{
   assert.match(panel,/if \(!current\(\)\) return;\s*permissionPendingRef\.current = false;\s*const watcher = await Location\.watchPositionAsync/);
   assert.match(panel,/if \(shouldCancelForAppState\(next, permissionPendingRef\.current\)\) stop\(\)/);
   assert.match(panel,/resumeWhenActiveRef\.current\?\.\(\)/);
+  assert.match(panel,/listener\.remove\(\)/);
   assert.doesNotMatch(panel,/startLocationUpdatesAsync|requestBackgroundPermissionsAsync|getFirestore|getDatabase|setDoc|updateDoc/);
 });
