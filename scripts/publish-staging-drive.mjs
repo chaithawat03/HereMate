@@ -79,16 +79,16 @@ export function validateEasArtifactDestination(origin, resolved) {
   try { start=new URL(origin); target=new URL(resolved); }
   catch { fail('malformed EAS artifact download URL'); }
   if(start.protocol!=='https:' || start.hostname!=='expo.dev' ||
-      !/^\\/artifacts\\/eas\\/[^/]+\\.apk$/.test(start.pathname) ||
+      !/^\/artifacts\/eas\/[^/]+\.apk$/.test(start.pathname) ||
       start.username || start.password) fail('unapproved EAS artifact origin');
   const host=target.hostname.toLowerCase();
   const approved=host==='expo.dev' ||
     host.endsWith('.expo.dev') ||
     host==='storage.googleapis.com' ||
-    /^([a-z0-9-]+\\.)?s3(?:[.-][a-z0-9-]+)?\\.amazonaws\\.com$/.test(host) ||
-    /^[a-z0-9-]+\\.cloudfront\\.net$/.test(host) ||
+    /^([a-z0-9-]+\.)?s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com$/.test(host) ||
+    /^[a-z0-9-]+\.cloudfront\.net$/.test(host) ||
     (host==='eascdn.net' || host.endsWith('.eascdn.net')) ||
-    /^[a-z0-9-]+\\.blob\\.core\\.windows\\.net$/.test(host);
+    /^[a-z0-9-]+\.blob\.core\.windows\.net$/.test(host);
   if(target.protocol!=='https:' || target.username || target.password || !approved)
     fail('unexpected EAS download redirect host: '+host+' (URL and query not logged)');
 }
