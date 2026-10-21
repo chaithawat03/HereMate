@@ -68,3 +68,12 @@ test('never return credentials, tokens or raw Firebase error messages',()=>{
   assert.doesNotMatch(bridge,/console\.|AsyncStorage|setDoc|updateDoc|fetch\(|https?:\/\/|signOut\(/);
   assert.doesNotMatch(read('src/auth/GuestAuthGate.tsx'),/GoogleSignin|continueStagingGoogleWithNativeToken/);
 });
+
+test('Google sign-in remains disabled until the native OAuth provider is configured',()=>{
+  const config=JSON.parse(read('app.json'));
+  const eas=JSON.parse(read('eas.json'));
+  const gate=read('src/auth/GuestAuthGate.tsx');
+  assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN,undefined);
+  assert.ok(!config.expo.plugins.some(p=>(Array.isArray(p)?p[0]:p)==='@react-native-google-signin/google-signin'));
+  assert.doesNotMatch(gate,/onPress=\{googleLogin\}|GoogleSignin\.signIn\(/);
+});
