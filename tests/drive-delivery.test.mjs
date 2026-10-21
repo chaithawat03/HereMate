@@ -8,7 +8,7 @@ import {
 } from '../scripts/publish-staging-drive.mjs';
 
 const sha='a'.repeat(40),build='0d993fc6-c204-4d5c-9dc2-156339a54719';
-const valid={sha,buildId:build,platform:'android',profile:'android-preview',status:'finished',artifactUrl:'https://expo.dev/artifacts/eas/demo.apk'};
+const valid={sha,buildId:build,platform:'android',profile:'android-guest-staging',status:'finished',artifactUrl:'https://expo.dev/artifacts/eas/demo.apk'};
 const owner='test@example.org';
 const folder={
   id:DRIVE_FOLDER_ID,name:'HereMate',mimeType:'application/vnd.google-apps.folder',
@@ -22,6 +22,7 @@ test('staging EAS Build Manifest must be approved Android APK and source SHA',()
   assert.equal(validateBuildManifest(valid,sha).buildId,build);
   assert.throws(()=>validateBuildManifest({...valid,sha:'b'.repeat(40)},sha),/source SHA/);
   assert.throws(()=>validateBuildManifest({...valid,profile:'production'},sha),/non-staging/);
+  assert.throws(()=>validateBuildManifest({...valid,profile:'android-preview'},sha),/non-staging/);
   assert.throws(()=>validateBuildManifest({...valid,status:'in-progress'},sha),/unfinished/);
   assert.throws(()=>validateBuildManifest({...valid,artifactUrl:'http://evil.example/abc.apk'},sha),/unapproved/);
   assert.throws(()=>validateBuildManifest({...valid,artifactUrl:'https://expo.dev/metadata.json'},sha),/unapproved/);
