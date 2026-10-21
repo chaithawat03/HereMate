@@ -34,6 +34,8 @@
     "src/location/gpsLifecycle.ts": "9623d55c2110fccd5f095a19b7d32af6aa1de786",
     "src/profile/profileModel.ts": "008f27e3105c76b1f4ff5804879f3ae81f7db9ca",
     "src/profile/firestoreProfile.ts": "3df86f565e4e4472557aa100154f11a2e9ee1366",
-    "src/profile/UserProfilePanel.tsx": "ff148a40c713e44fa953e56b9c5d359955658211"
+    "src/profile/UserProfilePanel.tsx": "ff148a40c713e44fa953e56b9c5d359955658211",
+    "src/auth/googleAccountFlow.ts": "515a4601c4c1a9bb26935ae715c1b0d82b757503",
+    "src/auth/googleAccountFirebase.ts": "0e52883306bf7e3ecdd5a1f08fbd807b30474d79"
   }
 }
