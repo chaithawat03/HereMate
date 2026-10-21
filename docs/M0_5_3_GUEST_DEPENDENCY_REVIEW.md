@@ -1,23 +1,22 @@
-# M0.5.3 Guest Authentication — dependency security review (2026-10-21)
+# M0.5.3 Anonymous Guest Staging — approved limited dependency exception
 
-**Review status: BLOCKED, no exception granted. Draft PR #18 must NOT merge or trigger EAS builds.**
+Owner instruction on 2026-10-21: proceed to **physical Android Guest Login testing without further delay**; accept current *Staging Guest-only* inherited Expo dependency risks rather than making them a blocker. This approval is **NOT** authorization to expose Phone/Password, Google account linking, profile/friends data, real GPS or Production.
 
-## Actual PR CI evidence
+## Actual dependency audit and remediation
+- Initial Guest dependency graph: 19 High-affected dependency records, zero Critical. Root High advisories included `@grpc/grpc-js` in addition to the inherited `braces` and `node-forge`.
+- Patched `@grpc/grpc-js` to **1.13.6** via reproducible npm override; owner rebuilt and pushed lockfile, and GitHub CI confirmed `npm ci` and Android/iOS exports.
+- After patch: **15 High-affected dependency records**, **0 Critical**; the remaining High root advisories are **`GHSA-vfj7-8cjw-p6xm` for `braces`** and **`GHSA-86w9-cpqp-85rv` for `node-forge`**. Counts describe affected package records, not independent vulnerabilities.
+- Legacy M0.1 `security/staging-exceptions.json` remains frozen for synthetic Demo data. Its original guard and test remain in place.
+- The new `security/guest-staging-exception.json` records **owner-accepted trial scope**, hashes of exact source/config/lock/rules/release files, allowed GHSA IDs, expiry **2026-11-20**, Staging-only build flag and no Production profile. New Critical/High advisories outside its two entries, hash changes or expired approvals **fail CI/build**.
+- `scripts/check-staging-audit.mjs` routes a Guest-staging build to the separately verified Guest policy, otherwise the unchanged M0.1 synthetic snapshot. Neither gate globally disables audit. `tests/security-guest-staging.test.mjs` covers expiry, changed sources, unexpected High/Critical, unsafe build profile and original M0.1 manifest independence.
 
-After owner's lockfile commit `9ca409f`, [GitHub Actions #39558892673](https://github.com/chaithawat03/HereMate/actions/runs/39558892673) verified `foundation` PASS, Firestore Emulator PASS, native Android/iOS Metro export PASS, TypeScript PASS, tests PASS. The intentional M0.1 lock/scope gate blocked with `STAGING AUDIT BLOCKED: M0.1 approved source changed: App.tsx`.
+## Guest trial constraints
+- Use only the explicit `android-guest-staging` internal APK profile on Project `heremate` via EAS. Original `android-preview` Demo profile remains in `eas.json`.
+- Anonymous Auth is **opt-in by button**, not automatic. Firebase Console has Anonymous and Google providers enabled, but this Guest trial implements only Anonymous.
+- Firestore `(default)` in `asia-southeast1` has **deny-all client Rules** confirmed by owner screenshot and actual offline Firebase Emulator tests. No Firestore/RTDB/GPS access in Guest code.
+- Firebase Anonymous Auth creates a real *anonymous UID* in the staging project; do not use identifiable personal details. Signing out may permanently lose access to the previous anonymous UID until secure account linking exists.
+- A Metro Hermes bundle PASS **does not guarantee** native login/persistence until physical Z Fold7 verification.
+- GitHub Actions staging build and existing private Google Drive upload remain subject to their existing WIF / OAuth state; if OAuth delivery expires, retrieve the artifact from the verified EAS build instead of reintroducing custom-domain/OAuth branding as a prerequisite.
+- Owner should test Guest login, UID persistence after force-close/reopen, logout and Fold/Unfold UI. Stop and report errors; address issues that appear without broadening scope to real GPS or Production.
 
-A separate **read-only** diagnostic was added without changing the blocking security test. [GitHub Actions #39559277305](https://github.com/chaithawat03/HereMate/actions/runs/39559277305) reports:
-
-- npm production dependency audit: **critical 0, high 19 affected package records, moderate 7**. These are package records/propagation, NOT 19 independent root advisories.
-- Direct advisory IDs: `GHSA-86w9-cpqp-85rv` (`node-forge`), `GHSA-vfj7-8cjw-p6xm` (`braces`), `GHSA-m9gg-hp2v-232j` (`@grpc/grpc-js`), `GHSA-f596-whhp-79r4` (`@grpc/grpc-js`, categorized low in upstream but may propagate through npm high package counts).
-- Lockfile currently has `@grpc/grpc-js@1.9.16`, transitively required by `@firebase/firestore@4.18.0` as `~1.9.0`. Both grpc advisories are fixed in version **1.13.6** or **1.14.5** per upstream: https://github.com/advisories/GHSA-m9gg-hp2v-232j and https://github.com/advisories/GHSA-f596-whhp-79r4. A version override to a patched grpc version would be outside Firestore's declared dependency range and **must pass runtime/Metro and regression tests; do NOT directly edit lockfile or declare it fixed without tests**.
-- Legacy M0.1 exception in `security/staging-exceptions.json` is limited to *synthetic-data-only*; expires 2026-11-20. This exception **does not authorize** real Firebase Anonymous Auth users, and its frozen hashes correctly block modifications in the Guest candidate. The inherited `braces` and `node-forge` findings must be remediated or undergo a new explicitly reviewed, scope- and time-limited decision for **Anonymous Guest only**, not Phone/Password or location sharing.
-
-## Remediation preference
-1. On the candidate branch, first test whether a **compatible patched version** of `@grpc/grpc-js` can be installed using npm's overrides/relock, without `--force` and without changing production/native packages unexpectedly. Re-run npm CI, strict TypeScript, Android+iOS Metro exports and offline Firestore Emulator. Use `npm audit --omit=dev --json` to confirm the grpc advisories actually disappeared.
-2. For inherited Metro signing/CLI advisories, prefer patched Expo-compatible releases when available. Do not `npm audit fix --force` or bypass existing policy globally.
-3. Any *remaining* advisories require **separately documented risk acceptance** with owner decision, expiration, exact advisory IDs, affected source snapshot/config and strict feature boundary: `staging` + user-initiated Firebase Anonymous Guest, no phone/password data, no real GPS, no Firestore/RTDB reads, no Production.
-4. Implement new security policy verification in a separate reviewed PR **without weakening the existing synthetic-only M0.1 checks**. Both foundation and mobile gates must independently prevent unapproved scope changes. Do not replace `verifyM01Snapshot` with an unconstrained allowlist.
-5. Test runtime sign-in and persistence on Android Z Fold7 only after approved staging-only builds.
-
-**No change to Firebase live Security Rules or IAM, and no Production release.**
+Any future Phone+Password, real friend data or location sharing requires separate rules/privacy/security decisions. Production release remains forbidden.
