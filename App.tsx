@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { GuestAuthGate } from './src/auth/GuestAuthGate';
 import { Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { makeDemoFriends, searchableFriends, visibleMapFriends, type FriendStatus } from './src/domain/demo';
 
@@ -7,7 +8,7 @@ const filters: Array<'ALL' | FriendStatus> = ['ALL', 'LIVE', 'STALE', 'OFFLINE',
 const colors: Record<FriendStatus, string> = { LIVE: '#29d9a8', STALE: '#ffca71', OFFLINE: '#a0b3c6', SHARING_OFF: '#79899b' };
 const labels: Record<FriendStatus, string> = { LIVE: 'LIVE', STALE: 'GPS ไม่อัปเดต', OFFLINE: 'OFFLINE', SHARING_OFF: 'หยุดแชร์' };
 
-export default function App() {
+function DemoMap() {
   const [count, setCount] = useState(30);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'ALL' | FriendStatus>('ALL');
@@ -106,3 +107,15 @@ const s = StyleSheet.create({
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#264659', borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
   foot: { color: '#91aabb', fontSize: 11, textAlign: 'center', marginTop: 9 },
 });
+
+/**
+ * Explicit Staging guest login preview. Old demo remains the default and
+ * unchanged on all existing production-less Android/iOS EAS profiles.
+ */
+export default function App() {
+  if (process.env.EXPO_PUBLIC_ENVIRONMENT !== 'staging' ||
+      process.env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST !== 'true') {
+    return <DemoMap />;
+  }
+  return <GuestAuthGate><DemoMap /></GuestAuthGate>;
+}
