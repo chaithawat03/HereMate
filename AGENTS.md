@@ -9,3 +9,8 @@
 - Firebase authorization is server-validated. One active GPS publisher per account.
 - Friend count is dynamic; status freshness and sharing consent must be explicit.
 - Report only actual test/build/deployment evidence, distinguishing PASS, BLOCKED, and NOT VERIFIED.
+
+## Product-first scope discipline
+- The owner explicitly rejects overengineering supporting systems as prerequisites for core project progress. Prior example: polishing Google Drive Auto Delivery until custom domains/OAuth branding became an avoidable blocker for the Native Mobile App.
+- Prioritize minimum viable, secure Android-first login, friend connections and consent-controlled live GPS. Document optional infrastructure separately, with its cost and fallback; never turn it into a gate without showing why it is necessary for the current milestone.
+- Stop before creating billable Firebase/GCP resources until the actual staging target, billing, budget alerts, region and security gates are verified and approved.
