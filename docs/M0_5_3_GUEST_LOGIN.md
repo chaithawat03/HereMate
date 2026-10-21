@@ -1,4 +1,4 @@
-# M0.5.3 — Native Android Guest Login Candidate (REVIEW REQUIRED)
+# M0.5.3 — Native Android Guest Login Trial (Staging only)
 
 Owner Firebase Console evidence (21 Oct 2026): Authentication providers **Google and Anonymous enabled**; Firestore `(default)` in **asia-southeast1**, live Rules UI shows `allow read, write: if false` for all documents. Real Emulator deny-all test PR #17 PASS. Google login itself is NOT implemented by this candidate; the first requested physical test is **Anonymous Guest login on Z Fold7**.
 
@@ -18,7 +18,13 @@ On the owner's Cloud Shell (2026-10-21), `npm ls --depth=0` confirmed `firebase@
 
 Owner should pull the updated PR branch preserving uncommitted root package and lockfile, run `npm run typecheck`, `node --test tests/m0-5-guest-auth.test.mjs`, and `npm test`. If successful, commit package.json + package-lock.json on the branch for full npm CI. DO NOT merge while this remains a Draft and the staging-only security exception is unresolved.
 
-## **BLOCKING** until dependency lock/security and CI are verified
+## Updated status — 2026-10-21
+
+Owner accepted **Staging Anonymous Guest-only** testing despite the two inherited Expo High advisories, with expiry 2026-11-20. The separate pinned `security/guest-staging-exception.json` now enforces this narrow trial instead of silently repurposing the original synthetic-only M0.1 exception. Dependencies `firebase@13.0.0`, `@react-native-async-storage/async-storage@2.2.0` and patched override `@grpc/grpc-js@1.13.6` are committed with a reproducible root lockfile. Guest Android/iOS Hermes exports passed in PR CI. This remains Staging-only: **no phone/password, friends/profile reads, GPS, Production**.
+
+The existing reviewed GitHub Actions staging pipeline will build profile **`android-guest-staging`** for an approved merge. Legacy `android-preview` remains available in EAS config but is not the automatic build profile for this trial. The trial must still pass CI, exact snapshot/expiry/advisory checks, reviewed merge and physical Android verification. See `docs/M0_5_3_GUEST_DEPENDENCY_REVIEW.md`.
+
+## Historical blockers (resolved for the scoped Guest trial; not waived for sensitive features)
 The original M0.1 Security Exception tracks an *exact file snapshot* and applies **only to synthetic-data staging**. This new feature will generate real Firebase Anonymous Auth records and requires both a new root Firebase dependency tree and root Expo file changes. **Do not merge this branch, start a real Guest APK, bypass audit checks or broaden the old Security Exception** until a revised security review explicitly authorizes narrow staging Guest auth testing.
 
 Root dependencies and `package-lock.json` MUST be generated together using `npx expo install firebase @react-native-async-storage/async-storage`, tested against Expo SDK 57 and React Native 0.86. **They are not provided in this candidate until a reproducible lockfile is generated**. Firebase web Analytics is not supported in the Native JS SDK; do NOT add `getAnalytics`, Hosting or custom domain.
