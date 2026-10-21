@@ -3,7 +3,7 @@
 Owner Firebase Console evidence (21 Oct 2026): Authentication providers **Google and Anonymous enabled**; Firestore `(default)` in **asia-southeast1**, live Rules UI shows `allow read, write: if false` for all documents. Real Emulator deny-all test PR #17 PASS. Google login itself is NOT implemented by this candidate; the first requested physical test is **Anonymous Guest login on Z Fold7**.
 
 ## Product-first implementation
-- Adds `src/auth/firebaseGuest.ts` using Firebase JS SDK Auth and React Native AsyncStorage persistence (`getReactNativePersistence(createAsyncStorage('heremate-staging-auth'))`).
+- Adds `src/auth/firebaseGuest.ts` using Firebase JS SDK Auth and React Native AsyncStorage v2 default-export persistence (`getReactNativePersistence(AsyncStorage)`).
 - A guest is **NOT created automatically**: user chooses `เข้าใช้งานแบบ Guest`, which calls `signInAnonymously()`. Session changes are observed by `onAuthStateChanged()`, user can `signOut()`. UID in the UI is truncated. No phone, Google OAuth or Firebase DB is accessed.
 - The existing synthetic Demo Map/Friends UI remains intact and remains the **default** on the prior `android-preview` and `ios-simulator` EAS build profiles.
 - Adds isolated EAS `android-guest-staging` APK and `ios-guest-simulator` profiles, explicitly setting `EXPO_PUBLIC_ENVIRONMENT=staging` and `EXPO_PUBLIC_ENABLE_FIREBASE_GUEST=true` to opt in.
