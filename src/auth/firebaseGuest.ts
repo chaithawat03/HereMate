@@ -36,7 +36,8 @@ export function getStagingGuestAuth(): Auth {
   }
   const app = existing.length ? getApp() : initializeApp(firebaseConfig);
 
-  // AsyncStorage v2 uses the default export (v3 uses createAsyncStorage).\n  // Per-app installation-scoped persistent login: no implicit account creation
+  // AsyncStorage v2 uses the default export (v3 uses createAsyncStorage).
+  // Per-app installation-scoped persistent login: no implicit account creation
   // and no manual copying Firebase refresh/ID tokens into our own storage.
   try {
     authInstance = initializeAuth(app, {
