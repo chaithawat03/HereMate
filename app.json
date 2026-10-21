@@ -21,6 +21,17 @@
       "eas": {
         "projectId": "93bb1566-2f29-4898-bba3-30f93b8deb6e"
       }
-    }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow HereMate to read your location only while you run the local GPS trial.",
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
+        }
+      ]
+    ]
   }
 }

@@ -25,7 +25,7 @@ const evaluate=(r=report(),p=policy,date='2026-10-21',a=app,e=eas)=>
 
 test('Guest consent is exactly scoped, time bound and current source hashes match',()=>{
   assert.doesNotThrow(()=>verifyGuestSnapshot(policy));
-  assert.equal(policy.sourceScope,'anonymous-guest-staging-only');
+  assert.equal(policy.sourceScope,'anonymous-guest-local-foreground-gps-staging-only');
   assert.equal(policy.expiresOn,'2026-11-20');
   const tampered=structuredClone(policy);
   tampered.sourceHashes['App.tsx']='0'.repeat(40);

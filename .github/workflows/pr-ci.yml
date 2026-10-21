@@ -22,6 +22,8 @@ jobs:
       - run: node --check tests/m0.test.mjs
       - name: Verify owner-approved Guest-only trial exception, exact hashes and expiry
         run: node --test tests/security-guest-staging.test.mjs
+      - name: Test M0.5.5 foreground GPS opt-in, lockfile and no backend publishing
+        run: node --test tests/m0-5-5-local-gps.test.mjs
       - name: Test M0.5.4 fold-responsive layout and Safe Area integration
         run: node --test tests/m0-5-4-responsive-layout.test.mjs
       - name: Verify opt-in Android Guest Login source and profile isolation (no Firebase credentials)

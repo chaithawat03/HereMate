@@ -76,7 +76,7 @@ export function GuestAuthGate({ children }: { children: React.ReactNode }) {
     return <View style={s.screen}>
       <Text style={s.brand}>HereMate</Text>
       <Text style={s.info}>ทดสอบ Guest Login · Firebase Staging</Text>
-      <Text style={s.note}>จะสร้างบัญชี Guest แบบไม่ระบุชื่อใน Firebase Authentication เมื่อคุณเลือกดำเนินการ ไม่มีการเข้าถึงตำแหน่ง GPS หรือรายชื่อผู้ติดต่อ</Text>
+      <Text style={s.note}>จะสร้างบัญชี Guest แบบไม่ระบุชื่อเมื่อคุณเลือกดำเนินการ การเข้าสู่ระบบไม่อ่าน GPS และไม่เข้าถึงรายชื่อผู้ติดต่อ หากต้องการทดสอบ GPS ต้องกดเริ่ม GPS หลัง Login เอง</Text>
       {message ? <Text accessibilityRole="alert" style={s.error}>{message}</Text> : null}
       <Pressable accessibilityRole="button" accessibilityLabel="เข้าสู่ระบบแบบ Guest" disabled={busy}
         onPress={guestLogin} style={[s.action,busy && s.disabled]}>

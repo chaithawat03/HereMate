@@ -11,6 +11,7 @@ const security=JSON.parse(read('security/staging-exceptions.json'));
 
 test('existing android-preview & ios-simulator profiles remain unchanged',()=>{
   assert.equal(eas.build['android-preview'].env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST,undefined);
+  assert.equal(eas.build['android-preview'].env.EXPO_PUBLIC_ENABLE_LOCAL_GPS,undefined);
   assert.equal(eas.build['ios-simulator'].env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST,undefined);
   assert.equal(eas.build['android-preview'].android.buildType,'apk');
   assert.equal(eas.build['ios-simulator'].ios.simulator,true);
@@ -19,6 +20,7 @@ test('Guest preview requires explicit staging flag and is never a production pro
   assert.equal(eas.build['android-guest-staging'].distribution,'internal');
   assert.equal(eas.build['android-guest-staging'].android.buildType,'apk');
   assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST,'true');
+  assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_LOCAL_GPS,'true');
   assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENVIRONMENT,'staging');
   assert.equal(eas.build['ios-guest-simulator'].ios.simulator,true);
   assert.equal(Object.hasOwn(eas.build,'production'),false);
@@ -43,7 +45,7 @@ test('anonymous login is user-initiated, persists using React Native AsyncStorag
   assert.match(gate,/onPress={guestLogin}/);
   assert.match(gate,/onPress={logout}/);
   assert.match(gate,/user\.isAnonymous/);
-  assert.match(gate,/ไม่มีการเข้าถึงตำแหน่ง GPS/);
+  assert.match(gate,/การเข้าสู่ระบบไม่อ่าน GPS/);
   assert.doesNotMatch(guest+gate,/getFirestore|getDatabase|geolocation|Location\.getCurrentPosition|requestForegroundPermissions|firebase\/analytics/);
 });
 test('do not confuse Guest preview staging with existing synthetic exception approval',()=>{
