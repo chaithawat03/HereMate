@@ -91,6 +91,32 @@ jobs:
         run: |
           ./node_modules/.bin/expo config --json > /tmp/heremate-expo-config.json
           node -e "const c=require('/tmp/heremate-expo-config.json'); if(c.owner !== 'smartyyys-team' || c.slug !== 'heremate')process.exit(1)"
+      - name: Android and iOS Guest-enabled native Metro export smoke (no credentials)
+        env:
+          EXPO_PUBLIC_ENVIRONMENT: staging
+          EXPO_PUBLIC_ENABLE_FIREBASE_GUEST: 'true'
+        run: |
+          ./node_modules/.bin/expo export --platform all --output-dir "$RUNNER_TEMP/heremate-guest-export"
+          node - "$RUNNER_TEMP/heremate-guest-export" <<'JS'
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const root=process.argv[2];
+          const chunks=[];
+          const scan=dir=>{
+            for(const item of fs.readdirSync(dir,{withFileTypes:true})){
+              const p=path.join(dir,item.name);
+              if(item.isDirectory())scan(p);
+              else if(/\\.js$/.test(item.name)) chunks.push(fs.readFileSync(p,'utf8'));
+            }
+          };
+          scan(root);
+          const bundle=chunks.join('\n');
+          if(!bundle.includes('auth/operation-not-allowed') ||
+             !bundle.includes('เข้าใช้งานแบบ Guest') ||
+             !bundle.includes('heremate.firebaseapp.com'))
+            throw Error('Guest build was not included in the native Metro exports');
+          console.log('Guest UI and native Firebase Auth configuration present in Metro JS export');
+          JS
       - name: Test EAS release and build gates
         run: node --test tests/release-gates.test.mjs
       - name: Android/iOS JavaScript Metro export smoke
