@@ -20,6 +20,8 @@ jobs:
           node-version: '24'
       - run: node --test tests/m0.test.mjs
       - run: node --check tests/m0.test.mjs
+      - name: Verify owner-approved Guest-only trial exception, exact hashes and expiry
+        run: node --test tests/security-guest-staging.test.mjs
       - name: Verify opt-in Android Guest Login source and profile isolation (no Firebase credentials)
         run: node --test tests/m0-5-guest-auth.test.mjs
       - name: Validate registered Firebase Staging identifiers (no backend access)
