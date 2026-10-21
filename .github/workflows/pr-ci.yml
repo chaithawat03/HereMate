@@ -106,7 +106,7 @@ jobs:
             for(const item of fs.readdirSync(dir,{withFileTypes:true})){
               const p=path.join(dir,item.name);
               if(item.isDirectory())scan(p);
-              else if(/\\.js$/.test(item.name)) chunks.push(fs.readFileSync(p,'utf8'));
+              else if(/\.js$/.test(item.name)) chunks.push(fs.readFileSync(p,'utf8'));
             }
           };
           scan(root);
