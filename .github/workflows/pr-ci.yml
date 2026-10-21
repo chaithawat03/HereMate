@@ -22,6 +22,8 @@ jobs:
       - run: node --check tests/m0.test.mjs
       - name: Verify owner-approved Guest-only trial exception, exact hashes and expiry
         run: node --test tests/security-guest-staging.test.mjs
+      - name: Test M1.0 owner-only Firestore profiles and feature isolation
+        run: node --test tests/m1-0-private-profile.test.mjs
       - name: Test M0.5.5.1 Android permission-dialog lifecycle
         run: node --test tests/m0-5-5-1-permission-lifecycle.test.mjs
       - name: Test M0.5.5 foreground GPS opt-in, lockfile and no backend publishing

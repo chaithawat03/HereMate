@@ -1,6 +1,6 @@
 {
   "environment": "staging",
-  "sourceScope": "anonymous-guest-local-foreground-gps-staging-only",
+  "sourceScope": "anonymous-guest-local-gps-private-profile-staging-only",
   "approvedOn": "2026-10-21",
   "expiresOn": "2026-11-20",
   "trackingIssue": "https://github.com/chaithawat03/HereMate/issues/12",
@@ -8,29 +8,32 @@
     {
       "id": "GHSA-vfj7-8cjw-p6xm",
       "package": "braces",
-      "reason": "Owner-authorized temporary Staging Guest plus manually started local foreground GPS, with no GPS upload, background tracking or Production."
+      "reason": "Owner-approved temporary Staging Guest trial plus local foreground GPS and owner-only pseudonymous private profile. No sharing, public directory, phone credentials or Production."
     },
     {
       "id": "GHSA-86w9-cpqp-85rv",
       "package": "node-forge",
-      "reason": "Inherited Expo code signing High accepted for local-only foreground GPS staging APK; no friend GPS sharing or Production."
+      "reason": "Inherited Expo code-signing High accepted for time-limited staging Guest, local GPS and owner-private profile preview. No other-user records, phone secrets or Production."
     }
   ],
   "sourceHashes": {
-    "App.tsx": "8cc6187b4a2db5de82b081bf818ea0961aac33b3",
-    "eas.json": "c6b108a64918426f77d8bd66e9a850c433e3d1ae",
+    "App.tsx": "a2cb0109843e502531fb417bdeebff5f78223971",
+    "eas.json": "be5cb0545c50e81f80fc2f0f6273a8da9f374f28",
     "package.json": "4c1e2f4b753c467193e18f281465d12f0e88c425",
     "package-lock.json": "f32b2732da5dd94ff51fc207ef868788d3fa8eb9",
     "src/auth/firebaseGuest.ts": "3e6b8656b79b17c419cbd12041b9aa17bea3b4f4",
     "src/auth/GuestAuthGate.tsx": "20b6f889a2b28dd5722c7d492fd9e52b9e7dc9f6",
     "src/config/firebaseStaging.ts": "cb9bc13e938e0066c1903488a912ea644545fcbf",
     "src/types/firebase-auth-react-native.d.ts": "f3d93ec8d12a535516d87fa9eba07e1eed29bfc6",
-    "firebase/firestore.rules": "6b9a282d103711c38bfc8ee3b65522e0f211e8b1",
+    "firebase/firestore.rules": "4d16f74aec37ee99b65be4e4d611fd8946a6f962",
     ".github/workflows/staging-eas-build.yml": "508f4ef1eb61b30db619dad462f466f9df2fb655",
     "scripts/verify-release.mjs": "81e25e72e596a77d578d3686fa79c3a7fd5053b0",
     "app.json": "0d85e2cb524b76b298b5e72c49c70ef4c84e4c6f",
     "src/location/LocalLocationPanel.tsx": "1efbd14aa76d0745e0364d7068139dbc75d17d9e",
     "src/location/locationLogic.ts": "7a0c63451399210df374760a89b3635efcf49533",
-    "src/location/gpsLifecycle.ts": "9623d55c2110fccd5f095a19b7d32af6aa1de786"
+    "src/location/gpsLifecycle.ts": "9623d55c2110fccd5f095a19b7d32af6aa1de786",
+    "src/profile/profileModel.ts": "008f27e3105c76b1f4ff5804879f3ae81f7db9ca",
+    "src/profile/firestoreProfile.ts": "3df86f565e4e4472557aa100154f11a2e9ee1366",
+    "src/profile/UserProfilePanel.tsx": "ff148a40c713e44fa953e56b9c5d359955658211"
   }
 }
