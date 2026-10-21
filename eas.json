@@ -17,6 +17,26 @@
       "env": {
         "EXPO_PUBLIC_ENVIRONMENT": "staging"
       }
+    },
+    "android-guest-staging": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_ENVIRONMENT": "staging",
+        "EXPO_PUBLIC_ENABLE_FIREBASE_GUEST": "true"
+      }
+    },
+    "ios-guest-simulator": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_ENVIRONMENT": "staging",
+        "EXPO_PUBLIC_ENABLE_FIREBASE_GUEST": "true"
+      }
     }
   }
 }
