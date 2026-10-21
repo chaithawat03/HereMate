@@ -14,6 +14,7 @@ const approvedRoot=new Map([
 const requiredFiles=[
   'App.tsx','app.json','eas.json','package.json','package-lock.json',
   'src/auth/firebaseGuest.ts','src/auth/GuestAuthGate.tsx',
+  'src/auth/googleAccountFlow.ts','src/auth/googleAccountFirebase.ts',
   'src/location/LocalLocationPanel.tsx','src/location/locationLogic.ts',
   'src/location/gpsLifecycle.ts',
   'src/profile/profileModel.ts','src/profile/firestoreProfile.ts','src/profile/UserProfilePanel.tsx',
