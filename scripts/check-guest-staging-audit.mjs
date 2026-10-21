@@ -15,6 +15,7 @@ const requiredFiles=[
   'App.tsx','app.json','eas.json','package.json','package-lock.json',
   'src/auth/firebaseGuest.ts','src/auth/GuestAuthGate.tsx',
   'src/location/LocalLocationPanel.tsx','src/location/locationLogic.ts',
+  'src/location/gpsLifecycle.ts',
   'src/config/firebaseStaging.ts','src/types/firebase-auth-react-native.d.ts',
   'firebase/firestore.rules','.github/workflows/staging-eas-build.yml',
   'scripts/verify-release.mjs'

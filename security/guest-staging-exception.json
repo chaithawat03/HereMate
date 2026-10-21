@@ -29,7 +29,8 @@
     ".github/workflows/staging-eas-build.yml": "508f4ef1eb61b30db619dad462f466f9df2fb655",
     "scripts/verify-release.mjs": "81e25e72e596a77d578d3686fa79c3a7fd5053b0",
     "app.json": "0d85e2cb524b76b298b5e72c49c70ef4c84e4c6f",
-    "src/location/LocalLocationPanel.tsx": "58ae177bd703b697745a914cc50d8171937888bb",
-    "src/location/locationLogic.ts": "7a0c63451399210df374760a89b3635efcf49533"
+    "src/location/LocalLocationPanel.tsx": "b8f2714682ac85bae187091f39b678ff27f5557c",
+    "src/location/locationLogic.ts": "7a0c63451399210df374760a89b3635efcf49533",
+    "src/location/gpsLifecycle.ts": "9623d55c2110fccd5f095a19b7d32af6aa1de786"
   }
 }
