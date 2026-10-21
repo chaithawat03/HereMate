@@ -10,6 +10,14 @@ Owner Firebase Console evidence (21 Oct 2026): Authentication providers **Google
 - Asynchronous persistence uses **AsyncStorage (unencrypted)**; this is for low-risk Guest device testing only, not a secure password storage solution. Firebase tokens are managed by Firebase SDK and are not copied into app state. A signed-out Guest without a linked account may not regain the same UID.
 - Staging source pins `heremate` project. No GPS permission is requested, and Firestore, RTDB, map updates are still simulated.
 
+## Expo + Firebase 13 React Native TypeScript compatibility
+
+On the owner's Cloud Shell (2026-10-21), `npm ls --depth=0` confirmed `firebase@13.0.0` and `@react-native-async-storage/async-storage@2.2.0` on this branch, but `tsc --noEmit` initially failed with **TS2305: `firebase/auth` has no exported member `getReactNativePersistence`**. This is a known discrepancy: Firebase's default Web-facing TypeScript declarations can omit the documented React Native-specific persistence export even when the Metro React Native runtime entry supports it.
+
+`src/types/firebase-auth-react-native.d.ts` supplies a **scoped, explicitly typed** declaration for that documented React Native export. The implementation remains `getReactNativePersistence(AsyncStorage)` for AsyncStorage **v2** (do not use v3-only `createAsyncStorage`). This is a TYPE declaration only; it is **not** a runtime polyfill. Test on Android native Expo bundle and physical device before claiming persistence works; if Metro resolves the Web Firebase Auth runtime, the declaration alone cannot fix that. Avoid import from private SDK distribution paths, `any`, or disabling TypeScript checks.
+
+Owner should pull the updated PR branch preserving uncommitted root package and lockfile, run `npm run typecheck`, `node --test tests/m0-5-guest-auth.test.mjs`, and `npm test`. If successful, commit package.json + package-lock.json on the branch for full npm CI. DO NOT merge while this remains a Draft and the staging-only security exception is unresolved.
+
 ## **BLOCKING** until dependency lock/security and CI are verified
 The original M0.1 Security Exception tracks an *exact file snapshot* and applies **only to synthetic-data staging**. This new feature will generate real Firebase Anonymous Auth records and requires both a new root Firebase dependency tree and root Expo file changes. **Do not merge this branch, start a real Guest APK, bypass audit checks or broaden the old Security Exception** until a revised security review explicitly authorizes narrow staging Guest auth testing.
 
