@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { validateEasArtifactDestination } from '../scripts/publish-staging-drive.mjs';
 
 const source='https://expo.dev/artifacts/eas/TwEwt2dY2Ly4jXyv0YaxnS-KF6P0ppTZBnUWpXsZxTA.apk';
@@ -33,7 +34,7 @@ test('Reject untrusted origin and redirected scheme or host, do not leak presign
  catch(e){ assert.doesNotMatch(e.message,/never-logged/);assert.match(e.message,/malicious.tld/);}
 });
 test('Workflow gates remain restricted to reviewed Android and opt-in private Drive',()=>{
- const w=(await import('node:fs')).readFileSync(new URL('../.github/workflows/staging-eas-build.yml',import.meta.url),'utf8');
+ const w=readFileSync(new URL('../.github/workflows/staging-eas-build.yml',import.meta.url),'utf8');
  assert.match(w,/STAGING_DRIVE_ENABLED/);
  assert.match(w,/environment: staging-drive/);
  assert.match(w,/inputs.run_mode == 'build'/);
