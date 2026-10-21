@@ -20,6 +20,8 @@ jobs:
           node-version: '24'
       - run: node --test tests/m0.test.mjs
       - run: node --check tests/m0.test.mjs
+      - name: Validate registered Firebase Staging identifiers (no backend access)
+        run: node --test tests/m0-5-firebase-config.test.mjs
       - name: Validate read-only M0.5 inventory and staging project guards
         run: |
           bash -n scripts/m0-5-inventory.sh
