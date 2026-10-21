@@ -1,0 +1,14 @@
+{
+  "name": "@heremate/firestore-emulator-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated Firebase Emulator tests only; no production or Expo dependency.",
+  "scripts": {
+    "test": "node --test ./rules.test.mjs"
+  },
+  "dependencies": {
+    "@firebase/rules-unit-testing": "6.0.0",
+    "firebase": "13.0.0"
+  }
+}
