@@ -33,7 +33,7 @@ test('Reviewed PR merge and both checks must pass',async()=>{
  const noReview=structuredClone(api);noReview['/pulls/7/reviews?per_page=100']=[];await assert.rejects(check(noReview),/review/);
 });
 test('Only Android completed APK EAS result accepted',()=>{
- const good={id,platform:'ANDROID',status:'FINISHED',buildProfile:'android-preview',gitCommitHash:sha,artifacts:{applicationArchiveUrl:'https://example.org/file.apk'}};
+ const good={id,platform:'ANDROID',status:'FINISHED',buildProfile:'android-guest-staging',gitCommitHash:sha,artifacts:{applicationArchiveUrl:'https://example.org/file.apk'}};
  assert.equal(verifyBuild(good,sha).buildId,id);
  assert.throws(()=>verifyBuild({...good,status:'IN_PROGRESS'},sha),/not finished/);
  assert.throws(()=>verifyBuild({...good,platform:'IOS'},sha),/not finished/);
@@ -46,7 +46,7 @@ test('EAS workflow has opt-in and staging safety gates',()=>{
  assert.match(workflow,/verify-merge/);
  assert.match(workflow,/validate-config/);
  assert.match(workflow,/environment: staging-eas/);
- assert.match(workflow,/--platform android --profile android-preview/);
+ assert.match(workflow,/--platform android --profile android-guest-staging/);
  assert.match(workflow,/--wait --json/);
  assert.doesNotMatch(workflow,/GOOGLE_DRIVE_REFRESH_TOKEN/);
  const buildSection=workflow.split('  build-android-staging:')[1]?.split('  publish-android-to-private-drive:')[0];
@@ -61,4 +61,6 @@ test('HereMate existing Expo project UUID is pinned and matches owner',()=>{
  assert.equal(app.expo.slug,'heremate');
  assert.equal(app.expo.extra.eas.projectId,'93bb1566-2f29-4898-bba3-30f93b8deb6e');
  assert.equal(checkEasConfig(app,eas,app.expo.extra.eas.projectId).projectId,'93bb1566-2f29-4898-bba3-30f93b8deb6e');
+ assert.equal(eas.build['android-preview'].env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST,undefined);
+ assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST,'true');
 });
