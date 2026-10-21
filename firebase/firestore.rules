@@ -1,17 +1,38 @@
 rules_version = '2';
 
-// HereMate M0.5.3 staging bootstrap — DENY ALL client reads/writes.
-//
-// Backend-only collections private_phone_auth and private_auth_rate_limits
-// contain credential verifiers and login abuse counters. No client (including
-// Firebase-authenticated Google/Anonymous users) may access these documents.
-//
-// This ruleset is intentionally NOT deployed by this PR; a later reviewed
-// rules deployment will add narrowly scoped per-user profile/friend permissions,
-// after emulator ACL tests. Firebase Admin SDK bypasses security rules and
-// MUST use a narrowly scoped runtime service account with IAM controls.
+// M1.0 private, owner-only Firebase Staging profiles.
+// No directory search, friendship reads, GPS access, or access to credentials.
 service cloud.firestore {
   match /databases/{database}/documents {
+    function owner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+    function validProfile(data) {
+      return data.keys().hasAll(['displayName', 'schemaVersion', 'shareLocation', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['displayName', 'schemaVersion', 'shareLocation', 'createdAt', 'updatedAt'])
+        && data.displayName is string
+        && data.displayName.size() >= 2
+        && data.displayName.size() <= 32
+        && data.schemaVersion == 1
+        && data.shareLocation == false
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+    match /users/{uid} {
+      allow get: if owner(uid);
+      allow list: if false;
+      allow create: if owner(uid) && validProfile(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if owner(uid)
+        && validProfile(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'updatedAt'])
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+    // Reserved future M1.2/M1.3 friendship and M2 live-position collections,
+    // plus private Phone+Password backend data: NEVER readable by clients yet.
     match /{document=**} {
       allow read, write: if false;
     }
