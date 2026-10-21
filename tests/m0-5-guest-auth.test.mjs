@@ -29,6 +29,14 @@ test('Guest preview requires explicit staging flag and is never a production pro
 });
 test('anonymous login is user-initiated, persists using React Native AsyncStorage',()=>{
   assert.match(guest,/getReactNativePersistence\(AsyncStorage\)/);
+  // Firebase Web-facing TypeScript types omit a documented native-only symbol.
+  // Require a narrow, typed module augmentation rather than a broad skip/any.
+  const nativeTypes=read('src/types/firebase-auth-react-native.d.ts');
+  assert.match(nativeTypes,/declare module 'firebase\/auth'/);
+  assert.match(nativeTypes,/export function getReactNativePersistence/);
+  assert.match(nativeTypes,/Promise<string \| null>/);
+  assert.doesNotMatch(nativeTypes,/\bany\b\s*[;|]|ts-ignore|ts-nocheck/);
+
   assert.match(guest,/signInAnonymously\(auth\)/);
   assert.match(guest,/signOut\(auth\)/);
   assert.match(guest,/onAuthStateChanged/);
