@@ -22,8 +22,8 @@ test('Guest preview requires explicit staging flag and is never a production pro
   assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENVIRONMENT,'staging');
   assert.equal(eas.build['ios-guest-simulator'].ios.simulator,true);
   assert.equal(Object.hasOwn(eas.build,'production'),false);
-  assert.match(app,/return <DemoMap \/>;/);
-  assert.match(app,/EXPO_PUBLIC_ENABLE_FIREBASE_GUEST !== 'true'/);
+  assert.match(app,/EXPO_PUBLIC_ENABLE_FIREBASE_GUEST === 'true'/);
+  assert.match(app,/guestEnabled \? <GuestAuthGate><DemoMap \/><\/GuestAuthGate> : <DemoMap \/>/);
   assert.match(guest,/EXPO_PUBLIC_ENVIRONMENT !== 'staging'/);
   assert.match(guest,/assertFirebaseStagingIdentity\(\)/);
 });

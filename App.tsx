@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { GuestAuthGate } from './src/auth/GuestAuthGate';
-import { Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { getResponsiveLayout } from './src/ui/layout';
 import { makeDemoFriends, searchableFriends, visibleMapFriends, type FriendStatus } from './src/domain/demo';
 
 const counts = [0, 5, 30, 100, 500, 1000];
@@ -9,6 +10,8 @@ const colors: Record<FriendStatus, string> = { LIVE: '#29d9a8', STALE: '#ffca71'
 const labels: Record<FriendStatus, string> = { LIVE: 'LIVE', STALE: 'GPS ไม่อัปเดต', OFFLINE: 'OFFLINE', SHARING_OFF: 'หยุดแชร์' };
 
 function DemoMap() {
+  const { width, height } = useWindowDimensions();
+  const { isExpanded, mapHeight } = getResponsiveLayout(width, height);
   const [count, setCount] = useState(30);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'ALL' | FriendStatus>('ALL');
@@ -21,15 +24,14 @@ function DemoMap() {
   const live = friends.filter(f => f.status === 'LIVE').length;
 
   return (
-    <SafeAreaView style={s.root}>
-      <StatusBar barStyle="light-content" />
-      <ScrollView contentContainerStyle={s.page} keyboardShouldPersistTaps="handled">
+    <View style={s.root}>
+      <ScrollView contentContainerStyle={[s.page, isExpanded && s.expandedPage]} keyboardShouldPersistTaps="handled">
         <View style={s.header}>
           <View><Text style={s.brand}>Here<Text style={s.accent}>Mate</Text></Text><Text style={s.sub}>Your People. One Map.</Text></View>
           <Text style={s.demo}>DEMO · NO GPS</Text>
         </View>
         <View style={s.header}><View><Text style={s.title}>แผนที่ของคุณ</Text><Text style={s.sub}>ตัวอย่างข้อมูล ไม่มีการติดตาม GPS จริง</Text></View><Text style={s.live}>{live} LIVE</Text></View>
-        <View style={s.map} accessibilityLabel="ตัวอย่างตำแหน่งจำลอง ไม่ใช่ Google Maps">
+        <View style={[s.map, { height: mapHeight }]} accessibilityLabel="ตัวอย่างตำแหน่งจำลอง ไม่ใช่ Google Maps">
           <View style={[s.road, { top: 70, left: -60, transform: [{ rotate: '25deg' }] }]} />
           <View style={[s.road, { top: 160, left: -30, transform: [{ rotate: '-35deg' }] }]} />
           <Text style={s.mapLabel}>SYNTHETIC MAP PREVIEW</Text>
@@ -63,30 +65,33 @@ function DemoMap() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips}>
           {filters.map(f => <Pressable key={f} style={[s.chip, f === filter && s.chipOn]} onPress={() => setFilter(f)}><Text style={s.chipText}>{f === 'ALL' ? 'ทั้งหมด' : labels[f]}</Text></Pressable>)}
         </ScrollView>
-        {filtered.slice(0, 12).map(f => <Pressable key={f.id} style={s.friend} onPress={() => setSelectedId(f.id)}>
+        <View style={[s.friendList, isExpanded && s.friendGrid]}>
+        {filtered.slice(0, 12).map(f => <Pressable key={f.id} style={[s.friend, isExpanded && s.friendWide]} onPress={() => setSelectedId(f.id)}>
           <View style={[s.avatar, { borderColor: colors[f.status] }]}><Text style={s.bold}>{f.name[0]}</Text></View>
           <View style={s.flex}><Text style={s.bold}>{f.name}</Text><Text style={s.sub}>{f.username}</Text></View>
           <Text style={{ color: colors[f.status], fontSize: 11, fontWeight: '700' }}>{labels[f.status]}</Text>
         </Pressable>)}
+        </View>
         {filtered.length === 0 ? <Text style={s.sub}>ไม่พบเพื่อน</Text> : null}
         {filtered.length > 12 ? <Text style={s.foot}>แสดง 12 จาก {filtered.length} คน · รายชื่อจริงจะใช้ Pagination</Text> : null}
         <Text style={s.foot}>HereMate M0.1 · Android Hero / iOS Ready · ไม่มีข้อมูลตำแหน่งจริง</Text>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#071725' },
-  page: { padding: 18, paddingBottom: 48, gap: 15 },
+  page: { padding: 18, paddingBottom: 56, gap: 15, width: '100%' },
+  expandedPage: { maxWidth: 960, alignSelf: 'center', paddingHorizontal: 28 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 },
   brand: { fontSize: 27, fontWeight: '800', color: '#f5f9fc' },
   accent: { color: '#50e2bb', fontWeight: '700' },
-  sub: { color: '#9bb0bf', fontSize: 11, marginTop: 3 },
+  sub: { color: '#9bb0bf', fontSize: 13, marginTop: 3 },
   demo: { color: '#6be5c1', borderColor: '#295363', borderWidth: 1, padding: 8, borderRadius: 10, fontSize: 10, fontWeight: '800' },
   title: { color: '#f0f5f8', fontSize: 18, fontWeight: '800' },
   live: { backgroundColor: '#15493d', padding: 9, borderRadius: 16, color: '#66e8bb', fontWeight: '800', fontSize: 12 },
-  map: { backgroundColor: '#113342', borderColor: '#2d5767', borderWidth: 1, borderRadius: 20, height: 290, overflow: 'hidden' },
+  map: { backgroundColor: '#113342', borderColor: '#2d5767', borderWidth: 1, borderRadius: 20, overflow: 'hidden' },
   road: { position: 'absolute', backgroundColor: '#355a66', height: 12, width: '140%', borderRadius: 12 },
   mapLabel: { position: 'absolute', top: 13, left: 12, color: '#b7d8d9', backgroundColor: '#0b2436', fontSize: 10, padding: 6, borderRadius: 6 },
   pin: { position: 'absolute', width: 24, height: 24, borderRadius: 13, borderColor: '#052232', borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
@@ -103,9 +108,12 @@ const s = StyleSheet.create({
   chipOn: { backgroundColor: '#1f8067', borderColor: '#5ac9ad' },
   chipText: { color: '#e7f5f3', fontWeight: '700', fontSize: 12 },
   search: { backgroundColor: '#173040', borderColor: '#355161', borderWidth: 1, borderRadius: 12, color: 'white', paddingHorizontal: 14, paddingVertical: 12 },
+  friendList: { gap: 9 },
+  friendGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  friendWide: { width: '49%' },
   friend: { flexDirection: 'row', gap: 11, borderRadius: 12, borderColor: '#284050', borderWidth: 1, padding: 12, alignItems: 'center' },
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#264659', borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
-  foot: { color: '#91aabb', fontSize: 11, textAlign: 'center', marginTop: 9 },
+  foot: { color: '#91aabb', fontSize: 12, textAlign: 'center', marginTop: 9 },
 });
 
 /**
@@ -113,9 +121,17 @@ const s = StyleSheet.create({
  * unchanged on all existing production-less Android/iOS EAS profiles.
  */
 export default function App() {
-  if (process.env.EXPO_PUBLIC_ENVIRONMENT !== 'staging' ||
-      process.env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST !== 'true') {
-    return <DemoMap />;
-  }
-  return <GuestAuthGate><DemoMap /></GuestAuthGate>;
+  // Android edge-to-edge windows can draw underneath the status bar. The legacy
+  // RN SafeAreaView alone does not reserve that area on Android.
+  // Apply the top inset ONCE at the root, for both Guest and Demo screens.
+  const androidTopInset = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) : 0;
+  const guestEnabled = process.env.EXPO_PUBLIC_ENVIRONMENT === 'staging' &&
+    process.env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST === 'true';
+
+  return (
+    <SafeAreaView style={[s.root, { paddingTop: androidTopInset }]}>
+      <StatusBar barStyle="light-content" />
+      {guestEnabled ? <GuestAuthGate><DemoMap /></GuestAuthGate> : <DemoMap />}
+    </SafeAreaView>
+  );
 }
