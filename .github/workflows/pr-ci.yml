@@ -22,6 +22,11 @@ jobs:
       - run: node --check tests/m0.test.mjs
       - name: Validate registered Firebase Staging identifiers (no backend access)
         run: node --test tests/m0-5-firebase-config.test.mjs
+      - name: Validate offline Cloud Run Phone + Password auth contract
+        run: |
+          node --check backend/auth/phone-login.mjs
+          node --check backend/auth/http.mjs
+          node --test tests/m0-5-phone-auth.test.mjs
       - name: Validate read-only M0.5 inventory and staging project guards
         run: |
           bash -n scripts/m0-5-inventory.sh
