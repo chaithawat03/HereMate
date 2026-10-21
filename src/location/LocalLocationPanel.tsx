@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Location from 'expo-location';
 import { toLocalSample, type LocalSample } from './locationLogic';
+import { shouldCancelForAppState } from './gpsLifecycle';
 
 type Mode = 'off' | 'starting' | 'on' | 'denied' | 'error';
 
@@ -13,9 +14,15 @@ export function LocalLocationPanel() {
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const runRef = useRef(0);
   const activeRef = useRef(true);
+  const permissionPendingRef = useRef(false);
+  const appStateRef = useRef(AppState.currentState);
+  const resumeWhenActiveRef = useRef<(() => void) | null>(null);
 
   const stop = useCallback(() => {
     runRef.current += 1;
+    permissionPendingRef.current = false;
+    resumeWhenActiveRef.current?.();
+    resumeWhenActiveRef.current = null;
     watchRef.current?.remove();
     watchRef.current = null;
     setSample(null);
@@ -26,10 +33,19 @@ export function LocalLocationPanel() {
   useEffect(() => {
     activeRef.current = true;
     const listener = AppState.addEventListener('change', next => {
-      if (next === 'background') stop();
+      appStateRef.current = next;
+      if (next === 'active') {
+        resumeWhenActiveRef.current?.();
+        resumeWhenActiveRef.current = null;
+      }
+      if (shouldCancelForAppState(next, permissionPendingRef.current)) stop();
     });
     return () => {
+      listener.remove();
       activeRef.current = false;
+      permissionPendingRef.current = false;
+      resumeWhenActiveRef.current?.();
+      resumeWhenActiveRef.current = null;
       runRef.current += 1;
       watchRef.current?.remove();
       watchRef.current = null;
@@ -51,13 +67,27 @@ export function LocalLocationPanel() {
         }
         return;
       }
+      // Android permission dialogs can temporarily report AppState background.
+      // Defer lifecycle cancellation until the permission dialog has closed.
+      permissionPendingRef.current = true;
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!current()) return;
       if (!permission.granted) {
+        permissionPendingRef.current = false;
         setMode('denied');
         setMessage('ไม่ได้รับสิทธิ์ตำแหน่ง คุณสามารถอนุญาตได้ใน Settings ของโทรศัพท์');
         return;
       }
+      // Do not start a GPS subscription while the user is really outside the app.
+      // Resume after Android reports active again; Stop/unmount invalidate run.
+      if (appStateRef.current !== 'active') {
+        await new Promise<void>(resolve => {
+          if (appStateRef.current === 'active') resolve();
+          else resumeWhenActiveRef.current = resolve;
+        });
+      }
+      if (!current()) return;
+      permissionPendingRef.current = false;
       const watcher = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
         position => {
@@ -77,6 +107,7 @@ export function LocalLocationPanel() {
       setMode('on');
     } catch {
       if (!current()) return;
+      permissionPendingRef.current = false;
       stop();
       setMode('error');
       setMessage('ไม่สามารถเริ่ม GPS ได้ โปรดลองใหม่');
