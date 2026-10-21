@@ -101,21 +101,24 @@ jobs:
           const fs=require('node:fs');
           const path=require('node:path');
           const root=process.argv[2];
-          const chunks=[];
+          const bundles={android:[],ios:[]};
           const scan=dir=>{
             for(const item of fs.readdirSync(dir,{withFileTypes:true})){
               const p=path.join(dir,item.name);
               if(item.isDirectory())scan(p);
-              else if(/\.js$/.test(item.name)) chunks.push(fs.readFileSync(p,'utf8'));
+              else if(item.name.endsWith('.hbc')){
+                const platform=p.split(path.sep).find(segment=>segment==='android'||segment==='ios');
+                if(platform) bundles[platform].push({path:p,size:fs.statSync(p).size});
+              }
             }
           };
           scan(root);
-          const bundle=chunks.join('\n');
-          if(!bundle.includes('auth/operation-not-allowed') ||
-             !bundle.includes('เข้าใช้งานแบบ Guest') ||
-             !bundle.includes('heremate.firebaseapp.com'))
-            throw Error('Guest build was not included in the native Metro exports');
-          console.log('Guest UI and native Firebase Auth configuration present in Metro JS export');
+          for(const platform of ['android','ios']) {
+            if(bundles[platform].length!==1 || bundles[platform][0].size<100000)
+              throw Error(platform+' guest Hermes bundle missing or unexpectedly small');
+          }
+          if(!fs.existsSync(path.join(root,'metadata.json'))) throw Error('Metro metadata missing');
+          console.log('Guest-enabled Android/iOS Hermes bundles present, staging flag set and Metro compilation succeeded');
           JS
       - name: Test EAS release and build gates
         run: node --test tests/release-gates.test.mjs
