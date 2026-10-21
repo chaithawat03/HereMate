@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { GuestAuthGate } from './src/auth/GuestAuthGate';
 import { Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { LocalLocationPanel } from './src/location/LocalLocationPanel';
 import { getResponsiveLayout } from './src/ui/layout';
 import { makeDemoFriends, searchableFriends, visibleMapFriends, type FriendStatus } from './src/domain/demo';
 
@@ -17,6 +18,9 @@ function DemoMap() {
   const [filter, setFilter] = useState<'ALL' | FriendStatus>('ALL');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sharing, setSharing] = useState(true);
+  const localGpsEnabled = process.env.EXPO_PUBLIC_ENVIRONMENT === 'staging' &&
+    process.env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST === 'true' &&
+    process.env.EXPO_PUBLIC_ENABLE_LOCAL_GPS === 'true';
   const friends = useMemo(() => makeDemoFriends(count), [count]);
   const filtered = useMemo(() => searchableFriends(friends, search, filter), [friends, search, filter]);
   const markers = useMemo(() => visibleMapFriends(friends, true).slice(0, 12), [friends]);
@@ -28,9 +32,9 @@ function DemoMap() {
       <ScrollView contentContainerStyle={[s.page, isExpanded && s.expandedPage]} keyboardShouldPersistTaps="handled">
         <View style={s.header}>
           <View><Text style={s.brand}>Here<Text style={s.accent}>Mate</Text></Text><Text style={s.sub}>Your People. One Map.</Text></View>
-          <Text style={s.demo}>DEMO · NO GPS</Text>
+          <Text style={s.demo}>{localGpsEnabled ? 'LOCAL GPS · NO SHARING' : 'DEMO · NO GPS'}</Text>
         </View>
-        <View style={s.header}><View><Text style={s.title}>แผนที่ของคุณ</Text><Text style={s.sub}>ตัวอย่างข้อมูล ไม่มีการติดตาม GPS จริง</Text></View><Text style={s.live}>{live} LIVE</Text></View>
+        <View style={s.header}><View><Text style={s.title}>แผนที่ของคุณ</Text><Text style={s.sub}>{localGpsEnabled ? 'จุดเพื่อนยังเป็นข้อมูลจำลอง · พิกัดจริงอยู่ด้านล่าง' : 'ตัวอย่างข้อมูล ไม่มีการติดตาม GPS จริง'}</Text></View><Text style={s.live}>{live} LIVE</Text></View>
         <View style={[s.map, { height: mapHeight }]} accessibilityLabel="ตัวอย่างตำแหน่งจำลอง ไม่ใช่ Google Maps">
           <View style={[s.road, { top: 70, left: -60, transform: [{ rotate: '25deg' }] }]} />
           <View style={[s.road, { top: 160, left: -30, transform: [{ rotate: '-35deg' }] }]} />
@@ -49,13 +53,15 @@ function DemoMap() {
           <Text style={s.bold}>{selected.name} · {labels[selected.status]}</Text>
           <Text style={s.sub}>{selected.username} · GPS ล่าสุด: {selected.lastGpsSeconds === null ? 'ไม่มีข้อมูล' : selected.lastGpsSeconds + ' วินาที'}</Text>
         </View><Pressable onPress={() => setSelectedId(null)}><Text style={s.accent}>ปิด</Text></Pressable></View> : null}
-        <View style={s.info}>
-          <View style={s.flex}><Text style={s.bold}>แชร์ตำแหน่งของฉัน</Text><Text style={s.sub}>ปุ่มจำลอง · ไม่มีการส่งตำแหน่งจริง</Text></View>
-          <Pressable accessibilityRole="switch" accessibilityState={{ checked: sharing }}
-            style={[s.toggle, sharing && s.enabled]} onPress={() => setSharing(!sharing)}>
-            <Text style={s.bold}>{sharing ? 'เปิด' : 'ปิด'}</Text>
-          </Pressable>
-        </View>
+        {localGpsEnabled ? <LocalLocationPanel /> : (
+          <View style={s.info}>
+                    <View style={s.flex}><Text style={s.bold}>แชร์ตำแหน่งของฉัน</Text><Text style={s.sub}>ปุ่มจำลอง · ไม่มีการส่งตำแหน่งจริง</Text></View>
+                    <Pressable accessibilityRole="switch" accessibilityState={{ checked: sharing }}
+                      style={[s.toggle, sharing && s.enabled]} onPress={() => setSharing(!sharing)}>
+                      <Text style={s.bold}>{sharing ? 'เปิด' : 'ปิด'}</Text>
+                    </Pressable>
+                  </View>
+        )}
         <View style={s.header}><Text style={s.title}>เพื่อนทั้งหมด</Text><Text style={s.accent}>{friends.length} คน</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips}>
           {counts.map(n => <Pressable key={n} style={[s.chip, n === count && s.chipOn]} onPress={() => { setCount(n); setSelectedId(null); }}><Text style={s.chipText}>{n}</Text></Pressable>)}
@@ -74,7 +80,7 @@ function DemoMap() {
         </View>
         {filtered.length === 0 ? <Text style={s.sub}>ไม่พบเพื่อน</Text> : null}
         {filtered.length > 12 ? <Text style={s.foot}>แสดง 12 จาก {filtered.length} คน · รายชื่อจริงจะใช้ Pagination</Text> : null}
-        <Text style={s.foot}>HereMate M0.1 · Android Hero / iOS Ready · ไม่มีข้อมูลตำแหน่งจริง</Text>
+        <Text style={s.foot}>{localGpsEnabled ? 'HereMate M0.5.5 · GPS บนเครื่องเท่านั้น · ไม่แชร์ตำแหน่ง' : 'HereMate M0.1 · Android Hero / iOS Ready · ไม่มีข้อมูลตำแหน่งจริง'}</Text>
       </ScrollView>
     </View>
   );

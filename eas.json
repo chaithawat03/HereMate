@@ -25,7 +25,8 @@
       },
       "env": {
         "EXPO_PUBLIC_ENVIRONMENT": "staging",
-        "EXPO_PUBLIC_ENABLE_FIREBASE_GUEST": "true"
+        "EXPO_PUBLIC_ENABLE_FIREBASE_GUEST": "true",
+        "EXPO_PUBLIC_ENABLE_LOCAL_GPS": "true"
       }
     },
     "ios-guest-simulator": {
@@ -35,7 +36,8 @@
       },
       "env": {
         "EXPO_PUBLIC_ENVIRONMENT": "staging",
-        "EXPO_PUBLIC_ENABLE_FIREBASE_GUEST": "true"
+        "EXPO_PUBLIC_ENABLE_FIREBASE_GUEST": "true",
+        "EXPO_PUBLIC_ENABLE_LOCAL_GPS": "true"
       }
     }
   }
