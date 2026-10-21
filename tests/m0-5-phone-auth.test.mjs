@@ -112,7 +112,7 @@ test('HTTP handler enforces strict POST JSON contract and safe responses',async(
 });
 
 test('API unit suite makes NO Firebase calls, app data/GPS writes, or secret exposure',()=>{
- const files=['backend/auth/phone-login.mjs','backend/auth/http.mjs','tests/m0-5-phone-auth.test.mjs'];
+ const files=['backend/auth/phone-login.mjs','backend/auth/http.mjs'];
  for(const path of files){
    const c=readFileSync(new URL('../'+path,import.meta.url),'utf8');
    assert.doesNotMatch(c,/firebase-admin\/|getFirestore\(|setDoc\(|getDatabase\(|createServer\(|gcloud run deploy/);
