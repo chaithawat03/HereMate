@@ -12,6 +12,15 @@ on:
       - 'package-lock.json'
       - 'src/**'
   workflow_dispatch:
+    inputs:
+      run_mode:
+        description: "Choose preflight (no build/uploads) or Android build"
+        required: true
+        type: choice
+        options:
+          - preflight
+          - build
+        default: preflight
 
 permissions:
   contents: read
@@ -21,11 +30,72 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight-private-drive:
+    # Runs without any EAS build or Google Drive write. Preserves WIF workflow_ref
+    # restrictions because it lives in the same staging-eas-build.yml.
+    if: >-
+      github.repository == 'chaithawat03/HereMate' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.run_mode == 'preflight'
+    environment: staging-drive
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate exact staging destination settings (no secrets)
+        env:
+          DRIVE_FOLDER_ID: ${{ vars.DRIVE_FOLDER_ID }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GOOGLE_WIF_SERVICE_ACCOUNT: ${{ vars.GOOGLE_WIF_SERVICE_ACCOUNT }}
+          GOOGLE_WIF_PROVIDER: ${{ vars.GOOGLE_WIF_PROVIDER }}
+          DRIVE_EXPECTED_OWNER_EMAIL: ${{ vars.DRIVE_EXPECTED_OWNER_EMAIL }}
+        run: |
+          set -euo pipefail
+          test "$DRIVE_FOLDER_ID" = "1Q0zgRbKdt9l6ZeEU4KILSf_1vUjQ2gmo"
+          test "$GCP_PROJECT_ID" = "heremate"
+          test "$GOOGLE_WIF_SERVICE_ACCOUNT" = "heremate-drive-ci@heremate.iam.gserviceaccount.com"
+          test "$GOOGLE_WIF_PROVIDER" = "projects/976775896533/locations/global/workloadIdentityPools/heremate-gh/providers/github"
+          test -n "$DRIVE_EXPECTED_OWNER_EMAIL"
+      - name: Authenticate via GitHub OIDC (no service account key)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GOOGLE_WIF_PROVIDER }}
+          service_account: ${{ vars.GOOGLE_WIF_SERVICE_ACCOUNT }}
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+      - name: Read only dedicated Secret Manager OAuth version
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          gcloud secrets versions access latest --project="$GCP_PROJECT_ID" --secret=heremate-staging-drive-oauth > "$RUNNER_TEMP/drive-oauth.json"
+          test -s "$RUNNER_TEMP/drive-oauth.json"
+      - name: Verify refresh token scope and existing Restricted Drive folder (read-only)
+        env:
+          DRIVE_OAUTH_SECRET_JSON_FILE: ${{ runner.temp }}/drive-oauth.json
+          DRIVE_FOLDER_ID: ${{ vars.DRIVE_FOLDER_ID }}
+          DRIVE_EXPECTED_OWNER_EMAIL: ${{ vars.DRIVE_EXPECTED_OWNER_EMAIL }}
+        run: node scripts/preflight-private-drive.mjs
+      - name: Remove temporary credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/drive-oauth.json"
+
   verify-reviewed-merge:
     if: >-
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
-      vars.STAGING_EAS_ENABLED == 'true'
+      vars.STAGING_EAS_ENABLED == 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.run_mode == 'build')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -55,7 +125,8 @@ jobs:
     if: >-
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
-      vars.STAGING_EAS_ENABLED == 'true'
+      vars.STAGING_EAS_ENABLED == 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.run_mode == 'build')
     environment: staging-eas
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -96,6 +167,7 @@ jobs:
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
       vars.STAGING_EAS_ENABLED == 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.run_mode == 'build') &&
       vars.STAGING_DRIVE_ENABLED == 'true'
     environment: staging-drive
     runs-on: ubuntu-latest

@@ -51,5 +51,7 @@ jobs:
         run: node --test tests/security-staging.test.mjs
       - name: Test private My Drive OAuth delivery (no credentials)
         run: node --test tests/drive-delivery.test.mjs
+      - name: Test WIF and OAuth read-only preflight (mocked, no credentials)
+        run: node --test tests/drive-preflight.test.mjs
       - name: Audit dependencies with approved M0.1 staging exception only
         run: node scripts/check-staging-audit.mjs

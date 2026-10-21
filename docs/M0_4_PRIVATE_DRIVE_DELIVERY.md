@@ -46,3 +46,17 @@ Repository variable `STAGING_DRIVE_ENABLED`: **leave unset or false** until OAut
 - The CI verifier writes a deterministic manifest body so retries remain idempotent. The separate local receipt includes the uploaded manifest's Drive file ID.
 - EAS build artifacts are not automatically public. Do not share the private Drive folder as 'Anyone with link'.
 - No app-store submission, live GPS, iPhone install, or Production deploy in M0.4.
+
+## M0.4 owner WIF / OAuth preflight
+
+As of 2026-10-21, owner-provided evidence shows Google Cloud Secret Manager OAuth credentials version 1 enabled, Google Drive OAuth GET to the Restricted existing HereMate folder returned HTTP 200 and canAddChildren=true, and GitHub Environment `staging-drive` exists with 5 configuration variables (the provider path is truncated in screenshot and verified by workflow input gate). This does **not** mean GitHub WIF or unattended token refresh is verified.
+
+Run [Staging Android EAS Build (gated)](https://github.com/chaithawat03/HereMate/actions/workflows/staging-eas-build.yml) manually on **main**, with `run_mode=preflight`. The preflight job does only:
+- Validate project, exact WIF provider, SA and Drive folder ID.
+- Exchange GitHub OIDC for GCP temporary credentials.
+- Read one dedicated Secret Manager secret version into ephemeral runner memory/disk (never print contents).
+- Refresh owner OAuth access token and check the exact `drive.file` scope; read Drive account and folder metadata, require owner, `shared=false`, and `canAddChildren=true`.
+- Delete temporary runner credential file on completion.
+
+The preflight does **NOT** call Expo, build Android, download APK, create Drive files, change sharing, or deploy Production. `STAGING_DRIVE_ENABLED` MUST remain disabled/absent during preflight. Manual `run_mode=build` still invokes normal EAS build when `STAGING_EAS_ENABLED=true` and permits Drive delivery only after explicit `STAGING_DRIVE_ENABLED=true` (separate later approval).
+
