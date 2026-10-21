@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   getStagingGuestAuth, startGuestSession, stopGuestSession, watchGuestSession
 } from './firebaseGuest';
@@ -70,10 +70,10 @@ export function GuestAuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (state.kind === 'checking') {
-    return <SafeAreaView style={s.screen}><ActivityIndicator color="#50e2bb" /><Text style={s.info}>กำลังตรวจสอบสถานะ Login...</Text></SafeAreaView>;
+    return <View style={s.screen}><ActivityIndicator color="#50e2bb" /><Text style={s.info}>กำลังตรวจสอบสถานะ Login...</Text></View>;
   }
   if (state.kind === 'signed-out' || state.kind === 'error') {
-    return <SafeAreaView style={s.screen}>
+    return <View style={s.screen}>
       <Text style={s.brand}>HereMate</Text>
       <Text style={s.info}>ทดสอบ Guest Login · Firebase Staging</Text>
       <Text style={s.note}>จะสร้างบัญชี Guest แบบไม่ระบุชื่อใน Firebase Authentication เมื่อคุณเลือกดำเนินการ ไม่มีการเข้าถึงตำแหน่ง GPS หรือรายชื่อผู้ติดต่อ</Text>
@@ -83,7 +83,7 @@ export function GuestAuthGate({ children }: { children: React.ReactNode }) {
         <Text style={s.actionText}>{busy ? 'กำลังเชื่อมต่อ...' : 'เข้าใช้งานแบบ Guest'}</Text>
       </Pressable>
       <Text style={s.note}>การลงชื่อออกจาก Guest อาจทำให้ไม่สามารถกลับเข้าสู่บัญชี Guest เดิมได้ จนกว่าจะมีระบบเชื่อมบัญชี</Text>
-    </SafeAreaView>;
+    </View>;
   }
   return <View style={s.main}>
     <View style={s.ribbon}>
@@ -102,7 +102,7 @@ export function GuestAuthGate({ children }: { children: React.ReactNode }) {
 }
 
 const s = StyleSheet.create({
-  screen:{flex:1,backgroundColor:'#071725',justifyContent:'center',padding:24,gap:18},
+  screen:{flex:1,backgroundColor:'#071725',justifyContent:'center',padding:24,gap:18,width:'100%',maxWidth:560,alignSelf:'center'},
   main:{flex:1,backgroundColor:'#071725'},
   flex:{flex:1},
   brand:{fontSize:30,fontWeight:'800',color:'#50e2bb'},
@@ -112,9 +112,9 @@ const s = StyleSheet.create({
   action:{backgroundColor:'#1f8067',padding:16,borderRadius:14,alignItems:'center'},
   actionText:{color:'white',fontSize:15,fontWeight:'800'},
   disabled:{opacity:.6},
-  ribbon:{flexDirection:'row',alignItems:'center',paddingHorizontal:16,paddingVertical:10,backgroundColor:'#102c39'},
+  ribbon:{flexDirection:'row',alignItems:'center',paddingHorizontal:16,paddingVertical:12,minHeight:60,backgroundColor:'#102c39'},
   label:{color:'#50e2bb',fontWeight:'800',fontSize:11},
-  uid:{color:'#9bb0bf',fontSize:11,marginTop:3},
+  uid:{color:'#9bb0bf',fontSize:12,marginTop:3},
   signout:{paddingHorizontal:14,paddingVertical:10,borderWidth:1,borderColor:'#527b8e',borderRadius:12},
   signoutText:{color:'#edf7f8',fontSize:12,fontWeight:'700'}
 });
