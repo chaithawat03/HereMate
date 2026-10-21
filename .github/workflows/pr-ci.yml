@@ -103,5 +103,7 @@ jobs:
         run: node --test tests/drive-preflight.test.mjs
       - name: Validate Expo APK redirect trust boundaries (no network)
         run: node --test tests/drive-redirect.test.mjs
+      - name: Inventory Guest staging dependencies (diagnostic, not waiver)
+        run: node scripts/report-guest-dependency-audit.mjs
       - name: Audit dependencies with approved M0.1 staging exception only
         run: node scripts/check-staging-audit.mjs
