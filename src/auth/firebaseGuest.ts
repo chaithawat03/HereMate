@@ -16,7 +16,7 @@ import {
   type Auth,
   type User,
 } from 'firebase/auth';
-import { createAsyncStorage } from '@react-native-async-storage/async-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { assertFirebaseStagingIdentity, firebaseConfig } from '../config/firebaseStaging';
 
 let authInstance: Auth | undefined;
@@ -36,11 +36,11 @@ export function getStagingGuestAuth(): Auth {
   }
   const app = existing.length ? getApp() : initializeApp(firebaseConfig);
 
-  // Per-app installation-scoped persistent login: no implicit account creation
+  // AsyncStorage v2 uses the default export (v3 uses createAsyncStorage).\n  // Per-app installation-scoped persistent login: no implicit account creation
   // and no manual copying Firebase refresh/ID tokens into our own storage.
   try {
     authInstance = initializeAuth(app, {
-      persistence: getReactNativePersistence(createAsyncStorage('heremate-staging-auth')),
+      persistence: getReactNativePersistence(AsyncStorage),
     });
   } catch (error) {
     // Hot reload can re-evaluate this module after Firebase Auth was initialized.
