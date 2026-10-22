@@ -45,7 +45,7 @@ test('anonymous login is user-initiated, persists using React Native AsyncStorag
   assert.match(gate,/onPress={guestLogin}/);
   assert.match(gate,/onPress={logout}/);
   assert.match(gate,/user\.isAnonymous/);
-  assert.match(gate,/การเข้าสู่ระบบไม่อ่าน GPS/);
+  assert.match(read('src/ui/preferencesModel.ts'),/การเข้าสู่ระบบไม่อ่าน GPS/);
   assert.doesNotMatch(guest+gate,/getFirestore|getDatabase|geolocation|Location\.getCurrentPosition|requestForegroundPermissions|firebase\/analytics/);
 });
 test('do not confuse Guest preview staging with existing synthetic exception approval',()=>{

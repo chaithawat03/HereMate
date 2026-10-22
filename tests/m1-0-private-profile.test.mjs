@@ -31,7 +31,7 @@ test('M1.0 profile is opt-in in Guest staging profile and never enabled in origi
  assert.equal(eas.build['android-preview'].env.EXPO_PUBLIC_ENABLE_M1_PROFILE,undefined);
  assert.match(app,/EXPO_PUBLIC_ENABLE_M1_PROFILE === 'true'/);
  assert.match(app,/m1ProfileEnabled \? <UserProfilePanel \/>/);
- assert.match(app,/เพื่อนจำลอง/);
+ assert.match(read('src/ui/preferencesModel.ts'),/เพื่อนจำลอง/);
  assert.match(panel,/loadOwnProfile\(\)/);
  assert.match(panel,/createOwnProfile\(name\)/);
  assert.match(panel,/renameOwnProfile\(name\)/);
