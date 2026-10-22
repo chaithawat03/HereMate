@@ -73,7 +73,7 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
     try{
       const relationRows=await listOwnRequests();
       if(!current())return;
-      const eligible=authorizedPeers(uid,relationRows)
+      const eligible=[...authorizedPeers(uid,relationRows)]
         .sort((a,b)=>a.uid.localeCompare(b.uid)).slice(0,MAX_MAP_FRIEND_READS);
       // Every selected friend's location comes from a separate authenticated
       // backend read, not a broad Firestore query. Failure never shows a
