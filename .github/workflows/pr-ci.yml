@@ -118,8 +118,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Install isolated pinned Admin SDK (not Expo app, not a release lockfile)
-        run: npm install --prefix backend/location-runtime --package-lock=false --ignore-scripts --no-audit --no-fund
+      - name: Install isolated pinned Admin SDK with temporary CI dependency lock
+        run: npm install --prefix backend/location-runtime --package-lock=true --ignore-scripts --no-audit --no-fund
+      - name: Audit standalone Firebase Admin runtime for High/Critical advisories
+        run: npm audit --prefix backend/location-runtime --omit=dev --audit-level=high
       - name: Verify staging boot defaults and bounded HTTP edge (offline)
         run: |
           node --check backend/location-runtime/main.mjs

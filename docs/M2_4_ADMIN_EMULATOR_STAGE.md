@@ -32,3 +32,8 @@ The existing mobile M2.4 client sends a **Firebase Auth ID token**, which does *
 2. A controlled gateway/proxy that itself authenticates client Firebase tokens, limits abuse and invokes private Cloud Run using its own workload identity. Evaluate gateway operational complexity and cost before making it an M2 release requirement.
 
 Do **not** mark `roles/run.invoker` as satisfied by a Firebase user token, open access implicitly, disable token validation, or create/deploy resources under this PR. Region, least privilege, IAM and cost are still owner-reviewed release blockers.
+
+## Isolated runtime dependency audit (CI)
+- PR CI generates a **temporary** dependency lock using the pinned direct Admin SDK version and runs `npm audit --omit=dev --audit-level=high` on the isolated backend package. No security exception for the Expo/Guest dependency tree applies to this new location service.
+- A generated CI lockfile **is not a committed/reviewed release lockfile**. Production/Staging deployment remains blocked until an exact committed backend lockfile is reviewed and runtime image is built with `npm ci`, not a transient `npm install`.
+- An npm registry/audit outage is a CI failure requiring investigation/retry, not permission to skip the security gate.
