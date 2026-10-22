@@ -5,6 +5,7 @@ import { GuestAuthGate } from './src/auth/GuestAuthGate';
 import { Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { LocalLocationPanel } from './src/location/LocalLocationPanel';
 import { UserProfilePanel } from './src/profile/UserProfilePanel';
+import { FriendsPanel } from './src/friends/FriendsPanel';
 import { getResponsiveLayout } from './src/ui/layout';
 import { makeDemoFriends, searchableFriends, visibleMapFriends, type FriendStatus } from './src/domain/demo';
 
@@ -31,6 +32,7 @@ function DemoMap() {
     process.env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST === 'true' &&
     process.env.EXPO_PUBLIC_ENABLE_LOCAL_GPS === 'true';
   const m1ProfileEnabled = localGpsEnabled && process.env.EXPO_PUBLIC_ENABLE_M1_PROFILE === 'true';
+  const m1FriendsEnabled = m1ProfileEnabled && process.env.EXPO_PUBLIC_ENABLE_M1_FRIENDS === 'true';
   const friends = useMemo(() => makeDemoFriends(count), [count]);
   const filtered = useMemo(() => searchableFriends(friends, search, filter), [friends, search, filter]);
   const markers = useMemo(() => visibleMapFriends(friends, true).slice(0, 12), [friends]);
@@ -73,6 +75,7 @@ function DemoMap() {
                   </View>
         )}
         {m1ProfileEnabled ? <UserProfilePanel /> : null}
+        {m1FriendsEnabled ? <FriendsPanel /> : null}
         <View style={s.header}><Text style={s.title}>{t(m1ProfileEnabled ? 'demoFriendsTitle' : 'allFriends')}</Text><Text style={s.accent}>{t('people',{count:friends.length})}</Text></View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips}>
           {counts.map(n => <Pressable key={n} style={[s.chip, n === count && s.chipOn]} onPress={() => { setCount(n); setSelectedId(null); }}><Text style={[s.chipText,n === count&&{color:c.accentOn}]}>{n}</Text></Pressable>)}
