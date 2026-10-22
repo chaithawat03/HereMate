@@ -24,7 +24,7 @@ const fields=(obj:unknown,keys:readonly string[]):boolean=>{
   const names=Object.keys(obj);
   return names.length===keys.length&&names.every(name=>keys.includes(name));
 };
-const unavailable=()=>{throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');};
+const unavailable=():never=>{throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');};
 const validNumber=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
 function validUrl(input:string):string {
   let url:URL;
