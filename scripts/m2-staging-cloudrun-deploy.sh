@@ -22,6 +22,19 @@ gcloud builds submit . \
  --config=backend/location-runtime/cloudbuild.yaml \
  --service-account='projects/heremate/serviceAccounts/heremate-m2-build@heremate.iam.gserviceaccount.com' \
  --substitutions="_IMAGE=${image}" --quiet
+# Deploy can partially create a public service before reporting a failure.
+# Install the fail-closed rollback BEFORE any public-invocation mutation.
+service_deployed=false
+rollback_on_failure() {
+ local result=$?
+ if [[ "$result" -ne 0 && "${service_deployed:-}" == "true" ]]; then
+   echo "M2_STAGING_DEPLOY_BLOCKED: validation failed; restoring IAM invoker check" >&2
+   gcloud run services update heremate-m2-location-staging \
+     --project=heremate --region=asia-southeast1 --invoker-iam-check --quiet || true
+ fi
+}
+trap rollback_on_failure EXIT
+service_deployed=true
 # Limit service-level scaling; budget ALERTS and max instances are NOT hard caps.
 gcloud run deploy heremate-m2-location-staging \
  --project=heremate --region=asia-southeast1 --image="$image" \
@@ -32,16 +45,6 @@ gcloud run deploy heremate-m2-location-staging \
  --cpu-throttling --timeout=10s --port=8080 --quiet
 # Public invocation uses *app-level* Firebase ID token checks at EVERY endpoint;
 # NEVER pass real Firebase credentials to Cloud Run IAM as invoker tokens.
-service_deployed=true
-rollback_on_failure() {
- local result=$?
- if [[ "$result" -ne 0 && "${service_deployed:-}" == "true" ]]; then
-   echo "M2_STAGING_DEPLOY_BLOCKED: validation failed; restoring IAM invoker check" >&2
-   gcloud run services update heremate-m2-location-staging \
-     --project=heremate --region=asia-southeast1 --invoker-iam-check --quiet || true
- fi
-}
-trap rollback_on_failure EXIT
 url="$(gcloud run services describe heremate-m2-location-staging \
  --project=heremate --region=asia-southeast1 --format='value(status.url)')"
 [[ "$url" == https://heremate-m2-location-staging-*.run.app ]] || {

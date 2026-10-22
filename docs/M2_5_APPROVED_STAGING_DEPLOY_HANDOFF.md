@@ -20,7 +20,7 @@ for group in private_location_grants private_latest_locations private_location_r
 done
 gcloud firestore fields ttls list --project=heremate --database='(default)'
 ```
-- Set GitHub repository/environment variables `M2_STAGING_DEPLOY_ENABLED=true`, `M2_STAGING_BUDGET_REVIEWED=true`, `M2_STAGING_WIF_TRUST_REVIEWED=true`, `M2_STAGING_WIF_PROVIDER=projects/976775896533/locations/global/workloadIdentityPools/.../providers/...`, `M2_STAGING_DEPLOY_SERVICE_ACCOUNT=heremate-m2-deploy@heremate.iam.gserviceaccount.com` **only after evidence verifies the checks**. Protect GitHub environment `m2-staging-deploy` with required reviewers, branch restriction to main; merely naming the environment in YAML does not configure reviewers. The direct GitHub connector cannot configure these secrets/vars or GCP IAM.
+- Set GitHub **repository-level variables** (the flags used in job-level `if:` checks must not be environment-only) and environment variables as appropriate `M2_STAGING_DEPLOY_ENABLED=true`, `M2_STAGING_BUDGET_REVIEWED=true`, `M2_STAGING_WIF_TRUST_REVIEWED=true`, `M2_STAGING_WIF_PROVIDER=projects/976775896533/locations/global/workloadIdentityPools/.../providers/...`, `M2_STAGING_DEPLOY_SERVICE_ACCOUNT=heremate-m2-deploy@heremate.iam.gserviceaccount.com` **only after evidence verifies the checks**. Protect GitHub environment `m2-staging-deploy` with required reviewers, branch restriction to main; merely naming the environment in YAML does not configure reviewers. The direct GitHub connector cannot configure these secrets/vars or GCP IAM.
 
 ## Manual-only execution
 
