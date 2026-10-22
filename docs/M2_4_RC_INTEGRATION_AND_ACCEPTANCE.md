@@ -1,0 +1,29 @@
+# HereMate M2.4 — Integration preparation and ONE Android staging acceptance
+
+Tracking: [M2 approved milestone #34](https://github.com/chaithawat03/HereMate/issues/34). **Proposed** M3/M4 cross-platform CR decisions are isolated in [#38](https://github.com/chaithawat03/HereMate/issues/38) and are NOT approved or included in M2.
+
+## Implemented in this integration-preparation change
+`src/location/m2StagingTransport.ts` is an **unmounted, dependency-injected staging transport** that matches the existing M2.1 POST endpoints. It uses a trusted current Firebase ID-token provider (never a UI token), pins to Staging project `heremate`, accepts only vetted `https://*.run.app/` origins, adds strict no-cache/Bearer/JSON headers, rejects a mid-request account switch, checks app foreground and OS permission for Start/Publish/Read and allows Stop even when the app is no longer foreground. Requests are short, bounded and abortable. It is **not configured with any actual URL**, nor is it imported by `App.tsx`.
+
+`tests/m2-4-staging-transport.test.mjs` exercises that transport against M2.1's `handleLocationHttp` function through synthetic authenticated responses. These tests are **offline contract tests**, not real Firebase Admin/Auth emulator, Cloud Run deployments or physical-device acceptance.
+
+## HARD BLOCKERS before enabling GPS sharing or claiming M2.4 acceptance
+1. **Real backend integration:** Audit/pin the Firebase Admin SDK in an isolated server runtime, make a Cloud Run HTTPS entrypoint that constructs verified Staging Auth and Firestore Admin store, and run true Admin/Firestore Emulator transactional tests for accepted friends, both consent flags, revision changes, stops/removals, spoofing/strangers, timeouts and transactions under concurrency. Verify server-received actor UID comes exclusively from valid Firebase ID tokens, and direct client access to private locations remains denied.
+2. **Cloud service review/deployment:** Owner must confirm Firebase/GCP project `heremate` and desired Staging region, project billing, Cloud Run service account least-privilege Firestore roles, authenticated-token gateway requirements, CORS/ingress/App Check and zero sensitive request logging. Deploy only after review; never ask for service keys/tokens or expose Production. **No Cloud Run service was created or deployed by this PR.**
+3. **Private data lifecycle/cost:** Configure Firestore TTL for `expireAt` on `private_location_grants`, `private_latest_locations` and `private_location_rate_limits`; enforce expiry **on every server read** because Firestore TTL deletion is asynchronous. Review request/rate limits and egress/billing alarms. Validate a maximum one active GPS publisher/account or explicitly resolve the account-device rule.
+4. **Mobile activation review:** In a separate PR only after #1–#3, pass a pinned approved HTTPS service URL and current Firebase user into the transport; mount M2SharingPanel and M2FriendLocationPanel for **Android Staging only** after reviewing UI status semantics and permission-revocation checks on EACH fix. AppState and OS permissions must stop the watcher locally when changed; remote Stop failure must be shown as unconfirmed. Do not activate background GPS tasks, geofences, history or iOS cross-platform work under M2.
+5. **Real-world security/latency integration:** End-to-end synthetic-account positive and negative tests on deployed Staging for app-initiated Start→Publish→Read→Stop, cross-account separation, consent ON/OFF after grant, friend removal, expiry, offline stop, reconnect, revoked token, clock skew, stale/inaccurate fixes, cost, and no unprivileged reads. User privacy/security is a release-blocking gate.
+6. **Release artifact:** Final named **M2 Android Staging RC** from a specific reviewed main SHA, green Foundation+Emulator+Mobile and backend integration tests, build manifest SHA-256 verified, restricted Drive delivery. No Production build and NO claim of final RC from intermediate EAS builds.
+
+## ONE owner acceptance campaign (after technical blockers close)
+Use **Samsung Galaxy Z Fold7** as A and **Anbernic RG406V** as B on separate stable signed-in identities. Do NOT request per-submilestone APK testing. Provide a single script with explicit observed PASS/FAIL:
+1. Both users can log in, retrieve existing profile, see each other in REAL friend list; no change to M1 approval.
+2. Sharing initially OFF; both M1 future-consent flags default OFF. Confirm independent consent toggle per user; without mutual consent, Start and remote read fail.
+3. With both consented, A explicitly chooses B and presses Start (foreground location permission). Only B sees A's fresh, accurate LIVE marker, A's UI visibly shows sharing ON; strangers and removed friends see no point.
+4. On Stop, background, sign-out, OS permission revoke, consent OFF, or friendship removal, local watcher stops and future server reads no longer return an authorized point. If remote Stop cannot be confirmed, UI must say so. Note TTL ≤60s fallback does NOT mean immediate guaranteed server revocation during total offline conditions.
+5. Verify expiry/stale/non-live label without showing coordinates as LIVE, map uses only server-confirmed latest fix, simulated map remains clearly labelled, no history or background sharing.
+6. Re-open app and test TH/EN, Light/Dark preference persistence, Guest→new Google UID linking as deferred risk #33 only if feasible with stable test identities. Record exceptions rather than declaring unobserved checks PASS.
+7. Verify APK SHA manifest, logged security reviews, Staging-only deployment IDs, and final owner sign-off.
+
+### Current status
+**M2.4 IN PROGRESS / BLOCKED on real server deployment and integration**, not RC-ready. None of the above hard blockers are waived by PR CI green. Do not generate an owner acceptance request until a single integrated Android Staging RC is actually available.
