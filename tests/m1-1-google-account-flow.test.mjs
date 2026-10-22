@@ -66,14 +66,16 @@ test('never return credentials, tokens or raw Firebase error messages',()=>{
   assert.match(bridge,/signInWithCredential\(auth,GoogleAuthProvider\.credential\(idToken\)\)/);
   assert.match(bridge,/getStagingGuestAuth\(\)/);
   assert.doesNotMatch(bridge,/console\.|AsyncStorage|setDoc|updateDoc|fetch\(|https?:\/\/|signOut\(/);
-  assert.doesNotMatch(read('src/auth/GuestAuthGate.tsx'),/GoogleSignin|continueStagingGoogleWithNativeToken/);
+  assert.match(read('src/auth/GuestAuthGate.tsx'),/continueStagingGoogleWithNativeToken/);
 });
 
-test('Google sign-in remains disabled until the native OAuth provider is configured',()=>{
+test('Google Sign-In is restricted to internal Android Guest staging',()=>{
   const config=JSON.parse(read('app.json'));
   const eas=JSON.parse(read('eas.json'));
   const gate=read('src/auth/GuestAuthGate.tsx');
-  assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN,undefined);
-  assert.ok(!config.expo.plugins.some(p=>(Array.isArray(p)?p[0]:p)==='@react-native-google-signin/google-signin'));
-  assert.doesNotMatch(gate,/onPress=\{googleLogin\}|GoogleSignin\.signIn\(/);
+  assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN,'true');
+  assert.equal(eas.build['ios-guest-simulator'].env.EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN,undefined);
+  assert.ok(config.expo.plugins.some(p=>(Array.isArray(p)?p[0]:p)==='@react-native-google-signin/google-signin'));
+  assert.match(gate,/onPress=\{googleLogin\}/);
+  assert.match(gate,/Platform\.OS === 'android'/);
 });

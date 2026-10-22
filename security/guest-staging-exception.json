@@ -1,34 +1,34 @@
 {
   "environment": "staging",
-  "sourceScope": "anonymous-guest-local-gps-private-profile-staging-only",
-  "approvedOn": "2026-10-21",
+  "sourceScope": "anonymous-guest-google-local-gps-private-profile-staging-only",
+  "approvedOn": "2026-10-22",
   "expiresOn": "2026-11-20",
   "trackingIssue": "https://github.com/chaithawat03/HereMate/issues/12",
   "allowed": [
     {
       "id": "GHSA-vfj7-8cjw-p6xm",
       "package": "braces",
-      "reason": "Owner-approved temporary Staging Guest trial plus local foreground GPS and owner-only pseudonymous private profile. No sharing, public directory, phone credentials or Production."
+      "reason": "Staging-only Guest and user-initiated Google native login trial with UID-safe linking, owner-private profile and local foreground GPS. No automatic account merge, remote location sharing, phone credentials or Production."
     },
     {
       "id": "GHSA-86w9-cpqp-85rv",
       "package": "node-forge",
-      "reason": "Inherited Expo code-signing High accepted for time-limited staging Guest, local GPS and owner-private profile preview. No other-user records, phone secrets or Production."
+      "reason": "Inherited Expo High signing advisory accepted temporarily for Android-only Google identity linking in internal staging; no production release or cross-user access."
     }
   ],
   "sourceHashes": {
     "App.tsx": "a2cb0109843e502531fb417bdeebff5f78223971",
-    "eas.json": "be5cb0545c50e81f80fc2f0f6273a8da9f374f28",
-    "package.json": "4c1e2f4b753c467193e18f281465d12f0e88c425",
-    "package-lock.json": "f32b2732da5dd94ff51fc207ef868788d3fa8eb9",
+    "eas.json": "af6853a36f832e50810410d8701c7933aee96d5d",
+    "package.json": "373a1ac3c384c47722ec8abb39470b3fcf2d77d8",
+    "package-lock.json": "9cdcef18e61195415c7bf26b85e5bbf217be4e56",
     "src/auth/firebaseGuest.ts": "3e6b8656b79b17c419cbd12041b9aa17bea3b4f4",
-    "src/auth/GuestAuthGate.tsx": "20b6f889a2b28dd5722c7d492fd9e52b9e7dc9f6",
+    "src/auth/GuestAuthGate.tsx": "ee89faa64fa6597c9919ac8fe108b68357ed6346",
     "src/config/firebaseStaging.ts": "cb9bc13e938e0066c1903488a912ea644545fcbf",
     "src/types/firebase-auth-react-native.d.ts": "f3d93ec8d12a535516d87fa9eba07e1eed29bfc6",
     "firebase/firestore.rules": "4d16f74aec37ee99b65be4e4d611fd8946a6f962",
     ".github/workflows/staging-eas-build.yml": "508f4ef1eb61b30db619dad462f466f9df2fb655",
     "scripts/verify-release.mjs": "81e25e72e596a77d578d3686fa79c3a7fd5053b0",
-    "app.json": "0d85e2cb524b76b298b5e72c49c70ef4c84e4c6f",
+    "app.json": "7cdd9bb0b0d7730200d3f2526cf946d2b70f87ce",
     "src/location/LocalLocationPanel.tsx": "1efbd14aa76d0745e0364d7068139dbc75d17d9e",
     "src/location/locationLogic.ts": "7a0c63451399210df374760a89b3635efcf49533",
     "src/location/gpsLifecycle.ts": "9623d55c2110fccd5f095a19b7d32af6aa1de786",
@@ -36,6 +36,10 @@
     "src/profile/firestoreProfile.ts": "3df86f565e4e4472557aa100154f11a2e9ee1366",
     "src/profile/UserProfilePanel.tsx": "ff148a40c713e44fa953e56b9c5d359955658211",
     "src/auth/googleAccountFlow.ts": "515a4601c4c1a9bb26935ae715c1b0d82b757503",
-    "src/auth/googleAccountFirebase.ts": "0e52883306bf7e3ecdd5a1f08fbd807b30474d79"
+    "src/auth/googleAccountFirebase.ts": "0e52883306bf7e3ecdd5a1f08fbd807b30474d79",
+    "google-services.json": "bda2e3ad703d4f9dd62c9faea3f5ce3b3f2a2ab0",
+    "src/auth/nativeGoogleSignIn.android.ts": "efcd0f3e3be19509bf46c438ca534d8d6601635a",
+    "src/auth/nativeGoogleSignIn.ts": "ca0737111e91db44d6c9586716b650c68df22344",
+    "src/config/googleStaging.ts": "76dc3a2fbfe799b3ed0b3ace932b1d772f2b38ad"
   }
 }

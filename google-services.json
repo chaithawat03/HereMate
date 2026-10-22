@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "976775896533",
+    "project_id": "heremate",
+    "storage_bucket": "heremate.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:976775896533:android:a34f7f3aa147c2bcaa315c",
+        "android_client_info": {
+          "package_name": "com.chaithawat03.heremate"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "976775896533-15kmh043j8gorrlknbfahrhb5u8f9a4n.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.chaithawat03.heremate",
+            "certificate_hash": "203f89bb96a20c39a157341611dacb5dead88d15"
+          }
+        },
+        {
+          "client_id": "976775896533-9omdv4lmvpamn6djp37jepm0f7i47srr.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA16J3Qq9flzNrdFH13m83DDPMab0y21-0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "976775896533-9omdv4lmvpamn6djp37jepm0f7i47srr.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
