@@ -62,7 +62,7 @@ function DemoMap() {
         {selected ? <View style={s.info}><View style={s.flex}>
           <Text style={s.bold}>{selected.name} · {labels[selected.status]}</Text>
           <Text style={s.sub}>{selected.username} · {t('lastGps')}: {selected.lastGpsSeconds === null ? t('noData') : t('seconds',{value:selected.lastGpsSeconds})}</Text>
-        </View><Pressable onPress={() => setSelectedId(null)}><Text style={s.accent}{t('close')}</Text></Pressable></View> : null}
+        </View><Pressable onPress={() => setSelectedId(null)}><Text style={s.accent}>{t('close')}</Text></Pressable></View> : null}
         {localGpsEnabled ? <LocalLocationPanel /> : (
           <View style={s.info}>
                     <View style={s.flex}><Text style={s.bold}>{t('mySharing')}</Text><Text style={s.sub}>{t('demoToggle')}</Text></View>
