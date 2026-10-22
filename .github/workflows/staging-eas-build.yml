@@ -1,8 +1,16 @@
 name: Staging Android EAS Build (gated)
 
 on:
-  # Never spend Expo Android build quota on intermediate main merges.
-  # A SHA-pinned, reviewed Release Candidate uses explicit manual dispatch.
+  push:
+    branches: [main]
+    # CI/docs/delivery-only merges must not consume an extra cloud build.
+    paths:
+      - 'App.tsx'
+      - 'app.json'
+      - 'eas.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/**'
   # Daily read-only OAuth/WIF health check. NEVER creates an EAS build.
   schedule:
     - cron: '17 7 * * *'
@@ -90,7 +98,8 @@ jobs:
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
       vars.STAGING_EAS_ENABLED == 'true' &&
-      github.event_name == 'workflow_dispatch' && inputs.run_mode == 'build'
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.run_mode == 'build'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -121,7 +130,8 @@ jobs:
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
       vars.STAGING_EAS_ENABLED == 'true' &&
-      github.event_name == 'workflow_dispatch' && inputs.run_mode == 'build'
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.run_mode == 'build'))
     environment: staging-eas
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -162,7 +172,8 @@ jobs:
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
       vars.STAGING_EAS_ENABLED == 'true' &&
-      github.event_name == 'workflow_dispatch' && inputs.run_mode == 'build' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.run_mode == 'build')) &&
       vars.STAGING_DRIVE_ENABLED == 'true'
     environment: staging-drive
     runs-on: ubuntu-latest
