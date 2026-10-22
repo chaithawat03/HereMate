@@ -70,5 +70,5 @@ test('Existing owner-approved EAS trigger snapshot stays byte-for-byte unchanged
  const workflow=readFileSync(new URL('../.github/workflows/staging-eas-build.yml',import.meta.url),'utf8');
  assert.match(workflow,/^  push:/m);
  assert.match(workflow,/STAGING_EAS_ENABLED/);
- assert.doesNotMatch(src,/EXPO_TOKEN|STAGING_DRIVE_ENABLED|signInWith|password/);
+ assert.doesNotMatch(src,/EXPO_TOKEN|STAGING_DRIVE_ENABLED|signInWith|refreshAccessToken/);
 });
