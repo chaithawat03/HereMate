@@ -45,7 +45,8 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   async function send(endpoint:string,payload:Readonly<Record<string,unknown>>,
     requireForeground:boolean):Promise<unknown> {
     const first=ports.currentIdentity();
-    if(!first||!CODE.test(first.uid))unavailable();
+    if(!first)throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');
+    if(!CODE.test(first.uid))unavailable();
     if(requireForeground&&(!ports.isForeground()||
        await ports.foregroundPermissionGranted()!==true))unavailable();
     let jwt:string;
@@ -89,8 +90,10 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       const result=await send('/v1/locations/grants/start',{viewerUid:safePeer(peerUid)},true);
       if(!fields(result,['enabled','expiresAtMs']))unavailable();
       const grant=result as {enabled:unknown;expiresAtMs:unknown};
-      if(grant.enabled!==true||!validNumber(grant.expiresAtMs))unavailable();
-      return {enabled:true,expiresAtMs:grant.expiresAtMs};
+      const expiresAt=grant.expiresAtMs;
+      if(grant.enabled!==true||!validNumber(expiresAt))
+        throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');
+      return {enabled:true,expiresAtMs:expiresAt};
     },
     async stop(peerUid:string){
       const result=await send('/v1/locations/grants/stop',{viewerUid:safePeer(peerUid)},false);
@@ -105,8 +108,10 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       },true);
       if(!fields(result,['stored','expiresAtMs']))unavailable();
       const row=result as {stored:unknown;expiresAtMs:unknown};
-      if(row.stored!==true||!validNumber(row.expiresAtMs))unavailable();
-      return {stored:true,expiresAtMs:row.expiresAtMs};
+      const expiresAt=row.expiresAtMs;
+      if(row.stored!==true||!validNumber(expiresAt))
+        throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');
+      return {stored:true,expiresAtMs:expiresAt};
     },
     async read(ownerUid:string){
       const result=await send('/v1/locations/points/read',{ownerUid:safePeer(ownerUid)},true);
