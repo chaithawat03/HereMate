@@ -1,6 +1,6 @@
 # M2 Staging candidate only. Pin digest and scan base image before deployment.
 # Build context is repository root: docker build -f backend/location-runtime/Dockerfile .
-FROM node:24-bookworm-slim
+FROM node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205
 ENV NODE_ENV=production
 WORKDIR /srv/heremate/runtime
 COPY backend/location-runtime/package.json backend/location-runtime/package-lock.json ./
