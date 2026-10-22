@@ -22,6 +22,8 @@ jobs:
       - run: node --check tests/m0.test.mjs
       - name: Verify owner-approved Guest-only trial exception, exact hashes and expiry
         run: node --test tests/security-guest-staging.test.mjs
+      - name: Test M2.0 offline privacy and no remote GPS contract
+        run: node --test tests/m2-0-location-privacy.test.mjs
       - name: Test M1 friends contracts and no GPS publishing
         run: node --test tests/m1-friends-contract.test.mjs
       - name: Test M1 UX theme/light/dark and TH/EN translation/persistence
