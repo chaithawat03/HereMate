@@ -19,7 +19,7 @@ const bindingsFor=(policy,member)=>new Set(
  (policy?.bindings||[]).filter(x=>Array.isArray(x.members)&&
  x.members.includes(member)&&!x.condition).map(x=>x.role)
 );
-export function assertM2CloudPreflight({project,region,billing,policy,ttl,runtimePolicy}){
+export function assertM2CloudPreflight({project,region,billing,policy,ttl,runtimePolicy,buildPolicy}){
  if(project!==M2_PROJECT||region!==M2_REGION)block('project or region mismatch');
  if(billing!==true)block('GCP billing is disabled or unreadable');
  if(!policy||!Array.isArray(policy.bindings))block('project IAM unavailable');
@@ -40,11 +40,14 @@ export function assertM2CloudPreflight({project,region,billing,policy,ttl,runtim
  if(!bindingsFor(runtimePolicy,'serviceAccount:'+M2_DEPLOY)
    .has('roles/iam.serviceAccountUser'))
    block('deploy identity cannot attach dedicated runtime identity');
+ if(!bindingsFor(buildPolicy,'serviceAccount:'+M2_DEPLOY)
+   .has('roles/iam.serviceAccountUser'))
+   block('deploy identity cannot attach dedicated Cloud Build identity');
  if(!Array.isArray(ttl))block('Firestore TTL list unavailable');
  for(const group of M2_COLLECTIONS){
-   const matching=ttl.filter(x=>
-    typeof x?.name==='string'&&
-    x.name.includes('/databases/(default)/collectionGroups/'+group+'/fields/expireAt'));
+   const expected='projects/'+M2_PROJECT+
+     '/databases/(default)/collectionGroups/'+group+'/fields/expireAt';
+   const matching=ttl.filter(x=>x?.name===expected);
    if(matching.length!==1 || matching[0]?.ttlConfig?.state!=='ACTIVE')
      block('Firestore expireAt TTL not ACTIVE for '+group);
  }
@@ -55,11 +58,11 @@ export function assertM2CloudPreflight({project,region,billing,policy,ttl,runtim
 if(process.argv[1]===fileURLToPath(import.meta.url)){
  try {
    const files=process.argv.slice(2);
-   if(files.length!==4)block('four reviewed read-only input snapshots required');
-   const [billing,policy,ttl,runtimePolicy]=files.map(p=>JSON.parse(readFileSync(p,'utf8')));
+   if(files.length!==5)block('five reviewed read-only input snapshots required');
+   const [billing,policy,ttl,runtimePolicy,buildPolicy]=files.map(p=>JSON.parse(readFileSync(p,'utf8')));
    const result=assertM2CloudPreflight({
      project:process.env.M2_GCP_PROJECT,region:process.env.M2_GCP_REGION,
-     billing:billing.billingEnabled,policy,ttl,runtimePolicy
+     billing:billing.billingEnabled,policy,ttl,runtimePolicy,buildPolicy
    });
    // Never emit principal details, project IAM bindings or credentials.
    process.stdout.write(JSON.stringify(result)+'\n');

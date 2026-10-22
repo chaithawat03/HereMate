@@ -24,8 +24,11 @@ function rig(){
  const runtimePolicy={bindings:[
   binding('roles/iam.serviceAccountUser',[actor(M2_DEPLOY)])
  ]};
+ const buildPolicy={bindings:[
+  binding('roles/iam.serviceAccountUser',[actor(M2_DEPLOY)])
+ ]};
  return {project:M2_PROJECT,region:M2_REGION,billing:true,
-  policy:project,ttl,runtimePolicy};
+  policy:project,ttl,runtimePolicy,buildPolicy};
 }
 test('approved project IAM, distinct runtime/build/deploy principals and ACTIVE TTL pass',()=>{
  const r=rig();const checked=assertM2CloudPreflight(r);
@@ -43,7 +46,12 @@ test('reject wrong GCP target, billing OFF, missing roles, editor and nonactive 
   {policy:{bindings:r.policy.bindings.filter(x=>x.role!=='roles/firebaseauth.viewer')}},
   {policy:{bindings:[...r.policy.bindings,{role:'roles/editor',members:[actor(M2_RUNTIME)]}]}},
   {runtimePolicy:{bindings:[]}},
+  {buildPolicy:{bindings:[]}},
+  {buildPolicy:{bindings:[{role:'roles/iam.serviceAccountUser',
+     members:[actor(M2_RUNTIME)]}]}},
   {ttl:r.ttl.filter(x=>!x.name.includes('private_location_grants'))},
+  {ttl:r.ttl.map((x,i)=>i===0?{...x,name:'projects/other-project'+
+     x.name.slice('projects/heremate'.length)}:x)},
   {ttl:r.ttl.map((x,i)=>i===0?{...x,ttlConfig:{state:'CREATING'}}:x)}
  ]) assert.throws(()=>assertM2CloudPreflight({...r,...update}),/M2_GCP_PREFLIGHT_BLOCKED/);
 });
@@ -61,6 +69,8 @@ test('new Cloud Run workflow is manual-only, guarded by GitHub variables and rev
  assert.match(workflow,/service_account: \$\{\{ vars.M2_STAGING_DEPLOY_SERVICE_ACCOUNT \}\}/);
  assert.match(workflow,/github.ref == 'refs\/heads\/main'/);
  assert.match(workflow,/verify-release.mjs verify-merge/);
+ assert.ok(workflow.includes('heremate-m2-staging/providers/github-m2-staging'));
+ assert.ok(!workflow.includes('workloadIdentityPools/*/providers/*'));
  assert.match(cloud,/--no-invoker-iam-check/);
  assert.match(cloud,/--min=0 --max=1 --concurrency=4/);
  assert.match(cloud,/--service-account='heremate-m2-runtime@heremate.iam.gserviceaccount.com'/);
@@ -69,6 +79,8 @@ test('new Cloud Run workflow is manual-only, guarded by GitHub variables and rev
  assert.match(cloud,/trap rollback_on_failure EXIT/);
  assert.match(cloud,/scripts\/m2-4-readonly-cloudrun-smoke.mjs/);
  assert.match(preflight,/m2-staging-gcp-verify.mjs/);
+ assert.ok(preflight.includes('build-policy.json'));
+ assert.ok(preflight.includes('heremate-m2-build@heremate.iam.gserviceaccount.com'));
  assert.match(old,/^  push:/m);
  assert.doesNotMatch(workflow+cloud+preflight,/gcloud iam service-accounts create|gcloud projects add-iam-policy-binding|gcloud firestore fields ttls update|EXPO_TOKEN|GOOGLE_DRIVE_REFRESH_TOKEN/);
 });

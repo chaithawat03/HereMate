@@ -63,9 +63,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$M2_DEPLOY_ACCOUNT" = 'heremate-m2-deploy@heremate.iam.gserviceaccount.com'
-          test -n "$M2_WIF_PROVIDER"
-          test "$M2_WIF_PROVIDER" != 'heremate-drive-ci@heremate.iam.gserviceaccount.com'
-          case "$M2_WIF_PROVIDER" in projects/976775896533/locations/global/workloadIdentityPools/*/providers/*) ;; *) exit 1 ;; esac
+          # Reject shared Drive WIF provider. Use dedicated provider for M2.
+          test "$M2_WIF_PROVIDER" = 'projects/976775896533/locations/global/workloadIdentityPools/heremate-m2-staging/providers/github-m2-staging'
       - name: Authenticate with short-lived WIF (NO JSON keys)
         uses: google-github-actions/auth@v3
         with:
@@ -108,6 +107,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/verify-release.mjs verify-merge
+      - name: Re-validate deploy SA and WIF provider before GCP mutation
+        env:
+          M2_DEPLOY_ACCOUNT: ${{ vars.M2_STAGING_DEPLOY_SERVICE_ACCOUNT }}
+          M2_WIF_PROVIDER: ${{ vars.M2_STAGING_WIF_PROVIDER }}
+        run: |
+          set -euo pipefail
+          test "$M2_DEPLOY_ACCOUNT" = 'heremate-m2-deploy@heremate.iam.gserviceaccount.com'
+          test "$M2_WIF_PROVIDER" = 'projects/976775896533/locations/global/workloadIdentityPools/heremate-m2-staging/providers/github-m2-staging'
       - name: Authenticate dedicated deploy workload (NOT Drive identity)
         uses: google-github-actions/auth@v3
         with:
