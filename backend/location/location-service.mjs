@@ -39,9 +39,18 @@ function verifiedPair(relation,ownerUid,viewerUid) {
        (relation.senderUid===viewerUid&&relation.recipientUid===ownerUid)) ||
      relation.senderConsent!==true||relation.recipientConsent!==true)deny();
 }
-function validGrant(grant,ownerUid,viewerUid,now) {
+function relationRevision(relation) {
+  // Firestore Timestamp has seconds+nanoseconds. Millisecond truncation
+  // can miss fast consent OFF->ON changes; M1 updates always set updatedAt.
+  const updated=relation?.updatedAt;
+  if(!Number.isSafeInteger(updated?.seconds) || updated.seconds<0 ||
+     !Number.isSafeInteger(updated?.nanoseconds) ||
+     updated.nanoseconds<0 || updated.nanoseconds>=1_000_000_000)deny();
+  return updated.seconds+':'+updated.nanoseconds;
+}
+function validGrant(grant,ownerUid,viewerUid,now,relation) {
   if(!grant||grant.ownerUid!==ownerUid||grant.viewerUid!==viewerUid||
-     grant.enabled!==true||!num(grant.expiresAtMs)||
+     grant.enabled!==true||grant.relationRevision!==relationRevision(relation)||!num(grant.expiresAtMs)||
      grant.expiresAtMs<=now||grant.expiresAtMs>now+5*60_000)deny();
 }
 function validPoint(point,now) {
@@ -95,7 +104,7 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       return tx(ownerUid,viewerUid,async ({relation,setGrant,deletePoint})=>{
         verifiedPair(relation,ownerUid,viewerUid);
         const now=time(clock);
-        setGrant({ownerUid,viewerUid,enabled:true,expiresAtMs:now+GRANT_MS,
+        setGrant({ownerUid,viewerUid,enabled:true,relationRevision:relationRevision(relation),expiresAtMs:now+GRANT_MS,
           expireAt:new Date(now+GRANT_MS)});
         deletePoint(); // Never expose a fix captured under a previous grant.
         return {enabled:true,expiresAtMs:now+GRANT_MS};
@@ -125,7 +134,7 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       return tx(ownerUid,viewerUid,async ({relation,grant,setPoint})=>{
         const now=time(clock);
         verifiedPair(relation,ownerUid,viewerUid);
-        validGrant(grant,ownerUid,viewerUid,now);
+        validGrant(grant,ownerUid,viewerUid,now,relation);
         validPoint(point,now);
         const expiresAtMs=Math.min(grant.expiresAtMs,now+FIX_MAX_AGE_MS);
         setPoint({ownerUid,viewerUid,point:{...point},expiresAtMs,
@@ -141,7 +150,7 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       return tx(ownerUid,viewerUid,async ({relation,grant,point})=>{
         const now=time(clock);
         verifiedPair(relation,ownerUid,viewerUid);
-        validGrant(grant,ownerUid,viewerUid,now);
+        validGrant(grant,ownerUid,viewerUid,now,relation);
         if(!point||point.ownerUid!==ownerUid||point.viewerUid!==viewerUid||
            !num(point.expiresAtMs)||point.expiresAtMs<=now||
            point.expiresAtMs>grant.expiresAtMs||!exactKeys(point.point,pointFields))deny();

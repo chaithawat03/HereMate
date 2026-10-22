@@ -17,6 +17,7 @@ let now=1800000000000;
 const point=()=>({latitude:13.75,longitude:100.5,accuracyMeters:12,capturedAtMs:now-1000});
 const bearer=id=>'T'.repeat(64)+id;
 const relation=(patch={})=>({schemaVersion:1,senderUid:A,recipientUid:B,
+  updatedAt:{seconds:Math.floor(now/1000),nanoseconds:0},
   senderConsent:true,recipientConsent:true,status:'accepted',...patch});
 
 // Fake Firestore transaction with tracked read-before-write order. No live Firebase,
@@ -105,8 +106,12 @@ test('server re-reads authoritative consents and friendship each operation; cann
  await x.publish();
  x.db.rows.set('friendRequests/'+pair,relation({senderConsent:false}));
  await fails(x.view());await fails(x.publish());await fails(x.start());
- x.db.rows.set('friendRequests/'+pair,relation({senderConsent:true,recipientConsent:false}));
+ x.db.rows.set('friendRequests/'+pair,relation({senderConsent:true,recipientConsent:false,updatedAt:{seconds:Math.floor(now/1000),nanoseconds:1}}));
  await fails(x.view());await fails(x.publish());
+ // Returning both consent flags to ON must not resurrect a pre-revocation grant.
+ x.db.rows.set('friendRequests/'+pair,relation({updatedAt:{seconds:Math.floor(now/1000),nanoseconds:2}}));
+ await fails(x.view());await fails(x.publish());
+ await x.start(); await x.publish(); await x.view();
  x.db.rows.set('friendRequests/'+pair,relation({status:'removed',senderConsent:false,recipientConsent:false}));
  await fails(x.view());await fails(x.start());
  // Removal does not stop an owner from clearing a stale grant.
