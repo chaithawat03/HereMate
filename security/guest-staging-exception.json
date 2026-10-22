@@ -28,7 +28,7 @@
     "firebase/firestore.rules": "4d16f74aec37ee99b65be4e4d611fd8946a6f962",
     ".github/workflows/staging-eas-build.yml": "508f4ef1eb61b30db619dad462f466f9df2fb655",
     "scripts/verify-release.mjs": "81e25e72e596a77d578d3686fa79c3a7fd5053b0",
-    "app.json": "7cdd9bb0b0d7730200d3f2526cf946d2b70f87ce",
+    "app.json": "1b6eb07e8fdda0ae57f733b885243d5da448228d",
     "src/location/LocalLocationPanel.tsx": "1efbd14aa76d0745e0364d7068139dbc75d17d9e",
     "src/location/locationLogic.ts": "7a0c63451399210df374760a89b3635efcf49533",
     "src/location/gpsLifecycle.ts": "9623d55c2110fccd5f095a19b7d32af6aa1de786",
@@ -40,6 +40,8 @@
     "google-services.json": "bda2e3ad703d4f9dd62c9faea3f5ce3b3f2a2ab0",
     "src/auth/nativeGoogleSignIn.android.ts": "efcd0f3e3be19509bf46c438ca534d8d6601635a",
     "src/auth/nativeGoogleSignIn.ts": "ca0737111e91db44d6c9586716b650c68df22344",
-    "src/config/googleStaging.ts": "76dc3a2fbfe799b3ed0b3ace932b1d772f2b38ad"
+    "src/config/googleStaging.ts": "76dc3a2fbfe799b3ed0b3ace932b1d772f2b38ad",
+    ".gitignore": "ca428526153db470bd8d76c23745b2d77c2b2236",
+    ".easignore": "ef4aa976b43bad76b6688e1c34b3010bdf0bad63"
   }
 }
