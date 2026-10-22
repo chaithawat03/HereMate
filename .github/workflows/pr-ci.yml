@@ -101,8 +101,45 @@ jobs:
             --config firebase.json \
             "node --test firebase/rules-tests/rules.test.mjs"
 
+  location-admin-emulator:
+    needs: foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install isolated pinned Admin SDK (not Expo app, not a release lockfile)
+        run: npm install --prefix backend/location-runtime --package-lock=false --ignore-scripts --no-audit --no-fund
+      - name: Verify staging boot defaults and bounded HTTP edge (offline)
+        run: |
+          node --check backend/location-runtime/main.mjs
+          node --check backend/location-runtime/edge.mjs
+          node --check backend/location-runtime/emulator.test.mjs
+          node --test backend/location-runtime/edge.test.mjs
+      - name: Real Firebase Admin Firestore transaction tests in isolated demo emulator
+        env:
+          GCLOUD_PROJECT: demo-heremate-m053
+          FIREBASE_CONFIG: '{"projectId":"demo-heremate-m053"}'
+          GOOGLE_APPLICATION_CREDENTIALS: ''
+        run: |
+          npx --yes firebase-tools@15.34.0 emulators:exec \
+            --only firestore \
+            --project demo-heremate-m053 \
+            --config firebase.json \
+            "node --test backend/location-runtime/emulator.test.mjs"
+
   mobile:
-    needs: [foundation, firestore-emulator]
+    needs: [foundation, firestore-emulator, location-admin-emulator]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

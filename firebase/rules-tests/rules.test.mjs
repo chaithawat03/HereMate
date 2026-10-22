@@ -72,8 +72,11 @@ test('M1.0 Firestore owner profile and reserved collections ACL', {timeout:60000
       await setDoc(doc(db,'friendships','pair-1'),{memberUids:['uid-owner','uid-other']});
       await setDoc(doc(db,'friend_requests','request-1'),{senderUid:'uid-owner'});
       await setDoc(doc(db,'locations','uid-owner'),{latitude:1,longitude:2});
+      await setDoc(doc(db,'private_location_grants',DIGEST),{enabled:true});
+      await setDoc(doc(db,'private_latest_locations',DIGEST),{point:{latitude:1,longitude:2}});
+      await setDoc(doc(db,'private_location_rate_limits',DIGEST),{count:1});
     });
-    const paths=[['private_phone_auth',DIGEST],['private_auth_rate_limits','auth-phone_'+DIGEST],['friendships','pair-1'],['friend_requests','request-1'],['locations','uid-owner'],['users/uid-owner/private','secret']];
+    const paths=[['private_phone_auth',DIGEST],['private_auth_rate_limits','auth-phone_'+DIGEST],['friendships','pair-1'],['friend_requests','request-1'],['locations','uid-owner'],['private_location_grants',DIGEST],['private_latest_locations',DIGEST],['private_location_rate_limits',DIGEST],['users/uid-owner/private','secret']];
     for(const db of [anon,owner,other]){
       for(const [col,id] of paths){
         const ref=doc(db,col,id);
