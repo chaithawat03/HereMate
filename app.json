@@ -14,7 +14,8 @@
     },
     "android": {
       "package": "com.chaithawat03.heremate",
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "googleServicesFile": "./google-services.json"
     },
     "extra": {
       "environment": "staging",
@@ -31,7 +32,8 @@
           "isAndroidBackgroundLocationEnabled": false,
           "isAndroidForegroundServiceEnabled": false
         }
-      ]
+      ],
+      "@react-native-google-signin/google-signin"
     ]
   }
 }
