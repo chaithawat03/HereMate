@@ -53,18 +53,30 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
         return result.granted===true;
       },
       watchForegroundFix:async(onFix,onError)=>{
+        let watching=true;
         const watcher=await Location.watchPositionAsync(
           {accuracy:Location.Accuracy.Balanced,timeInterval:10_000,distanceInterval:20},
           value=>{
-            if(!live)return;
-            const coords=value.coords;
-            const fix:ShareFix={
-              latitude:coords.latitude,longitude:coords.longitude,
-              accuracyMeters:coords.accuracy??Infinity,capturedAtMs:value.timestamp,
-            };
-            onFix(fix);
+            // Recheck the actual Android OS grant for EACH candidate fix.
+            // A foreground session or client boolean is never proof of
+            // ongoing permission after an OS Settings revocation.
+            void (async()=>{
+              if(!live||!watching)return;
+              if(AppState.currentState!=='active'||
+                 !await Location.hasServicesEnabledAsync()||
+                 !(await Location.getForegroundPermissionsAsync()).granted){
+                onError();return;
+              }
+              if(!live||!watching||AppState.currentState!=='active')return;
+              const coords=value.coords;
+              const fix:ShareFix={
+                latitude:coords.latitude,longitude:coords.longitude,
+                accuracyMeters:coords.accuracy??Infinity,capturedAtMs:value.timestamp,
+              };
+              onFix(fix);
+            })().catch(onError);
           },onError);
-        return {remove:()=>watcher.remove()};
+        return {remove:()=>{watching=false;watcher.remove();}};
       }
     });
     controller.current=ctrl;

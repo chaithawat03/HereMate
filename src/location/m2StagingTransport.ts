@@ -26,6 +26,14 @@ const fields=(obj:unknown,keys:readonly string[]):boolean=>{
 };
 const unavailable=():never=>{throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');};
 const validNumber=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
+const validFix=(p:unknown):p is ShareFix=>{
+  if(!fields(p,['latitude','longitude','accuracyMeters','capturedAtMs']))return false;
+  const v=p as Record<string,unknown>;
+  return validNumber(v.latitude)&&v.latitude>=-90&&v.latitude<=90&&
+    validNumber(v.longitude)&&v.longitude>=-180&&v.longitude<=180&&
+    validNumber(v.accuracyMeters)&&v.accuracyMeters>=0&&v.accuracyMeters<=200&&
+    validNumber(v.capturedAtMs)&&Number.isSafeInteger(v.capturedAtMs);
+};
 function validUrl(input:string):string {
   let url:URL;
   try{url=new URL(input);}catch{return unavailable();}
@@ -77,6 +85,10 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       let result:unknown;
       try{result=await response.json();}catch{return unavailable();}
       if(ports.currentIdentity()?.uid!==first.uid)unavailable();
+      // A permission revocation DURING an HTTPS request must not deliver
+      // any coordinate response to the UI after the original permission check.
+      if(requireForeground&&(!ports.isForeground()||
+         await ports.foregroundPermissionGranted()!==true))unavailable();
       return result;
     }catch{return unavailable();}
     finally{clearTimeout(timer);}
@@ -101,7 +113,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       return {enabled:false};
     },
     async publish(peerUid:string,fix:ShareFix){
-      if(!fields(fix,['latitude','longitude','accuracyMeters','capturedAtMs']))unavailable();
+      if(!validFix(fix))unavailable();
       const result=await send('/v1/locations/points/publish',{
         viewerUid:safePeer(peerUid),point:fix,
         appInForeground:true,foregroundPermissionGranted:true
@@ -115,10 +127,11 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     },
     async read(ownerUid:string){
       const result=await send('/v1/locations/points/read',{ownerUid:safePeer(ownerUid)},true);
-      if(!fields(result,['point','expiresAtMs'])||
-         !fields((result as {point:unknown}).point,
-           ['latitude','longitude','accuracyMeters','capturedAtMs']))unavailable();
-      return result as {point:ShareFix;expiresAtMs:number};
+      if(!fields(result,['point','expiresAtMs']))unavailable();
+      const row=result as {point:unknown;expiresAtMs:unknown};
+      if(!validFix(row.point)||!validNumber(row.expiresAtMs)||
+        !Number.isSafeInteger(row.expiresAtMs))unavailable();
+      return row as {point:ShareFix;expiresAtMs:number};
     }
   });
 }

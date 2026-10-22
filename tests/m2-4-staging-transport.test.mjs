@@ -10,7 +10,7 @@ const fixedNow=1_800_000_000_000;
 const point={latitude:13.5,longitude:100.2,accuracyMeters:23,capturedAtMs:fixedNow-1000};
 function rig(){
  let identity={uid:A,getIdToken:async()=>token};
- let foreground=true,permission=true,requests=[],serverMode='normal';
+ let foreground=true,permission=true,requests=[],serverMode='normal',onRespond=null;
  let startCount=0,stopCount=0,readCount=0,publishCount=0;
  const backend={
   async start({idToken,viewerUid}){
@@ -36,11 +36,15 @@ function rig(){
   requests.push({url,init});
   if(serverMode==='down')throw Error('network_offline');
   if(serverMode==='malformed')return {ok:true,status:200,json:async()=>({unexpected:true})};
+  if(serverMode==='untrustedPoint')return {ok:true,status:200,json:async()=>({
+    point:{latitude:91,longitude:100.2,accuracyMeters:23,capturedAtMs:fixedNow-1000},
+    expiresAtMs:fixedNow+20_000})};
   const route=new URL(url);
   const reply=await handleLocationHttp({
     method:init.method,path:route.pathname,contentType:init.headers['Content-Type'],
     authorization:init.headers.Authorization,bodyText:init.body
   },backend);
+  if(onRespond)await onRespond();
   return {ok:reply.status===200,status:reply.status,json:async()=>reply.body};
  };
  const ports={
@@ -54,6 +58,7 @@ function rig(){
  return {transport,ports,requests,
   setIdentity:x=>{identity=x;},setForeground:x=>{foreground=x;},
   setPermission:x=>{permission=x;},setServer:x=>{serverMode=x;},
+  setOnRespond:x=>{onRespond=x;},
   get counts(){return {startCount,stopCount,readCount,publishCount};}
  };
 }
@@ -130,4 +135,24 @@ test('mobile M2 remains strictly unmounted; no Cloud Run URL in app, no M2 EAS f
  assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_M2_MAP,undefined);
  assert.ok(code.includes("url.hostname.endsWith('.run.app')"));
  assert.doesNotMatch(code,/AsyncStorage|setDoc\(|onSnapshot|requestBackgroundPermissionsAsync|startLocationUpdatesAsync|console\.log/);
+});
+
+test('permission revoked while an HTTPS response is pending never returns a location',async()=>{
+ const r=rig();
+ r.setIdentity({uid:B,getIdToken:async()=>token});
+ let unlock,arrival;
+ const waiting=new Promise(resolve=>{unlock=resolve;});
+ const requested=new Promise(resolve=>{arrival=resolve;});
+ r.setOnRespond(async()=>{arrival();await waiting;});
+ const pending=r.transport.read(A);
+ await requested;
+ r.setPermission(false);
+ unlock();
+ await assert.rejects(pending,/UNAVAILABLE/);
+ assert.equal(r.requests.length,1);
+});
+test('location read validates numeric finite coordinates, bounds and expiry shape',async()=>{
+ const r=rig();r.setIdentity({uid:B,getIdToken:async()=>token});
+ r.setServer('untrustedPoint');
+ await assert.rejects(r.transport.read(A),/UNAVAILABLE/);
 });
