@@ -23,6 +23,16 @@ export function createNodeLocationHandler(service) {
     throw Error('location_service_unavailable');
   return async (req,res)=>{
     try {
+      // Node may collapse duplicate Authorization headers before req.headers.
+      // Fail closed on ambiguous credentials and forged request framing.
+      const raw=req.rawHeaders||[];
+      const count=name=>raw.filter((v,i)=>i%2===0&&
+        typeof v==='string'&&v.toLowerCase()===name).length;
+      if(count('authorization')!==1||count('content-length')>1||
+         (count('transfer-encoding')&&count('content-length'))){
+        reply(res,401,{error:'unauthorized'});
+        return;
+      }
       const claimedLength=req.headers['content-length'];
       if(claimedLength!==undefined &&
         (!/^[0-9]+$/.test(String(claimedLength))||Number(claimedLength)>MAX_BYTES)){

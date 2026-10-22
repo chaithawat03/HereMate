@@ -58,3 +58,31 @@ test('Node HTTP edge enforces strict body cap, Bearer header and no-store; no CO
   r=await call('',{},path,'GET');
   assert.equal(r.status,405);
 });
+
+test('duplicate Authorization request headers are denied before domain service access',async t=>{
+ let calls=0;
+ const never={
+   start:async()=>{calls++;return {enabled:true};},
+   stop:async()=>{calls++;return {enabled:false};},
+   publish:async()=>{calls++;return {stored:true};},
+   read:async()=>{calls++;return {point:null};}
+ };
+ const server=createServer(createNodeLocationHandler(never));
+ server.listen(0,'127.0.0.1');
+ await once(server,'listening');
+ t.after(()=>new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve())));
+ // Raw HTTP agent permits two Authorization header lines; Node normalizes
+ // headers but keeps rawHeaders for a conservative duplicate check.
+ const {request}=await import('node:http');
+ const result=await new Promise((resolve,reject)=>{
+   const req=request({
+     host:'127.0.0.1',port:server.address().port,
+     path:'/v1/locations/grants/start',method:'POST',
+     headers:{'Content-Type':'application/json','Authorization':['Bearer '+AUTH,'Bearer '+AUTH]}
+   },res=>{res.resume();res.on('end',()=>resolve(res.statusCode));});
+   req.on('error',reject);
+   req.end(JSON.stringify({viewerUid:B}));
+ });
+ assert.equal(result,401);
+ assert.equal(calls,0);
+});
