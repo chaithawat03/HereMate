@@ -27,3 +27,9 @@ Use **Samsung Galaxy Z Fold7** as A and **Anbernic RG406V** as B on separate sta
 
 ### Current status
 **M2.4 IN PROGRESS / BLOCKED on real server deployment and integration**, not RC-ready. None of the above hard blockers are waived by PR CI green. Do not generate an owner acceptance request until a single integrated Android Staging RC is actually available.
+
+## M2.4D: Real offline Auth-to-HTTP E2E — no release authorization (2026-10-22)
+- CI adds an isolated **Auth Emulator JWT -> actual Admin SDK `verifyIdToken(...,true)` -> Node HTTP edge -> real Admin Firestore Emulator** regression using three local test-only anonymous identities. Scenarios include Start/Publish/Read/Stop, both consent flags, stranger denial, one active publisher, disabling a signed-in account, immediate consent OFF/ON grant invalidation and private data cleanup.
+- All calls target `demo-heremate-m053` emulator only. Domain test adapters project trusted *emulator* claims into staging-shaped claims, so **real deployed project token signature verification remains NOT VERIFIED**.
+- The existing EAS build workflow remains byte-identical because the owner-approved Guest snapshot hashes it. An attempted manual-only trigger change caused the security guard to reject the diff. DO NOT rehash or waive that owner approval; request a separate reviewed reapproval when the actual signed M2 Android RC is ready. Until then avoid interim EAS builds; do not treat EAS Free quota reset as RC approval.
+- [Issue #43](https://github.com/chaithawat03/HereMate/issues/43) remains a blocking owner choice for paid Staging Cloud Run, IAM, TTL and actual E2E. No real GPS, deployed service or M2 APK was produced in this work.

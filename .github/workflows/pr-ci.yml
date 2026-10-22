@@ -166,6 +166,19 @@ jobs:
             --project demo-heremate-m053 \
             --config firebase.json \
             "node --test backend/location-runtime/auth-emulator.test.mjs"
+      - name: Real Auth Emulator JWT to Node HTTP to Admin Firestore E2E (offline only)
+        env:
+          GCLOUD_PROJECT: demo-heremate-m053
+          FIREBASE_CONFIG: '{"projectId":"demo-heremate-m053"}'
+          FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099'
+          FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080'
+          GOOGLE_APPLICATION_CREDENTIALS: ''
+        run: |
+          npx --yes firebase-tools@15.34.0 emulators:exec \
+            --only auth,firestore \
+            --project demo-heremate-m053 \
+            --config firebase.json \
+            "node --test backend/location-runtime/http-e2e-emulator.test.mjs"
 
   mobile:
     needs: [foundation, firestore-emulator, location-admin-emulator]
