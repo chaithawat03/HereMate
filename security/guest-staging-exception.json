@@ -43,7 +43,7 @@
     "src/config/googleStaging.ts": "76dc3a2fbfe799b3ed0b3ace932b1d772f2b38ad",
     ".gitignore": "ca428526153db470bd8d76c23745b2d77c2b2236",
     ".easignore": "ef4aa976b43bad76b6688e1c34b3010bdf0bad63",
-    "src/ui/preferencesModel.ts": "d455caa5df9743a22f5bb74baf5d4771d338d643",
+    "src/ui/preferencesModel.ts": "22727ee5355122884aabfcafd8aac87b939e236b",
     "src/ui/PreferencesProvider.tsx": "63d327badafb42382b3a04d5403fdd87299c0968",
     "src/friends/friendModel.ts": "4405b641fddc88524f620e2f0a93a4e1c026c710",
     "src/friends/firestoreFriends.ts": "8f2c94ec80c14a9d09d3996fec40691a72efae5f",
