@@ -30,7 +30,7 @@ test('one SafeAreaView root applies Android StatusBar inset once to Demo and Gue
   const gate=read('src/auth/GuestAuthGate.tsx');
   assert.match(app,/StatusBar\.currentHeight/);
   assert.match(app,/Platform\.OS === 'android'/);
-  assert.match(app,/SafeAreaView style=\{\[s\.root, \{ paddingTop: androidTopInset \}\]\}/);
+  assert.match(app,/SafeAreaView style=\{\{flex:1,backgroundColor:c\.background,paddingTop:androidTopInset\}\}/);
   assert.match(app,/useWindowDimensions\(\)/);
   assert.match(app,/getResponsiveLayout\(width, height\)/);
   assert.match(app,/height: mapHeight/);

@@ -20,6 +20,7 @@ const requiredFiles=[
   'src/location/LocalLocationPanel.tsx','src/location/locationLogic.ts',
   'src/location/gpsLifecycle.ts',
   'src/profile/profileModel.ts','src/profile/firestoreProfile.ts','src/profile/UserProfilePanel.tsx',
+  'src/ui/preferencesModel.ts','src/ui/PreferencesProvider.tsx',
   'src/config/firebaseStaging.ts','src/types/firebase-auth-react-native.d.ts',
   'firebase/firestore.rules','.github/workflows/staging-eas-build.yml',
   'scripts/verify-release.mjs'

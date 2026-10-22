@@ -38,5 +38,5 @@ test('foreground permission is user initiated and no remote GPS or background tr
   assert.match(panel,/AppState\.addEventListener/);
   assert.match(panel,/watchRef\.current\?\.remove\(\)/);
   assert.doesNotMatch(panel+app,/startLocationUpdatesAsync|requestBackgroundPermissionsAsync|getFirestore|getDatabase|setDoc|updateDoc|setValue/);
-  assert.match(panel,/ไม่ส่ง Firebase/);
+  assert.match(read('src/ui/preferencesModel.ts'),/ไม่ส่ง Firebase/);
 });

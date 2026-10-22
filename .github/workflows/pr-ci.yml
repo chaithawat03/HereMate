@@ -22,6 +22,8 @@ jobs:
       - run: node --check tests/m0.test.mjs
       - name: Verify owner-approved Guest-only trial exception, exact hashes and expiry
         run: node --test tests/security-guest-staging.test.mjs
+      - name: Test M1 UX theme/light/dark and TH/EN translation/persistence
+        run: node --test tests/m1-ui-preferences.test.mjs
       - name: Test M1.1 Google identity linking contract (synthetic tokens only)
         run: node --test tests/m1-1-google-account-flow.test.mjs
       - name: Verify M1.1B native Google OAuth config and rollout
