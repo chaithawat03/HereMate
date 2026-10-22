@@ -9,7 +9,7 @@ This PR adds a **Firebase Admin/Firestore transactional server code contract and
 The deployed Android APK remains M1 local-GPS only. Production and background GPS remain OFF.
 
 ## Why Firestore-only first?
-The M1 friend ledger and consents live in Firestore. A separate RTDB with direct client writes/reads cannot atomically consult Firestore consent from its own rules. M2.1 therefore uses **one Firestore transaction for every single relationship/grant/point read or write**, and no direct client access. Four records may be transactionally read: `friendRequests/{A}__{B}`, `friendRequests/{B}__{A}`, `private_location_grants/{owner}__{viewer}`, `private_latest_locations/{owner}__{viewer}`. If both directional relationship docs exist, authorization fails closed as ambiguous.
+The M1 friend ledger and consents live in Firestore. A separate RTDB with direct client writes/reads cannot atomically consult Firestore consent from its own rules. M2.1 therefore uses **one Firestore transaction for every single relationship/grant/point read or write**, and no direct client access. Five records may be transactionally read (including one owner-wide publisher lease): `friendRequests/{A}__{B}`, `friendRequests/{B}__{A}`, `private_location_grants/{owner}__{viewer}`, `private_latest_locations/{owner}__{viewer}`, `private_location_publishers/{owner}`. If both directional relationship docs exist, authorization fails closed as ambiguous.
 
 Current Firestore Rules already blanket-deny these new server-only collections to all clients; only a **future dedicated Cloud Run service identity with Firebase Admin SDK** may use them. No rules or indexes deployed in this PR.
 
@@ -44,3 +44,6 @@ Current Firestore Rules already blanket-deny these new server-only collections t
 
 ## Next gated actions (no owner device test now)
 M2.2 UI first, then dedicated Cloud Run service/infrastructure deployment only after security and cost review. Obtain owner-only setup when indispensable. Final user acceptance is ONE M2 RC on Z Fold7 and RG406V, as agreed.
+
+## M2.4 Single active publisher protection
+A fifth Firestore transaction read/write uses `private_location_publishers/{ownerUid}` to enforce one active owner + selected recipient sharing lease at a time. A second Start (even for another account session with the same UID) fails until owner Stop or expiry. M2 mobile UI currently selects ONE recipient per session; multi-recipient sharing needs separate approval/design. Both Publish and Read require matching active owner-wide lease, grant, relationship revision and expiry. Stop removes only its matching lease and cannot clear a different viewer's newer lease. Configure TTL on this fourth server-only collection before deployed Staging, enforce expiry synchronously on reads; TTL cleanup alone is insufficient.

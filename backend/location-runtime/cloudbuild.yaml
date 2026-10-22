@@ -1,0 +1,9 @@
+# REVIEW-ONLY Cloud Build candidate. Does not deploy Cloud Run or grant IAM.
+# Image substitution MUST be an approved heremate Staging Artifact Registry URL.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'backend/location-runtime/Dockerfile', '-t', '${_IMAGE}', '.']
+images:
+  - '${_IMAGE}'
+options:
+  logging: CLOUD_LOGGING_ONLY

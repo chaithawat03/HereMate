@@ -1,0 +1,23 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
+test('M2 release packaging is exact, safe and dormant until owner approval',()=>{
+ const docker=read('backend/location-runtime/Dockerfile');
+ const build=read('backend/location-runtime/cloudbuild.yaml');
+ const docs=read('docs/M2_4_STAGING_APPROVAL_GATE.md');
+ const lock=JSON.parse(read('backend/location-runtime/package-lock.json'));
+ const pkg=JSON.parse(read('backend/location-runtime/package.json'));
+ assert.equal(lock.packages[''].dependencies['firebase-admin'],pkg.dependencies['firebase-admin']);
+ assert.match(docker,/FROM node:24-bookworm-slim@sha256:[0-9a-f]{64}/);
+ assert.match(docker,/npm ci --omit=dev/);
+ assert.match(docker,/USER node/);
+ assert.ok(build.includes('gcr.io/cloud-builders/docker'));
+ assert.ok(build.includes('${_IMAGE}'));
+ assert.doesNotMatch(build,/gcloud run deploy|--allow-unauthenticated|allUsers/);
+ assert.match(docs,/private_location_publishers/);
+ assert.ok(docs.includes('M3/M4 CR #38'));
+ const app=read('App.tsx'),eas=JSON.parse(read('eas.json'));
+ assert.doesNotMatch(app,/M2SharingPanel|M2FriendLocationPanel|createM2StagingTransport/);
+ assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_M2_SHARING,undefined);
+});
