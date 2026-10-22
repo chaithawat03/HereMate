@@ -1,0 +1,10 @@
+{
+  "name": "@heremate/location-staging-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated M2.4 Firebase Admin Node runtime; never imported into Expo.",
+  "engines": {"node": ">=22.13.0"},
+  "dependencies": {"firebase-admin": "14.5.0"},
+  "scripts": {"test": "node --test edge.test.mjs"}
+}
