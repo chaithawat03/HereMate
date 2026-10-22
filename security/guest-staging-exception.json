@@ -1,6 +1,6 @@
 {
   "environment": "staging",
-  "sourceScope": "anonymous-guest-google-local-gps-private-profile-staging-only",
+  "sourceScope": "anonymous-guest-google-friends-consent-staging-only",
   "approvedOn": "2026-10-22",
   "expiresOn": "2026-11-20",
   "trackingIssue": "https://github.com/chaithawat03/HereMate/issues/12",
@@ -8,24 +8,24 @@
     {
       "id": "GHSA-vfj7-8cjw-p6xm",
       "package": "braces",
-      "reason": "Staging-only Guest and user-initiated Google native login trial with UID-safe linking, owner-private profile and local foreground GPS. No automatic account merge, remote location sharing, phone credentials or Production."
+      "reason": "Owner-authorized Android Staging Guest/Google and M1 private friend requests with per-member future consent default OFF. No live GPS sharing, phone credentials, member directory or Production."
     },
     {
       "id": "GHSA-86w9-cpqp-85rv",
       "package": "node-forge",
-      "reason": "Inherited Expo High signing advisory accepted temporarily for Android-only Google identity linking in internal staging; no production release or cross-user access."
+      "reason": "Time-limited inherited Expo signing High for Staging Android M1 friends trial only; no production or location publishing."
     }
   ],
   "sourceHashes": {
-    "App.tsx": "9c93ea9eac46cb2ac4bb27630a7e10569e2084e9",
-    "eas.json": "af6853a36f832e50810410d8701c7933aee96d5d",
+    "App.tsx": "383a7f95f7702ba491914c01f8d977025cef2368",
+    "eas.json": "d156a37fddab3e085cde88856e033457c3fd855a",
     "package.json": "373a1ac3c384c47722ec8abb39470b3fcf2d77d8",
     "package-lock.json": "9cdcef18e61195415c7bf26b85e5bbf217be4e56",
     "src/auth/firebaseGuest.ts": "3e6b8656b79b17c419cbd12041b9aa17bea3b4f4",
     "src/auth/GuestAuthGate.tsx": "8c22f95d060290f6b5a0a3850d7ec49763f3d5cd",
     "src/config/firebaseStaging.ts": "cb9bc13e938e0066c1903488a912ea644545fcbf",
     "src/types/firebase-auth-react-native.d.ts": "f3d93ec8d12a535516d87fa9eba07e1eed29bfc6",
-    "firebase/firestore.rules": "4d16f74aec37ee99b65be4e4d611fd8946a6f962",
+    "firebase/firestore.rules": "bbbd9c7e95c9a74a93404725b7b3fbea01617ede",
     ".github/workflows/staging-eas-build.yml": "508f4ef1eb61b30db619dad462f466f9df2fb655",
     "scripts/verify-release.mjs": "81e25e72e596a77d578d3686fa79c3a7fd5053b0",
     "app.json": "1b6eb07e8fdda0ae57f733b885243d5da448228d",
@@ -43,7 +43,10 @@
     "src/config/googleStaging.ts": "76dc3a2fbfe799b3ed0b3ace932b1d772f2b38ad",
     ".gitignore": "ca428526153db470bd8d76c23745b2d77c2b2236",
     ".easignore": "ef4aa976b43bad76b6688e1c34b3010bdf0bad63",
-    "src/ui/preferencesModel.ts": "bc6223d9388a55d8c8fe2c38cf198c1fd48c91f1",
-    "src/ui/PreferencesProvider.tsx": "63d327badafb42382b3a04d5403fdd87299c0968"
+    "src/ui/preferencesModel.ts": "d455caa5df9743a22f5bb74baf5d4771d338d643",
+    "src/ui/PreferencesProvider.tsx": "63d327badafb42382b3a04d5403fdd87299c0968",
+    "src/friends/friendModel.ts": "4405b641fddc88524f620e2f0a93a4e1c026c710",
+    "src/friends/firestoreFriends.ts": "8f2c94ec80c14a9d09d3996fec40691a72efae5f",
+    "src/friends/FriendsPanel.tsx": "36b2842daa3eb159ea9ac4e741c20b9a1c46afee"
   }
 }

@@ -21,13 +21,14 @@ const requiredFiles=[
   'src/location/gpsLifecycle.ts',
   'src/profile/profileModel.ts','src/profile/firestoreProfile.ts','src/profile/UserProfilePanel.tsx',
   'src/ui/preferencesModel.ts','src/ui/PreferencesProvider.tsx',
+  'src/friends/friendModel.ts','src/friends/firestoreFriends.ts','src/friends/FriendsPanel.tsx',
   'src/config/firebaseStaging.ts','src/types/firebase-auth-react-native.d.ts',
   'firebase/firestore.rules','.github/workflows/staging-eas-build.yml',
   'scripts/verify-release.mjs'
 ].sort();
 export function verifyGuestSnapshot(policy,root=new URL('../',import.meta.url)){
   if(policy?.environment!=='staging' ||
-     policy?.sourceScope!=='anonymous-guest-google-local-gps-private-profile-staging-only' ||
+     policy?.sourceScope!=='anonymous-guest-google-friends-consent-staging-only' ||
      policy?.approvedOn!=='2026-10-22' ||
      policy?.expiresOn!=='2026-11-20' ||
      policy?.trackingIssue!=='https://github.com/chaithawat03/HereMate/issues/12')
@@ -44,7 +45,7 @@ export function evaluateGuestAudit(report,policy,now,app,eas){
   if(report?.auditReportVersion!==2||!report.vulnerabilities||!report.metadata?.vulnerabilities||report.error)
     error('npm audit v2 unavailable/invalid');
   if(policy?.environment!=='staging' ||
-    policy?.sourceScope!=='anonymous-guest-google-local-gps-private-profile-staging-only' ||
+    policy?.sourceScope!=='anonymous-guest-google-friends-consent-staging-only' ||
     policy?.expiresOn!=='2026-11-20' ||
     !Array.isArray(policy.allowed)||policy.allowed.length!==approvedRoot.size)
     error('not the approved Guest-only policy');
@@ -67,12 +68,15 @@ export function evaluateGuestAudit(report,policy,now,app,eas){
      guest?.env?.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST!=='true' ||
      guest?.env?.EXPO_PUBLIC_ENABLE_LOCAL_GPS!=='true' ||
      guest?.env?.EXPO_PUBLIC_ENABLE_M1_PROFILE!=='true' ||
+     guest?.env?.EXPO_PUBLIC_ENABLE_M1_FRIENDS!=='true' ||
      guest?.env?.EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN!=='true' ||
      eas?.build?.['ios-guest-simulator']?.env?.EXPO_PUBLIC_ENABLE_M1_PROFILE!=='true' ||
      eas?.build?.['ios-guest-simulator']?.env?.EXPO_PUBLIC_ENABLE_LOCAL_GPS!=='true' ||
      eas?.build?.['android-preview']?.env?.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST!==undefined ||
      eas?.build?.['android-preview']?.env?.EXPO_PUBLIC_ENABLE_LOCAL_GPS!==undefined ||
      eas?.build?.['android-preview']?.env?.EXPO_PUBLIC_ENABLE_M1_PROFILE!==undefined ||
+     eas?.build?.['android-preview']?.env?.EXPO_PUBLIC_ENABLE_M1_FRIENDS!==undefined ||
+     eas?.build?.['ios-guest-simulator']?.env?.EXPO_PUBLIC_ENABLE_M1_FRIENDS!==undefined ||
      eas?.build?.['android-preview']?.env?.EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN!==undefined ||
      eas?.build?.['ios-guest-simulator']?.env?.EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN!==undefined ||
      !eas?.build?.['ios-guest-simulator']?.ios?.simulator)

@@ -31,8 +31,114 @@ service cloud.firestore {
         && request.resource.data.updatedAt == request.time;
       allow delete: if false;
     }
-    // Reserved future M1.2/M1.3 friendship and M2 live-position collections,
-    // plus private Phone+Password backend data: NEVER readable by clients yet.
+    // M1.2–M1.4: one directed request document doubles as the durable
+    // accepted-friend ledger. No public member search, no GPS, no side channels.
+    function signedIn() {return request.auth != null;}
+    function participant(data) {
+      return signedIn() &&
+        (request.auth.uid == data.senderUid || request.auth.uid == data.recipientUid);
+    }
+    function profilePath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+    function validFriendData(data,id) {
+      return data.keys().hasAll([
+          'schemaVersion','senderUid','recipientUid','senderDisplayName',
+          'recipientDisplayName','status','senderConsent','recipientConsent',
+          'createdAt','updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'schemaVersion','senderUid','recipientUid','senderDisplayName',
+          'recipientDisplayName','status','senderConsent','recipientConsent',
+          'createdAt','updatedAt'
+        ]) &&
+        data.schemaVersion == 1 &&
+        data.senderUid is string && data.senderUid.size() >= 12 && data.senderUid.size() <= 128 &&
+        data.recipientUid is string && data.recipientUid.size() >= 12 && data.recipientUid.size() <= 128 &&
+        data.senderUid != data.recipientUid &&
+        id == data.senderUid + '__' + data.recipientUid &&
+        data.senderDisplayName is string &&
+        data.senderDisplayName.size() >= 2 && data.senderDisplayName.size() <= 32 &&
+        data.recipientDisplayName is string && data.recipientDisplayName.size() <= 32 &&
+        data.status in ['pending','accepted','declined','cancelled','removed'] &&
+        data.senderConsent is bool && data.recipientConsent is bool &&
+        data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+    function immutableFriendFields() {
+      return request.resource.data.senderUid == resource.data.senderUid &&
+        request.resource.data.recipientUid == resource.data.recipientUid &&
+        request.resource.data.senderDisplayName == resource.data.senderDisplayName &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.schemaVersion == resource.data.schemaVersion &&
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status','recipientDisplayName','senderConsent','recipientConsent','updatedAt'
+        ]);
+    }
+    function receivePending() {
+      return request.auth.uid == resource.data.recipientUid &&
+        resource.data.status == 'pending' &&
+        request.resource.data.senderConsent == false &&
+        request.resource.data.recipientConsent == false &&
+        request.resource.data.status in ['accepted','declined'] &&
+        (
+          (request.resource.data.status == 'accepted' &&
+            request.resource.data.recipientDisplayName ==
+              get(profilePath(resource.data.recipientUid)).data.displayName) ||
+          (request.resource.data.status == 'declined' &&
+            request.resource.data.recipientDisplayName == resource.data.recipientDisplayName)
+        );
+    }
+    function cancelPending() {
+      return request.auth.uid == resource.data.senderUid &&
+        resource.data.status == 'pending' &&
+        request.resource.data.status == 'cancelled' &&
+        request.resource.data.recipientDisplayName == resource.data.recipientDisplayName &&
+        request.resource.data.senderConsent == false &&
+        request.resource.data.recipientConsent == false;
+    }
+    function removeAccepted() {
+      return resource.data.status == 'accepted' &&
+        request.resource.data.status == 'removed' &&
+        request.resource.data.recipientDisplayName == resource.data.recipientDisplayName &&
+        request.resource.data.senderConsent == false &&
+        request.resource.data.recipientConsent == false;
+    }
+    function updateOwnConsent() {
+      return resource.data.status == 'accepted' &&
+        request.resource.data.status == 'accepted' &&
+        request.resource.data.recipientDisplayName == resource.data.recipientDisplayName &&
+        (
+          (request.auth.uid == resource.data.senderUid &&
+            request.resource.data.recipientConsent == resource.data.recipientConsent) ||
+          (request.auth.uid == resource.data.recipientUid &&
+            request.resource.data.senderConsent == resource.data.senderConsent)
+        );
+    }
+    match /friendRequests/{pairId} {
+      allow get, list: if participant(resource.data);
+      allow create: if signedIn() &&
+        validFriendData(request.resource.data,pairId) &&
+        request.auth.uid == request.resource.data.senderUid &&
+        exists(profilePath(request.resource.data.senderUid)) &&
+        exists(profilePath(request.resource.data.recipientUid)) &&
+        request.resource.data.senderDisplayName ==
+          get(profilePath(request.resource.data.senderUid)).data.displayName &&
+        request.resource.data.recipientDisplayName == '' &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.senderConsent == false &&
+        request.resource.data.recipientConsent == false &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.updatedAt == request.time;
+      allow update: if participant(resource.data) &&
+        validFriendData(request.resource.data,pairId) &&
+        immutableFriendFields() &&
+        (receivePending() || cancelPending() || removeAccepted() || updateOwnConsent());
+      allow delete: if false;
+    }
+    // Historical private credential/legacy friendship collections remain denied.
+    // M2 location feeds, all user subcollections and arbitrary paths remain denied.
+
     match /{document=**} {
       allow read, write: if false;
     }
