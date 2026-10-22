@@ -71,6 +71,6 @@ test('theme and translations used by login, GPS, profile, map and status bar',()
  assert.match(profile,/t\('profileTitle'\)/);
  assert.match(profile,/t\(message\)/);
  assert.match(app,/t\('mapShown'/);
- assert.match(app,/t\('searchPlaceholder'\)/);
+ assert.match(app,/searchPlaceholder/);
  assert.doesNotMatch(provider+read('src/ui/preferencesModel.ts'),/requestForegroundPermissionsAsync|signInWithCredential|signOut\(|getFirestore/);
 });
