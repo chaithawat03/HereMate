@@ -39,8 +39,12 @@ gcloud projects get-iam-policy heremate --format=json > "$tmp/project-policy.jso
 gcloud iam service-accounts get-iam-policy \
   heremate-m2-runtime@heremate.iam.gserviceaccount.com \
   --project=heremate --format=json > "$tmp/runtime-policy.json"
+# Verify separate iam.serviceAccounts.actAs on the Cloud Build identity.
+gcloud iam service-accounts get-iam-policy \
+  heremate-m2-build@heremate.iam.gserviceaccount.com \
+  --project=heremate --format=json > "$tmp/build-policy.json"
 gcloud firestore fields ttls list --project=heremate \
   --database='(default)' --format=json > "$tmp/ttl.json"
 node scripts/m2-staging-gcp-verify.mjs \
   "$tmp/billing.json" "$tmp/project-policy.json" \
-  "$tmp/ttl.json" "$tmp/runtime-policy.json"
+  "$tmp/ttl.json" "$tmp/runtime-policy.json" "$tmp/build-policy.json"
