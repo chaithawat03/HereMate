@@ -122,6 +122,16 @@ jobs:
         run: npm ci --prefix backend/location-runtime --ignore-scripts --no-audit --no-fund
       - name: Audit standalone Firebase Admin runtime for High/Critical advisories
         run: npm audit --prefix backend/location-runtime --omit=dev --audit-level=high
+      - name: Build isolated Staging runtime container (NO deploy/no credentials)
+        run: |
+          docker build -f backend/location-runtime/Dockerfile -t heremate-m2-ci .
+          docker run --rm --entrypoint node heremate-m2-ci --check main.mjs
+          if docker run --rm heremate-m2-ci; then
+            echo "Unexpected unguarded location server startup" >&2
+            exit 1
+          fi
+      - name: Record Node base manifest digest for later explicit pin/review
+        run: docker buildx imagetools inspect node:24-bookworm-slim | grep '^Digest:'
       - name: Verify staging boot defaults and bounded HTTP edge (offline)
         run: |
           node --check backend/location-runtime/main.mjs
