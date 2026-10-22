@@ -127,7 +127,10 @@ test('real emulated JWT+HTTP+Admin Firestore positive and privacy negative E2E',
     assert.equal(viewed.body.point.longitude,0);
     assert.ok(viewed.body.expiresAtMs<=started.body.expiresAtMs);
     assert.equal((await call(stranger,'read',{ownerUid:owner.uid})).status,404);
-    assert.equal((await call(stranger,'stop',{viewerUid:viewer.uid})).status,404);
+    // STOP intentionally returns an idempotent success for its OWN actor pair,
+    // even without a friendship. Stranger cannot revoke the owner's lease.
+    assert.equal((await call(stranger,'stop',{viewerUid:viewer.uid})).status,200);
+    assert.equal((await call(viewer,'read',{ownerUid:owner.uid})).status,200);
     assert.equal((await call(viewer,'publish',{
       viewerUid:owner.uid,point:fix(),
       appInForeground:true,foregroundPermissionGranted:true
