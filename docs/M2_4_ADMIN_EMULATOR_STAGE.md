@@ -21,3 +21,14 @@ Cloud Run IAM does not natively treat a Firebase user ID token as its service-in
 4. Only then mount the Android panels in a reviewed Staging-only PR and prepare ONE signed, SHA-verified M2 RC for Z Fold7 + RG406V. No interim owner APK request.
 
 All M3 background, iOS cross-platform and M4 geofencing/history requests remain **proposal-only** in #38.
+
+## M2.4A additional Auth Emulator gate
+- A separate `auth-emulator.test.mjs` test calls the **actual** Firebase Admin `verifyIdToken(idToken,true)`, with an anonymous Auth Emulator ID token. It checks valid claims and rejection after disabling and revoking the synthetic account. This validates integration with emulator identity, **NOT Google's production token-signature trust**.
+- The entire job requires `GCLOUD_PROJECT=demo-heremate-m053`, `FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099`, `FIRESTORE_EMULATOR_HOST=127.0.0.1:8080`, and empty `GOOGLE_APPLICATION_CREDENTIALS`. The real Cloud Run runtime explicitly rejects both emulator variables. No Firebase real project calls from tests.
+
+## Cloud Run invoker decision pending
+The existing mobile M2.4 client sends a **Firebase Auth ID token**, which does *not* meet the Google IAM `roles/run.invoker` OIDC-token requirement for private Cloud Run invocation. A security review must choose and document **one**:
+1. An explicitly owner-approved, publicly invokable **Staging-only** HTTPS Cloud Run endpoint that independently validates Firebase ID tokens using Admin SDK on every request, with request ceilings, abuse controls, minimized logs, careful per-recipient authorization, TTL, and budget alarms. Public *invocation* is not public access to location data; security depends on application-level authentication and authorization.
+2. A controlled gateway/proxy that itself authenticates client Firebase tokens, limits abuse and invokes private Cloud Run using its own workload identity. Evaluate gateway operational complexity and cost before making it an M2 release requirement.
+
+Do **not** mark `roles/run.invoker` as satisfied by a Firebase user token, open access implicitly, disable token validation, or create/deploy resources under this PR. Region, least privilege, IAM and cost are still owner-reviewed release blockers.
