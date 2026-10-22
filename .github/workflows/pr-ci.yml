@@ -28,6 +28,8 @@ jobs:
         run: node --test tests/m2-4-release-packaging.test.mjs
       - name: Test M2.4C Android integration remains unmounted until secure Staging approval
         run: node --test tests/m2-4c-android-integration-gate.test.mjs
+      - name: Test approval-gated read-only Cloud Run Staging smoke without network
+        run: node --test tests/m2-4e-readonly-smoke.test.mjs
       - name: Test M2.3 authorized real friend map and status privacy (offline)
         run: node --test tests/m2-3-friend-map-privacy.test.mjs
       - name: Test M2.2 foreground-only sharing and remote stop lifecycle (offline)
