@@ -93,6 +93,21 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   assert.equal((await raw.collection('private_location_publishers').doc(A).get()).exists,false);
   await assert.rejects(read(),LocationDenied);
 
+  // Cross-recipient competing STARTs on the same owner-wide lease must not both commit.
+  await raw.collection('friendRequests').doc(A+'__'+C).set(relation(A,C));
+  const competing=await Promise.allSettled([
+    svc.start({idToken:bearer(A),viewerUid:B}),
+    svc.start({idToken:bearer(A),viewerUid:C})
+  ]);
+  assert.equal(competing.filter(x=>x.status==='fulfilled').length,1);
+  assert.equal(competing.filter(x=>x.status==='rejected').length,1);
+  const leaseSnap=await raw.collection('private_location_publishers').doc(A).get();
+  assert.equal(leaseSnap.exists,true);
+  assert.ok([B,C].includes(leaseSnap.data().viewerUid));
+  assert.ok(leaseSnap.data().expireAt instanceof Timestamp);
+  await svc.stop({idToken:bearer(A),viewerUid:leaseSnap.data().viewerUid});
+  assert.equal((await raw.collection('private_location_publishers').doc(A).get()).exists,false);
+
   // Separate actor checks actual persisted Firestore rate-limit transactions.
   for(let i=0;i<6;i++) {
     await svc.start({idToken:bearer(D),viewerUid:C});
