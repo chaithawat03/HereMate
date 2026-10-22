@@ -150,3 +150,10 @@ jobs:
         run: node scripts/report-guest-dependency-audit.mjs
       - name: Audit dependencies with approved M0.1 staging exception only
         run: node scripts/check-staging-audit.mjs
+      - name: Android native config plugin prebuild smoke (no cloud credentials)
+        env:
+          CI: '1'
+          EXPO_PUBLIC_ENVIRONMENT: staging
+          EXPO_PUBLIC_ENABLE_FIREBASE_GUEST: 'true'
+          EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN: 'true'
+        run: ./node_modules/.bin/expo prebuild --platform android --no-install --clean
