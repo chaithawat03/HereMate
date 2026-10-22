@@ -50,3 +50,16 @@ test('native Android picker is user-initiated and passes token only to Firebase 
   assert.match(fallback,/GOOGLE_SIGNIN_ANDROID_ONLY/);
   assert.doesNotMatch(native+gate,/console\.log|console\.error|AsyncStorage|setDoc|updateDoc|requestBackgroundPermissions|startLocationUpdatesAsync|serverAuthCode/);
 });
+
+test('EAS uploads Firebase client config while continuing to exclude credentials',()=>{
+  const ignore=read('.gitignore').trimEnd().split(/\r?\n/);
+  const archiveRules=read('.easignore').trimEnd().split(/\r?\n/);
+  assert.ok(ignore.includes('google-services.json'));
+  for(const rule of ignore.filter(line=>line && !line.startsWith('#'))) assert.ok(archiveRules.includes(rule), 'Missing original ignore rule: '+rule);
+  const active=archiveRules.filter(line=>line && !line.startsWith('#'));
+  assert.equal(active.at(-1),'!google-services.json');
+  assert.ok(active.lastIndexOf('!google-services.json') > active.lastIndexOf('google-services.json'));
+  assert.ok(!active.some(rule=>rule==='!*.pem' || rule==='!.env' || rule==='!*.keystore'));
+  assert.equal(JSON.parse(read('google-services.json')).project_info.project_id,'heremate');
+  assert.equal(app.expo.newArchEnabled,undefined); // SDK 57 schema rejects this old property.
+});

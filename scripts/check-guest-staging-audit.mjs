@@ -12,7 +12,7 @@ const approvedRoot=new Map([
   ['GHSA-86w9-cpqp-85rv','node-forge']
 ]);
 const requiredFiles=[
-  'App.tsx','app.json','eas.json','package.json','package-lock.json',
+  'App.tsx','app.json','.gitignore','.easignore','eas.json','package.json','package-lock.json',
   'src/auth/firebaseGuest.ts','src/auth/GuestAuthGate.tsx',
   'src/auth/googleAccountFlow.ts','src/auth/googleAccountFirebase.ts',
   'src/auth/nativeGoogleSignIn.ts','src/auth/nativeGoogleSignIn.android.ts',
