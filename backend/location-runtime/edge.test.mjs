@@ -55,7 +55,7 @@ test('Node HTTP edge enforces strict body cap, Bearer header and no-store; no CO
   assert.deepEqual(await r.json(),{error:'payload_too_large'});
   r=await call(JSON.stringify({viewerUid:B,extra:1}),{Authorization:'Bearer '+AUTH});
   assert.equal(r.status,400);
-  r=await call('',{},path,'GET');
+  r=await call('',{Authorization:'Bearer '+AUTH},path,'GET');
   assert.equal(r.status,405);
 });
 
