@@ -30,17 +30,20 @@ export function createFirestoreLocationStore(db) {
         doc(db,'friendRequests',viewerUid+'__'+ownerUid),
         doc(db,'private_location_grants',pair),
         doc(db,'private_latest_locations',pair),
+        doc(db,'private_location_publishers',ownerUid),
       ];
       return db.runTransaction(async tx=>{
         // Firestore transactions require ALL reads before ANY writes.
         // Concurrent M1 acceptance/consent/removal updates cause a retry.
-        const [forward,reverse,grant,point]=await Promise.all(refs.map(x=>tx.get(x)));
+        const [forward,reverse,grant,point,publisher]=await Promise.all(refs.map(x=>tx.get(x)));
         const relevant=[view(forward),view(reverse)].filter(Boolean);
         // Ambiguous bidirectional relationship records are denied, never merged.
         const relation=relevant.length===1?relevant[0]:null;
         const changes=[];
         const outcome=await work({
-          relation,grant:view(grant),point:view(point),
+          relation,grant:view(grant),point:view(point),publisher:view(publisher),
+          setPublisher:data=>changes.push(['set',refs[4],data]),
+          deletePublisher:()=>changes.push(['delete',refs[4]]),
           setGrant:data=>changes.push(['set',refs[2],data]),
           deleteGrant:()=>changes.push(['delete',refs[2]]),
           setPoint:data=>changes.push(['set',refs[3],data]),

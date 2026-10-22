@@ -111,6 +111,7 @@ test('server re-reads authoritative consents and friendship each operation; cann
  // Returning both consent flags to ON must not resurrect a pre-revocation grant.
  x.db.rows.set('friendRequests/'+pair,relation({updatedAt:{seconds:Math.floor(now/1000),nanoseconds:2}}));
  await fails(x.view());await fails(x.publish());
+ await x.stop();
  await x.start(); await x.publish(); await x.view();
  x.db.rows.set('friendRequests/'+pair,relation({status:'removed',senderConsent:false,recipientConsent:false}));
  await fails(x.view());await fails(x.start());
@@ -158,10 +159,42 @@ test('ambiguous opposite-direction relationships deny instead of merging consent
 });
 test('persisted per-actor/per-route rate limiting is durable and bounded',async()=>{
  const x=setup();
- for(let i=0;i<6;i++)await x.start();
+ for(let i=0;i<6;i++){await x.start();await x.stop();}
  await fails(x.start(),LocationLimited);
  assert.ok([...x.db.rows.keys()].some(k=>k.startsWith('private_location_rate_limits/')));
  assert.ok(![...x.db.rows.keys()].some(k=>k.includes(A)&&k.startsWith('private_location_rate_limits/')));
+});
+test('one owner-wide live publisher lease is transactional; other peer and duplicate Start denied',async()=>{
+ const x=setup();
+ const second='m2vieweruid00000004';
+ x.db.rows.set('friendRequests/'+A+'__'+second,relation({recipientUid:second}));
+ await x.start();
+ assert.equal(x.db.rows.get('private_location_publishers/'+A).viewerUid,B);
+ await fails(x.start()); // No second publisher even for the same recipient.
+ await fails(x.svc.start({idToken:bearer(A),viewerUid:second}));
+ await x.publish();
+ await x.view();
+ // A stale STOP for unrelated recipient must not terminate the current lease.
+ await x.svc.stop({idToken:bearer(A),viewerUid:second});
+ assert.equal(x.db.rows.get('private_location_publishers/'+A).viewerUid,B);
+ await x.view();
+ await x.stop();
+ assert.equal(x.db.rows.has('private_location_publishers/'+A),false);
+ const next=await x.svc.start({idToken:bearer(A),viewerUid:second});
+ assert.equal(next.enabled,true);
+ await fails(x.view()); // Previous viewer has no active grant or lease.
+});
+test('expired publisher lease does not survive new grant despite delayed Firestore TTL',async()=>{
+ const x=setup();
+ await x.start();
+ await x.publish();
+ now+=GRANT_MS+1;
+ await fails(x.view());
+ await fails(x.publish());
+ const restarted=await x.start();
+ assert.equal(restarted.enabled,true);
+ // Previous point deleted on fresh START; no location resurrects.
+ await fails(x.view());
 });
 test('HTTP boundary requires bearer, exact payloads, size and no credential leaks',async()=>{
  const x=setup();
@@ -196,4 +229,5 @@ test('strict separation: backend offline-only, no mobile GPS publishing or Fireb
  assert.match(adapter,/private_latest_locations/);
  assert.match(adapter,/private_location_grants/);
  assert.match(adapter,/private_location_rate_limits/);
+ assert.match(adapter,/private_location_publishers/);
 });

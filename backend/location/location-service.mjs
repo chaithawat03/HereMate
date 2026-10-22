@@ -53,6 +53,11 @@ function validGrant(grant,ownerUid,viewerUid,now,relation) {
      grant.enabled!==true||grant.relationRevision!==relationRevision(relation)||!num(grant.expiresAtMs)||
      grant.expiresAtMs<=now||grant.expiresAtMs>now+5*60_000)deny();
 }
+function validPublisher(publisher,ownerUid,viewerUid,now,grant) {
+  if(!publisher || publisher.ownerUid!==ownerUid ||
+    publisher.viewerUid!==viewerUid || !num(publisher.expiresAtMs) ||
+    publisher.expiresAtMs<=now || publisher.expiresAtMs!==grant.expiresAtMs)deny();
+}
 function validPoint(point,now) {
   if(!exactKeys(point,pointFields)||
      !num(point.latitude)||point.latitude< -90||point.latitude>90||
@@ -92,7 +97,7 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
     if(accepted!==true)throw new LocationLimited();
   }
   function tx(ownerUid,viewerUid,work) {
-    // All friend, grant and point reads occur within ONE Firestore transaction.
+    // All friend, grant, point and owner-wide publisher-lease reads occur in ONE Firestore transaction.
     return store.transactPair({ownerUid,viewerUid},work);
   }
   return Object.freeze({
@@ -101,11 +106,18 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       assertUid(viewerUid);
       if(ownerUid===viewerUid)deny();
       await limit(ownerUid,'start');
-      return tx(ownerUid,viewerUid,async ({relation,setGrant,deletePoint})=>{
+      return tx(ownerUid,viewerUid,async ({relation,publisher,setGrant,setPublisher,deletePoint})=>{
         verifiedPair(relation,ownerUid,viewerUid);
         const now=time(clock);
-        setGrant({ownerUid,viewerUid,enabled:true,relationRevision:relationRevision(relation),expiresAtMs:now+GRANT_MS,
-          expireAt:new Date(now+GRANT_MS)});
+        // A single owner account may have ONE foreground publisher/viewer pair
+        // at a time in M2. Staging UI selects exactly one recipient per session.
+        // The common owner-wide Firestore doc makes competing STARTs race-safe.
+        if(publisher && (!num(publisher.expiresAtMs) ||
+          publisher.expiresAtMs>now))deny();
+        const expiresAtMs=now+GRANT_MS;
+        setPublisher({ownerUid,viewerUid,expiresAtMs,expireAt:new Date(expiresAtMs)});
+        setGrant({ownerUid,viewerUid,enabled:true,relationRevision:relationRevision(relation),expiresAtMs,
+          expireAt:new Date(expiresAtMs)});
         deletePoint(); // Never expose a fix captured under a previous grant.
         return {enabled:true,expiresAtMs:now+GRANT_MS};
       });
@@ -116,9 +128,12 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       if(ownerUid===viewerUid)deny();
       await limit(ownerUid,'stop');
       // Always allow authenticated owner to revoke, even if friendship was removed.
-      return tx(ownerUid,viewerUid,async ({deleteGrant,deletePoint})=>{
+      return tx(ownerUid,viewerUid,async ({publisher,deletePublisher,deleteGrant,deletePoint})=>{
         deleteGrant();
         deletePoint();
+        // Never delete another recipient's newer lease on a delayed Stop.
+        if(publisher?.ownerUid===ownerUid &&
+           publisher?.viewerUid===viewerUid)deletePublisher();
         return {enabled:false};
       });
     },
@@ -131,10 +146,11 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       // they are additional local gates, never substitutes for server consent.
       if(appInForeground!==true||foregroundPermissionGranted!==true)deny();
       if(!exactKeys(point,pointFields))invalid();
-      return tx(ownerUid,viewerUid,async ({relation,grant,setPoint})=>{
+      return tx(ownerUid,viewerUid,async ({relation,grant,publisher,setPoint})=>{
         const now=time(clock);
         verifiedPair(relation,ownerUid,viewerUid);
         validGrant(grant,ownerUid,viewerUid,now,relation);
+        validPublisher(publisher,ownerUid,viewerUid,now,grant);
         validPoint(point,now);
         const expiresAtMs=Math.min(grant.expiresAtMs,now+FIX_MAX_AGE_MS);
         setPoint({ownerUid,viewerUid,point:{...point},expiresAtMs,
@@ -147,10 +163,11 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       assertUid(ownerUid);
       if(ownerUid===viewerUid)deny();
       await limit(viewerUid,'read');
-      return tx(ownerUid,viewerUid,async ({relation,grant,point})=>{
+      return tx(ownerUid,viewerUid,async ({relation,grant,point,publisher})=>{
         const now=time(clock);
         verifiedPair(relation,ownerUid,viewerUid);
         validGrant(grant,ownerUid,viewerUid,now,relation);
+        validPublisher(publisher,ownerUid,viewerUid,now,grant);
         if(!point||point.ownerUid!==ownerUid||point.viewerUid!==viewerUid||
            !num(point.expiresAtMs)||point.expiresAtMs<=now||
            point.expiresAtMs>grant.expiresAtMs||!exactKeys(point.point,pointFields))deny();

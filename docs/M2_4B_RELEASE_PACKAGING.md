@@ -11,10 +11,13 @@ Tracks M2 #34. Cross-platform M3/M4 CR #38 is not approved.
 1. Explicit Staging `heremate` project/region/billing approval and dedicated Cloud Run service identity with only Firestore least-privilege access; no reuse of the existing Drive CI identity.
 2. Decide public HTTPS app-authenticated endpoint vs private Cloud Run gateway, including token checks and mitigations for *unauthenticated invocation costs*. Firebase client ID tokens are not Cloud Run IAM invoker tokens.
 3. Cloud Run service needs a named approved origin pinned into Android, runtime logging policy, max instances/request timeout/budget alarms; no Production.
-4. Enable Firestore TTL on `private_location_grants`, `private_latest_locations`, `private_location_rate_limits` and any future active-publisher lease; server must always reject expired data at read time.
+4. Enable Firestore TTL on `private_location_grants`, `private_latest_locations`, `private_location_rate_limits` and the M2.4 owner-wide `private_location_publishers` lease; server must always reject expired data at read time.
 5. Complete one-active-publisher/account enforcement, actual live Staging Auth/Firestore tests, consent/revocation and cross-account negative E2E.
 6. Only then separately enable Android Staging M2 UI, create SHA-pinned APK and private Drive artifact, and ask owner for ONE physical Z Fold7 / RG406V acceptance.
 
 This document does **not** approve resource creation or location transport activation.
 
 Verified Docker Hub Node 24 multi-architecture manifest digest at CI build time: `sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205`. A digest is integrity pinning, not proof of vulnerability-free OS packages.
+
+## Single publisher / single target in M2
+Staging M2 explicitly permits only **one active recipient per owner account at a time**, matching the current one-choice mobile UI and ensuring different logged-in devices using the same UID cannot hold simultaneous publisher leases. The owner-wide lease is read/written in the same Firestore transaction as grants/points. Competing start requests cannot both commit. This narrows concurrency intentionally; full multi-friend concurrent publication is outside M2 and requires a separate security/privacy review.

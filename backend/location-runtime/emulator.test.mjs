@@ -83,16 +83,21 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   await relRef.update({recipientConsent:true,updatedAt:stamp(now+2)});
   await assert.rejects(read(),LocationDenied);
   await assert.rejects(pub(),LocationDenied);
+  await svc.stop({idToken:bearer(A),viewerUid:B});
   await start();
   await pub();
   assert.deepEqual((await read()).point,fix);
   await svc.stop({idToken:bearer(A),viewerUid:B});
   assert.equal((await raw.collection('private_latest_locations').doc(A+'__'+B).get()).exists,false);
   assert.equal((await raw.collection('private_location_grants').doc(A+'__'+B).get()).exists,false);
+  assert.equal((await raw.collection('private_location_publishers').doc(A).get()).exists,false);
   await assert.rejects(read(),LocationDenied);
 
   // Separate actor checks actual persisted Firestore rate-limit transactions.
-  for(let i=0;i<6;i++) await svc.start({idToken:bearer(D),viewerUid:C});
+  for(let i=0;i<6;i++) {
+    await svc.start({idToken:bearer(D),viewerUid:C});
+    await svc.stop({idToken:bearer(D),viewerUid:C});
+  }
   await assert.rejects(svc.start({idToken:bearer(D),viewerUid:C}),LocationLimited);
   const counters=await raw.collection('private_location_rate_limits').get();
   assert.ok(counters.size>0);
