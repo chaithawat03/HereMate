@@ -1,0 +1,118 @@
+name: M2 Cloud Run Staging — manually gated
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_mode:
+        description: "Run read-only GCP preflight or deploy M2 Staging service"
+        required: true
+        type: choice
+        options: [preflight, deploy]
+        default: preflight
+      confirm_target:
+        description: "Enter exact owner-approved target: heremate/asia-southeast1/M2-Staging"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heremate-m2-cloudrun-staging
+  cancel-in-progress: false
+
+jobs:
+  staging-preflight:
+    if: >-
+      github.repository == 'chaithawat03/HereMate' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.confirm_target == 'heremate/asia-southeast1/M2-Staging' &&
+      vars.M2_STAGING_DEPLOY_ENABLED == 'true' &&
+      vars.M2_STAGING_BUDGET_REVIEWED == 'true' &&
+      vars.M2_STAGING_WIF_TRUST_REVIEWED == 'true'
+    environment: m2-staging-deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
+      checks: read
+    env:
+      M2_GCP_PROJECT: heremate
+      M2_GCP_REGION: asia-southeast1
+      M2_GCP_APPROVAL_ISSUE: '43'
+      M2_BUDGET_REVIEWED: 'true'
+      M2_WIF_TRUST_REVIEWED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require green reviewed PR at exact main SHA (NO GCP writes)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/verify-release.mjs verify-merge
+      - name: Require reviewed dedicated deployment WIF, not Drive identity
+        env:
+          M2_DEPLOY_ACCOUNT: ${{ vars.M2_STAGING_DEPLOY_SERVICE_ACCOUNT }}
+          M2_WIF_PROVIDER: ${{ vars.M2_STAGING_WIF_PROVIDER }}
+        run: |
+          set -euo pipefail
+          test "$M2_DEPLOY_ACCOUNT" = 'heremate-m2-deploy@heremate.iam.gserviceaccount.com'
+          test -n "$M2_WIF_PROVIDER"
+          test "$M2_WIF_PROVIDER" != 'heremate-drive-ci@heremate.iam.gserviceaccount.com'
+          case "$M2_WIF_PROVIDER" in projects/976775896533/locations/global/workloadIdentityPools/*/providers/*) ;; *) exit 1 ;; esac
+      - name: Authenticate with short-lived WIF (NO JSON keys)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.M2_STAGING_WIF_PROVIDER }}
+          service_account: ${{ vars.M2_STAGING_DEPLOY_SERVICE_ACCOUNT }}
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+      - name: Verify billing, dedicated SAs, IAM and 4 ACTIVE TTL policies (READ ONLY)
+        run: bash scripts/m2-staging-gcp-preflight.sh
+
+  staging-deploy:
+    needs: staging-preflight
+    if: >-
+      inputs.run_mode == 'deploy' &&
+      github.ref == 'refs/heads/main' &&
+      vars.M2_STAGING_DEPLOY_ENABLED == 'true'
+    environment: m2-staging-deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
+      checks: read
+    env:
+      M2_GCP_PROJECT: heremate
+      M2_GCP_REGION: asia-southeast1
+      M2_GCP_APPROVAL_ISSUE: '43'
+      M2_GCP_DEPLOY_CONFIRMED: 'true'
+      M2_BUDGET_REVIEWED: 'true'
+      M2_WIF_TRUST_REVIEWED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Re-validate reviewed main SHA before any GCP build
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/verify-release.mjs verify-merge
+      - name: Authenticate dedicated deploy workload (NOT Drive identity)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.M2_STAGING_WIF_PROVIDER }}
+          service_account: ${{ vars.M2_STAGING_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Build isolated reviewed image and deploy ONLY approved M2 Staging
+        run: bash scripts/m2-staging-cloudrun-deploy.sh

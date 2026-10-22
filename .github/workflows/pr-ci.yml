@@ -30,6 +30,12 @@ jobs:
         run: node --test tests/m2-4c-android-integration-gate.test.mjs
       - name: Test approval-gated read-only Cloud Run Staging smoke without network
         run: node --test tests/m2-4e-readonly-smoke.test.mjs
+      - name: Test M2.5 owner-approved GCP IAM/TTL and manual-only Cloud Run deployment safeguards (offline)
+        run: |
+          bash -n scripts/m2-staging-gcp-preflight.sh
+          bash -n scripts/m2-staging-cloudrun-deploy.sh
+          node --check scripts/m2-staging-gcp-verify.mjs
+          node --test tests/m2-5-cloudrun-deployment-gate.test.mjs
       - name: Test M2.3 authorized real friend map and status privacy (offline)
         run: node --test tests/m2-3-friend-map-privacy.test.mjs
       - name: Test M2.2 foreground-only sharing and remote stop lifecycle (offline)
