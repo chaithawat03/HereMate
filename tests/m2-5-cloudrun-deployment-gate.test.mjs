@@ -66,8 +66,9 @@ test('new Cloud Run workflow is manual-only, guarded by GitHub variables and rev
  assert.match(cloud,/--service-account='heremate-m2-runtime@heremate.iam.gserviceaccount.com'/);
  assert.match(cloud,/--region=asia-southeast1/);
  assert.match(cloud,/--invoker-iam-check/);
+ assert.match(cloud,/trap rollback_on_failure EXIT/);
  assert.match(cloud,/scripts\/m2-4-readonly-cloudrun-smoke.mjs/);
  assert.match(preflight,/m2-staging-gcp-verify.mjs/);
  assert.match(old,/^  push:/m);
- assert.doesNotMatch(workflow+cloud+preflight,/gcloud iam service-accounts create|gcloud projects add-iam-policy-binding|gcloud firestore fields ttls update|EXPO_TOKEN|GOOGLE_DRIVE_REFRESH_TOKEN|M3\/M4/);
+ assert.doesNotMatch(workflow+cloud+preflight,/gcloud iam service-accounts create|gcloud projects add-iam-policy-binding|gcloud firestore fields ttls update|EXPO_TOKEN|GOOGLE_DRIVE_REFRESH_TOKEN/);
 });

@@ -33,14 +33,15 @@ gcloud run deploy heremate-m2-location-staging \
 # Public invocation uses *app-level* Firebase ID token checks at EVERY endpoint;
 # NEVER pass real Firebase credentials to Cloud Run IAM as invoker tokens.
 service_deployed=true
-rollback_if_smoke_fails() {
- if [[ "${service_deployed:-}" == "true" ]]; then
-   echo "M2_STAGING_DEPLOY_BLOCKED: read-only smoke failed; restoring IAM invoker check" >&2
+rollback_on_failure() {
+ local result=$?
+ if [[ "$result" -ne 0 && "${service_deployed:-}" == "true" ]]; then
+   echo "M2_STAGING_DEPLOY_BLOCKED: validation failed; restoring IAM invoker check" >&2
    gcloud run services update heremate-m2-location-staging \
      --project=heremate --region=asia-southeast1 --invoker-iam-check --quiet || true
  fi
 }
-trap rollback_if_smoke_fails ERR
+trap rollback_on_failure EXIT
 url="$(gcloud run services describe heremate-m2-location-staging \
  --project=heremate --region=asia-southeast1 --format='value(status.url)')"
 [[ "$url" == https://heremate-m2-location-staging-*.run.app ]] || {
@@ -49,6 +50,6 @@ url="$(gcloud run services describe heremate-m2-location-staging \
 }
 HEREMATE_M2_PROJECT=heremate HEREMATE_M2_SMOKE_APPROVED=true \
   node scripts/m2-4-readonly-cloudrun-smoke.mjs "$url/"
-trap - ERR
+trap - EXIT
 printf 'M2 Staging smoke PASSED. Exact reviewed service origin: %s\n' "$url"
 printf 'Deployment is NOT full real-user GPS E2E and NOT Android RC-ready.\n'
