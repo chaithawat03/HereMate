@@ -1,0 +1,19 @@
+# Build context minimized. Never copy credentials, personal records or Expo assets.
+**
+!backend/
+backend/**
+!backend/location/
+!backend/location/location-service.mjs
+!backend/location/firestore-location-adapters.mjs
+!backend/location/http.mjs
+!backend/location-runtime/
+!backend/location-runtime/package.json
+!backend/location-runtime/package-lock.json
+!backend/location-runtime/main.mjs
+!backend/location-runtime/edge.mjs
+**/.env
+**/node_modules
+**/google-services.json
+**/*.pem
+**/*.jks
+**/*.keystore

@@ -118,20 +118,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Install isolated pinned Admin SDK with temporary CI dependency lock
-        run: npm install --prefix backend/location-runtime --package-lock=true --ignore-scripts --no-audit --no-fund
+      - name: Install isolated Firebase Admin runtime from committed lockfile
+        run: npm ci --prefix backend/location-runtime --ignore-scripts --no-audit --no-fund
       - name: Audit standalone Firebase Admin runtime for High/Critical advisories
         run: npm audit --prefix backend/location-runtime --omit=dev --audit-level=high
-      - name: Temporary review-only lockfile capture (public package metadata, no tokens)
-        run: |
-          node - <<'JS'
-          const fs=require('node:fs');
-          const s=fs.readFileSync('backend/location-runtime/package-lock.json','utf8');
-          for(let i=0;i<s.length;i+=2048){
-            console.log('HEREMATE_LOCK_CHUNK_'+String(i/2048).padStart(5,'0')+':'+JSON.stringify(s.slice(i,i+2048)));
-          }
-          console.log('HEREMATE_LOCK_CHUNK_COUNT='+Math.ceil(s.length/2048));
-          JS
       - name: Verify staging boot defaults and bounded HTTP edge (offline)
         run: |
           node --check backend/location-runtime/main.mjs
