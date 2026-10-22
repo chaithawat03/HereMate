@@ -105,6 +105,13 @@ jobs:
         run: |
           ./node_modules/.bin/expo config --json > /tmp/heremate-expo-config.json
           node -e "const c=require('/tmp/heremate-expo-config.json'); if(c.owner !== 'smartyyys-team' || c.slug !== 'heremate')process.exit(1)"
+      - name: Android native config plugin prebuild smoke (no cloud credentials)
+        env:
+          CI: '1'
+          EXPO_PUBLIC_ENVIRONMENT: staging
+          EXPO_PUBLIC_ENABLE_FIREBASE_GUEST: 'true'
+          EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN: 'true'
+        run: ./node_modules/.bin/expo prebuild --platform android --no-install --clean
       - name: Android and iOS Guest-enabled native Metro export smoke (no credentials)
         env:
           EXPO_PUBLIC_ENVIRONMENT: staging
