@@ -16,6 +16,10 @@ function DemoMap() {
   const { colors: c, t } = usePreferences();
   const s = useMemo(() => makeStyles(c), [c]);
   const labels: Record<FriendStatus, string> = { LIVE: 'LIVE', STALE: t('statusStale'), OFFLINE: t('statusOffline'), SHARING_OFF: t('statusNotSharing') };
+  // Map pins retain semantic marker colors; light-theme text labels need deeper accessible contrast.
+  const statusText:Record<FriendStatus,string> = c.background === '#F7FAFC'
+    ? {LIVE:c.positive,STALE:'#845400',OFFLINE:'#4F6579',SHARING_OFF:c.muted}
+    : colors;
   const { width, height } = useWindowDimensions();
   const { isExpanded, mapHeight } = getResponsiveLayout(width, height);
   const [count, setCount] = useState(30);
@@ -82,7 +86,7 @@ function DemoMap() {
         {filtered.slice(0, 12).map(f => <Pressable key={f.id} style={[s.friend, isExpanded && s.friendWide]} onPress={() => setSelectedId(f.id)}>
           <View style={[s.avatar, { borderColor: colors[f.status] }]}><Text style={s.bold}>{f.name[0]}</Text></View>
           <View style={s.flex}><Text style={s.bold}>{f.name}</Text><Text style={s.sub}>{f.username}</Text></View>
-          <Text style={{ color: colors[f.status], fontSize: 11, fontWeight: '700' }}>{labels[f.status]}</Text>
+          <Text style={{ color: statusText[f.status], fontSize: 11, fontWeight: '700' }}>{labels[f.status]}</Text>
         </Pressable>)}
         </View>
         {filtered.length === 0 ? <Text style={s.sub}>{t('noFriends')}</Text> : null}
