@@ -1,0 +1,194 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {
+  createLocationService,LocationDenied,LocationBusy,LocationLimited,LocationInvalid,
+  STAGING_PROJECT,GRANT_MS
+} from '../backend/location/location-service.mjs';
+import {
+  createFirestoreLocationStore,createFirestoreLocationRateLimiter,
+} from '../backend/location/firestore-location-adapters.mjs';
+import {handleLocationHttp} from '../backend/location/http.mjs';
+const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
+
+const A='m2owneruid000000001',B='m2vieweruid00000002',C='m2strangeruid000003';
+const pair=A+'__'+B;
+let now=1800000000000;
+const point=()=>({latitude:13.75,longitude:100.5,accuracyMeters:12,capturedAtMs:now-1000});
+const bearer=id=>'T'.repeat(64)+id;
+const relation=(patch={})=>({schemaVersion:1,senderUid:A,recipientUid:B,
+  senderConsent:true,recipientConsent:true,status:'accepted',...patch});
+
+// Fake Firestore transaction with tracked read-before-write order. No live Firebase,
+// network credentials or real GPS. Commit staged writes only on success.
+function database() {
+ const rows=new Map();
+ let readingAfterWrite=false;
+ return {
+  projectId:STAGING_PROJECT,rows,
+  collection(name){return {doc(id){return {key:name+'/'+id}}};},
+  async runTransaction(worker) {
+   const changes=[];
+   let written=false;
+   const tx={
+    async get(ref){
+     if(written){readingAfterWrite=true;throw Error('READ_AFTER_WRITE');}
+     const data=rows.get(ref.key);
+     return {exists:data!==undefined,data:()=>structuredClone(data)};
+    },
+    set(ref,data){written=true;changes.push(['set',ref.key,data]);},
+    delete(ref){written=true;changes.push(['delete',ref.key]);},
+   };
+   const result=await worker(tx);
+   for(const [op,key,data] of changes){
+    if(op==='set')rows.set(key,structuredClone(data));
+    else rows.delete(key);
+   }
+   return result;
+  },
+  isOrdered(){return !readingAfterWrite;}
+ };
+}
+function setup() {
+ now=1800000000000;
+ const db=database();
+ db.rows.set('friendRequests/'+pair,relation());
+ const revoked=new Set();
+ const adminAuth={app:{options:{projectId:STAGING_PROJECT}},
+   async verifyIdToken(token,checkRevoked){
+     assert.equal(checkRevoked,true);
+     const uid=token.startsWith('T'.repeat(64))?token.slice(64):null;
+     if(!uid||revoked.has(uid))throw Error('invalid or revoked');
+     return {uid,sub:uid,aud:STAGING_PROJECT,iss:'https://securetoken.google.com/'+STAGING_PROJECT};
+   }
+ };
+ const store=createFirestoreLocationStore(db);
+ const rateLimiter=createFirestoreLocationRateLimiter(db,()=>now);
+ const svc=createLocationService({adminAuth,store,rateLimiter,clock:()=>now});
+ const start=()=>svc.start({idToken:bearer(A),viewerUid:B});
+ const stop=()=>svc.stop({idToken:bearer(A),viewerUid:B});
+ const publish=()=>svc.publish({idToken:bearer(A),viewerUid:B,point:point(),
+  appInForeground:true,foregroundPermissionGranted:true});
+ const view=()=>svc.read({idToken:bearer(B),ownerUid:A});
+ return {db,svc,adminAuth,revoked,start,stop,publish,view};
+}
+const fails=(promise,ErrorType=LocationDenied)=>assert.rejects(promise,ErrorType);
+
+test('startup blocks incorrect project, missing revoked-token verification, or nonpersistent rate limiter',()=>{
+ const db=database(),store=createFirestoreLocationStore(db),limiter=createFirestoreLocationRateLimiter(db);
+ assert.throws(()=>createFirestoreLocationStore({...db,projectId:'production'}),LocationBusy);
+ assert.throws(()=>createLocationService({adminAuth:{app:{options:{projectId:'production'}},verifyIdToken(){}},store,rateLimiter:limiter}),LocationBusy);
+ assert.throws(()=>createLocationService({adminAuth:{app:{options:{projectId:STAGING_PROJECT}},verifyIdToken(){}},store,rateLimiter:{persistent:false,consume(){} }}),LocationBusy);
+});
+test('selected friend: explicit grant, fresh publish, authorized recipient read and immediate Stop',async()=>{
+ const x=setup();
+ await fails(x.publish()); // No grant, even if both consent booleans true.
+ await fails(x.view());
+ const started=await x.start();
+ assert.equal(started.enabled,true);
+ assert.equal(started.expiresAtMs,now+GRANT_MS);
+ const published=await x.publish();
+ assert.equal(published.stored,true);
+ const readResult=await x.view();
+ assert.deepEqual(readResult.point,point());
+ assert.equal(Object.keys(readResult).sort().join(','),'expiresAtMs,point');
+ assert.deepEqual(await x.stop(),{enabled:false});
+ await fails(x.view());
+ await fails(x.publish());
+ assert.equal(x.db.rows.has('private_latest_locations/'+pair),false);
+ assert.equal(x.db.rows.has('private_location_grants/'+pair),false);
+ assert.equal(x.db.isOrdered(),true);
+});
+test('server re-reads authoritative consents and friendship each operation; cannot use a cached grant',async()=>{
+ const x=setup();
+ await x.start();
+ await x.publish();
+ x.db.rows.set('friendRequests/'+pair,relation({senderConsent:false}));
+ await fails(x.view());await fails(x.publish());await fails(x.start());
+ x.db.rows.set('friendRequests/'+pair,relation({senderConsent:true,recipientConsent:false}));
+ await fails(x.view());await fails(x.publish());
+ x.db.rows.set('friendRequests/'+pair,relation({status:'removed',senderConsent:false,recipientConsent:false}));
+ await fails(x.view());await fails(x.start());
+ // Removal does not stop an owner from clearing a stale grant.
+ assert.deepEqual(await x.stop(),{enabled:false});
+});
+test('a stranger cannot publish, read, stop or start grants for another actor',async()=>{
+ const x=setup();await x.start();await x.publish();
+ await fails(x.svc.read({idToken:bearer(C),ownerUid:A}));
+ await fails(x.svc.publish({idToken:bearer(B),viewerUid:B,point:point(),appInForeground:true,foregroundPermissionGranted:true}));
+ await fails(x.svc.stop({idToken:bearer(C),viewerUid:C}));
+ await fails(x.svc.start({idToken:bearer(C),viewerUid:A}));
+ x.revoked.add(B);
+ await fails(x.view());
+});
+test('unverified, mismatched, expired and too-future data cannot be read or stored',async()=>{
+ const x=setup();
+ await fails(x.svc.start({idToken:'forged',viewerUid:B}));
+ await fails(x.svc.start({idToken:bearer(A),viewerUid:'../../other'}),LocationInvalid);
+ await x.start();
+ for(const patch of [{latitude:91},{longitude:-181},{accuracyMeters:201},
+   {accuracyMeters:NaN},{capturedAtMs:now-31_000},{capturedAtMs:now+5_001}]){
+   await fails(x.svc.publish({idToken:bearer(A),viewerUid:B,
+     point:{...point(),...patch},appInForeground:true,foregroundPermissionGranted:true}));
+ }
+ await fails(x.svc.publish({idToken:bearer(A),viewerUid:B,point:{...point(),extra:'private'},
+   appInForeground:true,foregroundPermissionGranted:true}),LocationInvalid);
+ await x.publish();
+ now+=31_001;await fails(x.view());
+ now+=GRANT_MS;await fails(x.view());await fails(x.publish());
+});
+test('background or missing OS foreground permission fail closed; no coordinate writes',async()=>{
+ const x=setup();await x.start();
+ await fails(x.svc.publish({idToken:bearer(A),viewerUid:B,
+  point:point(),appInForeground:false,foregroundPermissionGranted:true}));
+ await fails(x.svc.publish({idToken:bearer(A),viewerUid:B,
+  point:point(),appInForeground:true,foregroundPermissionGranted:false}));
+ assert.equal(x.db.rows.has('private_latest_locations/'+pair),false);
+});
+test('ambiguous opposite-direction relationships deny instead of merging consents',async()=>{
+ const x=setup();
+ x.db.rows.set('friendRequests/'+B+'__'+A,{
+   senderUid:B,recipientUid:A,status:'accepted',senderConsent:true,recipientConsent:true});
+ await fails(x.start());
+});
+test('persisted per-actor/per-route rate limiting is durable and bounded',async()=>{
+ const x=setup();
+ for(let i=0;i<6;i++)await x.start();
+ await fails(x.start(),LocationLimited);
+ assert.ok([...x.db.rows.keys()].some(k=>k.startsWith('private_location_rate_limits/')));
+ assert.ok(![...x.db.rows.keys()].some(k=>k.includes(A)&&k.startsWith('private_location_rate_limits/')));
+});
+test('HTTP boundary requires bearer, exact payloads, size and no credential leaks',async()=>{
+ const x=setup();
+ const call=(path,body,auth=bearer(A),opts={})=>handleLocationHttp({
+    method:'POST',path,contentType:'application/json',
+    authorization:auth===null?'': 'Bearer '+auth,bodyText:JSON.stringify(body),...opts
+  },x.svc);
+ const start='/v1/locations/grants/start',readPath='/v1/locations/points/read';
+ assert.equal((await call('/unknown',{})).status,404);
+ assert.equal((await call(start,{viewerUid:B},null)).status,401);
+ assert.equal((await call(start,{viewerUid:B,unknown:1})).status,400);
+ assert.equal((await call(start,{viewerUid:B},bearer(A),{method:'GET'})).status,405);
+ assert.equal((await call(start,{viewerUid:B},bearer(A),{contentType:'text/plain'})).status,415);
+ assert.equal((await call(start,{viewerUid:B},bearer(A),{bodyText:'x'.repeat(1025)})).status,413);
+ assert.equal((await call(start,{viewerUid:B})).status,200);
+ assert.equal((await call(readPath,{ownerUid:A},bearer(C))).status,404);
+ const denied=await call(readPath,{ownerUid:A},bearer(C));
+ assert.deepEqual(denied.body,{error:'not_available'});
+ assert.equal(denied.headers['Cache-Control'],'no-store, private, max-age=0');
+ assert.doesNotMatch(JSON.stringify(denied),new RegExp(A+'|'+B+'|latitude|token','i'));
+});
+test('strict separation: backend offline-only, no mobile GPS publishing or Firebase client rule changes',()=>{
+ const app=read('App.tsx'),eas=JSON.parse(read('eas.json')),rules=read('firebase/firestore.rules');
+ const api=read('backend/location/location-service.mjs');
+ const adapter=read('backend/location/firestore-location-adapters.mjs');
+ assert.doesNotMatch(app,/private_latest_locations|EXPO_PUBLIC_ENABLE_M2_SHARING/);
+ assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_M2_SHARING,undefined);
+ assert.match(rules,/allow read, write: if false/);
+ assert.doesNotMatch(api+adapter,/firebase-admin|require\('firebase|import .*firebase|fetch\(|watchPositionAsync/);
+ assert.match(adapter,/db\.runTransaction/);
+ assert.match(api,/verifyIdToken\(idToken,true\)/);
+ assert.match(adapter,/private_latest_locations/);
+ assert.match(adapter,/private_location_grants/);
+ assert.match(adapter,/private_location_rate_limits/);
+});

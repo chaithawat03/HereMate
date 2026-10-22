@@ -22,6 +22,12 @@ jobs:
       - run: node --check tests/m0.test.mjs
       - name: Verify owner-approved Guest-only trial exception, exact hashes and expiry
         run: node --test tests/security-guest-staging.test.mjs
+      - name: Test M2.1 transactional backend privacy and bearer HTTP contract (offline)
+        run: |
+          node --check backend/location/location-service.mjs
+          node --check backend/location/firestore-location-adapters.mjs
+          node --check backend/location/http.mjs
+          node --test tests/m2-1-server-location.test.mjs
       - name: Test M2.0 offline privacy and no remote GPS contract
         run: node --test tests/m2-0-location-privacy.test.mjs
       - name: Test M1 friends contracts and no GPS publishing
