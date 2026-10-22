@@ -27,3 +27,9 @@ Use **Samsung Galaxy Z Fold7** as A and **Anbernic RG406V** as B on separate sta
 
 ### Current status
 **M2.4 IN PROGRESS / BLOCKED on real server deployment and integration**, not RC-ready. None of the above hard blockers are waived by PR CI green. Do not generate an owner acceptance request until a single integrated Android Staging RC is actually available.
+
+## M2.4D: Real offline HTTP E2E and RC-only EAS builds (2026-10-22)
+- An isolated **Auth Emulator JWT -> actual Firebase Admin Auth `verifyIdToken(...,true)` -> local HTTP Node edge -> real Admin Firestore Emulator transaction** regression runs in GitHub PR CI. Three test-only anonymous accounts exercise accepted friendship, dual consent, GPS Start/Publish/Read/Stop, stranger denial, same-owner overlapping Start rejection, disabled token denial, consent OFF/ON grant invalidation, and deleting private grant/point/lease. No real user credentials, real GCP project, deployed Cloud Run or device GPS.
+- Auth/Firestore test project is `demo-heremate-m053` only; domain test adapters **project** verified emulator claims to staging-shaped claims. This is deliberately not a test of real Google's signature verification of Staging tokens and is **NOT** deployed.
+- `.github/workflows/staging-eas-build.yml` no longer triggers a billable Expo build automatically on intermediate main merges. Keep the existing daily read-only Drive health check. **Final M2 Android RC** requires explicit `workflow_dispatch` with `run_mode=build`, passing reviewed-main SHA and approved environment gates, and should be requested only after successful live Staging integration. No automatic retry or build plan upgrade.
+- [Cloud Run owner approval #43](https://github.com/chaithawat03/HereMate/issues/43) remains open. Region/IAM/billing/TTL, deployed Auth/Firestore integration, real Cloud Run URL, Android UI activation and final APK remain BLOCKED. An offline emulator passing test does not replace live Staging acceptance.

@@ -43,6 +43,10 @@ test('Only Android completed APK EAS result accepted',()=>{
 test('EAS workflow has opt-in and staging safety gates',()=>{
  const workflow=readFileSync(new URL('../.github/workflows/staging-eas-build.yml',import.meta.url),'utf8');
  assert.match(workflow,/STAGING_EAS_ENABLED/);
+ assert.doesNotMatch(workflow,/^  push:/m,'intermediate main pushes must NOT consume EAS quota');
+ assert.match(workflow,/github.event_name == 'workflow_dispatch' && inputs.run_mode == 'build'/);
+ assert.match(workflow,/run_mode:/);
+ assert.match(workflow,/schedule:/);
  assert.match(workflow,/verify-merge/);
  assert.match(workflow,/validate-config/);
  assert.match(workflow,/environment: staging-eas/);
