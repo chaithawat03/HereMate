@@ -54,7 +54,7 @@ export function createForegroundSharingController(p:SharePorts) {
   let state:SharingState=off, epoch=0, disposed=false;
   let watch:Unsubscribe|null=null, alarm:unknown=null, inStart:Promise<void>|null=null;
   let inPublish:Promise<void>|null=null, inStop:Promise<void>|null=null;
-  let lastPublishAt=-Infinity;
+  let lastPublishAt=-Infinity,activeOwner:string|null=null;
   const publishState=(next:SharingState)=>{
     state=next;
     if(!disposed)p.onState(next);
@@ -66,7 +66,7 @@ export function createForegroundSharingController(p:SharePorts) {
   async function stop():Promise<void> {
     if(inStop)return inStop;
     const peer=state.peerUid;
-    ++epoch;cancelLocal();
+    ++epoch;activeOwner=null;cancelLocal();
     if(!peer){publishState(off);return;}
     publishState({phase:'stopping',peerUid:peer,expiresAtMs:null,error:null});
     const task=(async()=>{
@@ -99,6 +99,7 @@ export function createForegroundSharingController(p:SharePorts) {
     const run=++epoch;
     const active=()=>!disposed&&run===epoch&&p.ownerUid()===owner&&p.isForeground();
     lastPublishAt=-Infinity;
+    activeOwner=owner;
     publishState({phase:'starting',peerUid,expiresAtMs:null,error:null});
     const task=(async()=>{
       try {
@@ -128,7 +129,8 @@ export function createForegroundSharingController(p:SharePorts) {
     try{await task;}finally{if(inStart===task)inStart=null;}
   }
   function onFix(fix:ShareFix):void {
-    if(state.phase!=='sharing'||!p.isForeground())return;
+    if(state.phase!=='sharing')return;
+    if(!p.isForeground()||p.ownerUid()!==activeOwner){void stop();return;}
     const peer=state.peerUid,expires=state.expiresAtMs,now=p.now();
     if(!peer||expires===null||now>=expires){void stop();return;}
     if(!freshShareFix(fix,now))return;

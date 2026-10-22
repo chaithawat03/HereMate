@@ -49,6 +49,7 @@ function rig(){
   get removes(){return removes;},get timer(){return timer;},
   tick:ms=>{now+=ms;},leave:()=>{foreground=false;control.interrupted();},
   setPermission:v=>{permission=v;},setUid:v=>{uid=v;control.accountChanged();},
+  silentUidChange:v=>{uid=v;},silentLeave:()=>{foreground=false;},
   failStop:v=>{failStop=v;},failWatch:v=>{failWatch=v;},
  };
 }
@@ -117,6 +118,18 @@ test('background, auth change and consent revoke immediately stop local watcher 
   assert.equal(r.control.getState().phase,'off');
   assert.equal(r.stops,1);assert.ok(r.removes>=1);
   r.push(r.point());await flush();assert.equal(r.publishes.length,0);
+ }
+});
+test('a delayed auth or AppState callback cannot allow another fix to publish',async()=>{
+ for(const incident of ['silent-auth','silent-background']){
+  const r=rig();await r.control.start(b,rel());
+  if(incident==='silent-auth')r.silentUidChange(c);
+  else r.silentLeave();
+  r.push(r.point());
+  await flush();
+  assert.equal(r.publishes.length,0);
+  assert.equal(r.stops,1);
+  assert.equal(r.control.getState().phase,'off');
  }
 });
 test('backend STOP failure is not mislabeled as off and retry confirms revocation',async()=>{
