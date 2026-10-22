@@ -12,11 +12,11 @@ test('M2 release packaging is exact, safe and dormant until owner approval',()=>
  assert.match(docker,/FROM node:24-bookworm-slim@sha256:[0-9a-f]{64}/);
  assert.match(docker,/npm ci --omit=dev/);
  assert.match(docker,/USER node/);
- assert.match(build,/cloud-builders\\/docker/);
- assert.match(build,/\\$_IMAGE/);
+ assert.ok(build.includes('gcr.io/cloud-builders/docker'));
+ assert.ok(build.includes('${_IMAGE}'));
  assert.doesNotMatch(build,/gcloud run deploy|--allow-unauthenticated|allUsers/);
  assert.match(docs,/private_location_publishers/);
- assert.match(docs,/M3\\/M4 CR #38/);
+ assert.ok(docs.includes('M3/M4 CR #38'));
  const app=read('App.tsx'),eas=JSON.parse(read('eas.json'));
  assert.doesNotMatch(app,/M2SharingPanel|M2FriendLocationPanel|createM2StagingTransport/);
  assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_M2_SHARING,undefined);
