@@ -56,9 +56,14 @@ test('M4 replay and out-of-order captures cannot fabricate Enter/Exit',()=>{
  assert.equal(changed.event,'enter');
  const late=advanceState(circle,at(0.02,now+35_000),now+35_200,changed.next);
  assert.equal(late.next.streak,1);
+ assert.equal(late.next.zone,'unknown'); // stale baseline cannot emit a fake Exit
  const longGap=advanceState(circle,at(0.02,now+75_000),now+75_200,late.next);
  assert.equal(longGap.event,null);
  assert.equal(longGap.next.streak,1);
+ const oldSchema=advanceState(circle,at(0.02,now+1800),now+2000,
+   {zone:'inside',pending:'outside',streak:1,lastEventAtMs:null});
+ assert.equal(oldSchema.next.zone,'unknown');
+ assert.equal(oldSchema.event,null);
  for(const s of [base,same.next,established.next,proposed.next,replay.next,changed.next]){
    assert.equal(Object.hasOwn(s,'latitude'),false);
    assert.equal(Object.hasOwn(s,'longitude'),false);
