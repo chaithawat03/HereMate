@@ -4,9 +4,9 @@
  * The server still checks the viewer's authorization on EVERY peer read.
  */
 import type {FriendRequest} from '../friends/friendModel';
-import {
-  authorizedPeers,MAX_MAP_FRIEND_READS,type ServerRead
-} from './m2FriendLocationView';
+import type {ServerRead} from './m2FriendLocationView';
+
+const MAX_MAP_FRIEND_READS=8;
 
 const UID=/^[A-Za-z0-9_-]{12,128}$/;
 export type AuthorizedMapSnapshot=Readonly<{
@@ -19,6 +19,8 @@ export type AuthorizedMapReadPorts=Readonly<{
   /** Must inspect the live Firebase UID, foreground state and UI generation. */
   isCurrent:()=>boolean;
   loadRelations:()=>Promise<FriendRequest[]>;
+  /** Inject the existing mutual-consent, duplicate-denying M2 projection. */
+  selectPeers:(viewerUid:string,relations:readonly FriendRequest[])=>ReadonlyArray<{uid:string}>;
   readPeer:(peerUid:string)=>Promise<ServerRead>;
 }>;
 
@@ -38,7 +40,7 @@ export async function loadAuthorizedFriendMap(
   // rows outside this account. Mutual consent is independently required below.
   const relations=rows.filter(row=>
     row.senderUid===p.viewerUid||row.recipientUid===p.viewerUid);
-  const eligible=[...authorizedPeers(p.viewerUid,relations)]
+  const eligible=[...p.selectPeers(p.viewerUid,relations)]
     .sort((a,b)=>a.uid.localeCompare(b.uid)).slice(0,MAX_MAP_FRIEND_READS);
   const outcomes=await Promise.allSettled(eligible.map(async peer=>{
     if(!current())throw Error('map_read_cancelled');
