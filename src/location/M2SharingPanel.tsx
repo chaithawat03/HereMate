@@ -10,6 +10,7 @@ import {onAuthStateChanged} from 'firebase/auth';
 import {getStagingGuestAuth} from '../auth/firebaseGuest';
 import {listOwnRequests} from '../friends/firestoreFriends';
 import {otherParticipant,type FriendRequest} from '../friends/friendModel';
+import {createAccountScopedFriendRefresh} from './accountScopedFriendRefresh';
 import {usePreferences} from '../ui/PreferencesProvider';
 import type {Palette} from '../ui/preferencesModel';
 import {
@@ -39,12 +40,21 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
   const emergencyLock=useRef(false);
   const controller=useRef<ReturnType<typeof createForegroundSharingController>|null>(null);
   const account=useRef<string|null>(null);
+  const refreshGate=useRef<ReturnType<typeof createAccountScopedFriendRefresh>|null>(null);
 
   useEffect(()=>{
     if(!backendReviewedAndEnabled)return;
     let live=true;
     const auth=getStagingGuestAuth();
     account.current=auth.currentUser?.uid??null;
+    const gate=createAccountScopedFriendRefresh({
+      currentUid:()=>{
+        const uid=auth.currentUser?.uid??null;
+        return uid===account.current?uid:null;
+      },
+      isForeground:()=>AppState.currentState==='active'
+    });
+    refreshGate.current=gate;
     const ctrl=createForegroundSharingController({
       ownerUid:()=>account.current,
       isForeground:()=>AppState.currentState==='active',
@@ -88,20 +98,41 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
     controller.current=ctrl;
     const app=AppState.addEventListener('change',next=>{
       if(next!=='active'){
+        gate.invalidate();
         ctrl.interrupted();setEmergencyState(null);
+        if(live){
+          setFriends([]);setSelectedUid(null);setLoadError(false);
+        }
+      }else if(live){
+        // A new foreground refresh is required; never restore old names.
+        setAuthRevision(value=>value+1);
       }
     });
     const authUnsub=onAuthStateChanged(auth,u=>{
       const uid=u?.uid??null;
       if(account.current!==uid){
-        account.current=uid;ctrl.accountChanged();setEmergencyState(null);
+        gate.invalidate();
+        account.current=uid;
+        ctrl.accountChanged();setEmergencyState(null);
+        if(live){
+          setFriends([]);setSelectedUid(null);setLoadError(false);
+        }
       }
       if(live)setAuthRevision(x=>x+1);
-    },()=>{account.current=null;ctrl.accountChanged();});
+    },()=>{
+      gate.invalidate();
+      account.current=null;
+      ctrl.accountChanged();setEmergencyState(null);
+      if(live){
+        setFriends([]);setSelectedUid(null);setLoadError(true);
+      }
+    });
     return()=>{
       live=false;
       app.remove();
       authUnsub();
+      gate.dispose();
+      if(refreshGate.current===gate)refreshGate.current=null;
       ctrl.dispose();
       controller.current=null;
       account.current=null;
@@ -109,20 +140,27 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
   },[backendReviewedAndEnabled,transport]);
 
   const refresh=useCallback(async()=>{
-    if(!backendReviewedAndEnabled)return;
-    try{
-      const entries=await listOwnRequests();
-      setFriends(entries);
+    if(!backendReviewedAndEnabled||AppState.currentState!=='active')return;
+    await refreshGate.current?.run(listOwnRequests,(entries,uid)=>{
+      // In addition to the async cancellation gate, refuse records that
+      // do not belong to the currently authenticated account.
+      const own=entries.filter(r=>r.senderUid===uid||r.recipientUid===uid);
+      setFriends(own);
       setLoadError(false);
-      const peer=session.peerUid;
+      const peer=controller.current?.getState().peerUid;
       if(peer){
-        const current=entries.find(r=>r.status==='accepted'&&
-          (r.senderUid===peer||r.recipientUid===peer));
-        controller.current?.consentChanged(current?toRelation(current):null);
+        const relation=own.find(r=>r.status==='accepted'&&
+          ((r.senderUid===uid&&r.recipientUid===peer)||
+           (r.recipientUid===uid&&r.senderUid===peer)));
+        controller.current?.consentChanged(relation?toRelation(relation):null);
       }
-    }catch{setLoadError(true);controller.current?.interrupted();}
-  },[backendReviewedAndEnabled,session.peerUid,authRevision]);
-  useEffect(()=>{if(backendReviewedAndEnabled)void refresh();},[backendReviewedAndEnabled,refresh]);
+    },()=>{
+      setLoadError(true);
+      controller.current?.interrupted();
+    });
+  },[backendReviewedAndEnabled]);
+  useEffect(()=>{if(backendReviewedAndEnabled)void refresh();},
+    [backendReviewedAndEnabled,refresh,authRevision,session.peerUid]);
   const owner=account.current;
   const emergencyAvailable=Platform.OS==='android'&&
     typeof transport.emergencyStop==='function';
@@ -146,11 +184,15 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
     try{
       const result=await transport.emergencyStop!(peerUid);
       if(result.enabled!==false)throw Error('not_confirmed');
-      if(account.current!==actor||AppState.currentState!=='active')return;
+      if(account.current!==actor||
+         getStagingGuestAuth().currentUser?.uid!==actor||
+         AppState.currentState!=='active')return;
       controller.current?.acknowledgeEmergencyStop(peerUid);
       setEmergencyState({peerUid,status:'confirmed'});
     }catch{
-      if(account.current===actor&&AppState.currentState==='active')
+      if(account.current===actor&&
+         getStagingGuestAuth().currentUser?.uid===actor&&
+         AppState.currentState==='active')
         setEmergencyState({peerUid,status:'failed'});
     }finally{
       emergencyLock.current=false;
