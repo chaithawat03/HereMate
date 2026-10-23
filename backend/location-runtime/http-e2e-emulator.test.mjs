@@ -16,13 +16,17 @@ import {getFirestore,Timestamp} from 'firebase-admin/firestore';
 import {createLocationService,STAGING_PROJECT} from '../location/location-service.mjs';
 import {createFirestoreLocationStore,createFirestoreLocationRateLimiter} from '../location/firestore-location-adapters.mjs';
 import {createNodeLocationHandler} from './edge.mjs';
+import {createM2StagingTransport} from '../../src/location/m2StagingTransport.ts';
 
 const DEMO='demo-heremate-m053',AUTH_HOST='127.0.0.1:9099',DB_HOST='127.0.0.1:8080';
 const route={
  start:'/v1/locations/grants/start',
  stop:'/v1/locations/grants/stop',
  publish:'/v1/locations/points/publish',
- read:'/v1/locations/points/read'
+ read:'/v1/locations/points/read',
+ deviceStart:'/v2/locations/sessions/start',
+ devicePublish:'/v2/locations/sessions/publish',
+ deviceStop:'/v2/locations/sessions/stop'
 };
 const fix=()=>({latitude:0,longitude:0,accuracyMeters:10,capturedAtMs:Date.now()-500});
 test('real emulated JWT+HTTP+Admin Firestore positive and privacy negative E2E',
@@ -163,4 +167,79 @@ test('real emulated JWT+HTTP+Admin Firestore positive and privacy negative E2E',
     const noToken=await call(null,'start',{viewerUid:viewer.uid});
     assert.equal(noToken.status,401);
     assert.ok(!JSON.stringify(noToken).includes(owner.uid));
+
+    // M3 v2: the actual Android transport talks to a real local Node HTTP
+    // edge backed by Firebase Auth JWT verification and Firestore transactions.
+    // Only the injected fetch maps the approved HTTPS Staging origin to the
+    // OFFLINE emulator. No real Cloud Run/GCP request or phone GPS is used.
+    const approvedOrigin='https://heremate-m2-location-staging-2inhowyo2a-as.a.run.app';
+    const androidV2=createM2StagingTransport({
+      approvedCloudRunUrl:approvedOrigin,projectId:STAGING_PROJECT,
+      useDeviceSessions:true,
+      currentIdentity:()=>({uid:viewer.uid,getIdToken:async()=>viewer.token}),
+      isForeground:()=>true,foregroundPermissionGranted:async()=>true,
+      fetchImpl:async(url,init)=>{
+        const target=new URL(url);
+        assert.equal(target.origin,approvedOrigin);
+        assert.ok([route.deviceStart,route.devicePublish,route.deviceStop,
+          route.stop].includes(target.pathname));
+        return fetch(origin+target.pathname,init);
+      }
+    });
+    await assert.rejects(androidV2.publish(owner.uid,fix()),/UNAVAILABLE/,
+      'a handset without a device capability cannot publish');
+    const v2Grant=await androidV2.start(owner.uid);
+    assert.equal(v2Grant.enabled,true);
+    assert.ok(v2Grant.expiresAtMs>Date.now());
+    assert.equal(Object.hasOwn(v2Grant,'sessionToken'),false,
+      'the raw capability is never exposed to UI state');
+    const pairId=viewer.uid+'__'+owner.uid;
+    const grantDoc=(await db.collection('private_location_grants').doc(pairId).get()).data();
+    const publisherDoc=(await db.collection('private_location_publishers').doc(viewer.uid).get()).data();
+    assert.match(grantDoc.sessionDigest,/^[0-9a-f]{64}$/);
+    assert.equal(grantDoc.sessionDigest,publisherDoc.sessionDigest);
+    assert.equal(Object.hasOwn(grantDoc,'sessionToken'),false);
+    assert.equal(Object.hasOwn(publisherDoc,'sessionToken'),false);
+    assert.equal((await call(viewer,'deviceStart',{viewerUid:owner.uid})).status,404,
+      'a second same-account device cannot replace the active publisher');
+    assert.equal((await call(viewer,'devicePublish',{
+      viewerUid:owner.uid,sessionToken:'0'.repeat(64),point:fix(),
+      appInForeground:true,foregroundPermissionGranted:true
+    })).status,404,'a different device capability cannot publish');
+    assert.equal((await call(viewer,'publish',{
+      viewerUid:owner.uid,point:fix(),
+      appInForeground:true,foregroundPermissionGranted:true
+    })).status,404,'legacy v1 cannot inject into a v2 lease');
+    assert.equal((await androidV2.publish(owner.uid,fix())).stored,true);
+    assert.equal((await call(owner,'read',{ownerUid:viewer.uid})).status,200);
+    assert.equal((await call(stranger,'read',{ownerUid:viewer.uid})).status,404);
+    assert.equal((await call(viewer,'deviceStop',{
+      viewerUid:owner.uid,sessionToken:'0'.repeat(64)
+    })).status,404,'a stale device cannot revoke the active session');
+
+    // Bilateral consent revocation immediately hides the point, and restoring
+    // consent does not revive the previous relation-revision-bound lease.
+    await relationRef.update({senderConsent:false,
+      updatedAt:Timestamp.fromMillis(Date.now()+10000)});
+    assert.equal((await call(owner,'read',{ownerUid:viewer.uid})).status,404);
+    await relationRef.update({senderConsent:true,
+      updatedAt:Timestamp.fromMillis(Date.now()+11000)});
+    assert.equal((await call(owner,'read',{ownerUid:viewer.uid})).status,404);
+    // The owner-wide emergency STOP uses the authenticated v1 endpoint
+    // independently of the current handset capability or consent state.
+    assert.deepEqual(await androidV2.emergencyStop(owner.uid),{enabled:false});
+    await assert.rejects(androidV2.publish(owner.uid,fix()),/UNAVAILABLE/);
+    assert.equal((await call(owner,'read',{ownerUid:viewer.uid})).status,404);
+
+    // Explicit re-start after a confirmed emergency STOP creates a new
+    // session; a normal v2 STOP clears the only latest fix and lease.
+    assert.equal((await androidV2.start(owner.uid)).enabled,true);
+    assert.equal((await androidV2.publish(owner.uid,fix())).stored,true);
+    assert.deepEqual(await androidV2.stop(owner.uid),{enabled:false});
+    for(const collection of ['private_location_grants','private_latest_locations']){
+      assert.equal((await db.collection(collection).doc(pairId).get()).exists,false);
+    }
+    assert.equal((await db.collection('private_location_publishers')
+      .doc(viewer.uid).get()).exists,false);
+    assert.equal((await call(owner,'read',{ownerUid:viewer.uid})).status,404);
   });
