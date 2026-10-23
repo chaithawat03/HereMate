@@ -10,6 +10,7 @@ import {GuestAuthGate} from './src/auth/GuestAuthGate';
 import {UserProfilePanel} from './src/profile/UserProfilePanel';
 import {FriendsPanel} from './src/friends/FriendsPanel';
 import {M3IOSStagingScreens} from './src/location/M3IOSStagingScreens';
+import {M4GeofenceStagingScreens} from './src/geofences/M4GeofenceStagingScreens';
 
 export const M3_IOS_STAGING_ORIGIN=
   'https://heremate-m2-location-staging-2inhowyo2a-as.a.run.app' as const;
@@ -37,6 +38,9 @@ function Content(){
         <FriendsPanel/>
         <M3IOSStagingScreens approvedCloudRunUrl={M3_IOS_STAGING_ORIGIN}
           backendReviewedAndEnabled={true}/>
+        {process.env.EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'?
+          <M4GeofenceStagingScreens approvedCloudRunUrl={M3_IOS_STAGING_ORIGIN}
+            backendReviewedAndEnabled={true}/>:null}
       </ScrollView>
     </GuestAuthGate>
   </SafeAreaView>;

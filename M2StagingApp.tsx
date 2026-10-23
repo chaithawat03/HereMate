@@ -17,6 +17,7 @@ import {GuestAuthGate} from './src/auth/GuestAuthGate';
 import {UserProfilePanel} from './src/profile/UserProfilePanel';
 import {FriendsPanel} from './src/friends/FriendsPanel';
 import {M2AndroidStagingScreens} from './src/location/M2AndroidStagingScreens';
+import {M4GeofenceStagingScreens} from './src/geofences/M4GeofenceStagingScreens';
 
 // Confirmed by Cloud Run services describe in the owner-approved GCP project,
 // and exercised in the successful three-account live Staging E2E.
@@ -58,6 +59,10 @@ function M2Screen(){
           <M2AndroidStagingScreens
             approvedCloudRunUrl={HERE_M2_STAGING_ORIGIN}
             backendReviewedAndEnabled={true}/>
+          {process.env.EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'?
+            <M4GeofenceStagingScreens
+              approvedCloudRunUrl={HERE_M2_STAGING_ORIGIN}
+              backendReviewedAndEnabled={true}/>:null}
           <Text style={{fontSize:12,color:c.muted}}>{t('m2MapSchematic')}</Text>
         </ScrollView>
       </GuestAuthGate> : <View style={{padding:20}}>
