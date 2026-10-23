@@ -108,15 +108,17 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       if(ports.useDeviceSessions===true){
         if(deviceSession!==null)unavailable();
         const uid=ports.currentIdentity()?.uid;
-        if(!uid)unavailable();
+        if(typeof uid!=='string')return unavailable();
         const result=await send('/v2/locations/sessions/start',{viewerUid},true);
-        if(!fields(result,['enabled','expiresAtMs','sessionToken']))unavailable();
+        if(!fields(result,['enabled','expiresAtMs','sessionToken']))
+          return unavailable();
         const row=result as {enabled:unknown;expiresAtMs:unknown;sessionToken:unknown};
-        if(row.enabled!==true||!validNumber(row.expiresAtMs)||
-          !validCapability(row.sessionToken)||
-          ports.currentIdentity()?.uid!==uid)unavailable();
-        deviceSession={uid,peerUid:viewerUid,token:row.sessionToken};
-        return {enabled:true,expiresAtMs:row.expiresAtMs};
+        const expiry=row.expiresAtMs,token=row.sessionToken;
+        if(row.enabled!==true||!validNumber(expiry)||
+          !validCapability(token)||ports.currentIdentity()?.uid!==uid)
+          return unavailable();
+        deviceSession={uid,peerUid:viewerUid,token};
+        return {enabled:true,expiresAtMs:expiry};
       }
       const result=await send('/v1/locations/grants/start',{viewerUid},true);
       if(!fields(result,['enabled','expiresAtMs']))unavailable();
@@ -131,7 +133,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       if(ports.useDeviceSessions===true){
         const active=deviceSession;
         if(!active||active.uid!==ports.currentIdentity()?.uid||
-           active.peerUid!==viewerUid)unavailable();
+           active.peerUid!==viewerUid)return unavailable();
         const result=await send('/v2/locations/sessions/stop',{
           viewerUid,sessionToken:active.token
         },false);
