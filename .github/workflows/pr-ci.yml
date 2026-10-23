@@ -53,6 +53,8 @@ jobs:
         run: node --test tests/m2-3-friend-map-privacy.test.mjs
       - name: Test M2.2 foreground-only sharing and remote stop lifecycle (offline)
         run: node --test tests/m2-2-foreground-share.test.mjs
+      - name: M3 publisher session V2 HTTP strict schema and identity (offline)
+        run: node --test tests/m3-device-session-http.test.mjs
       - name: Test M2.1 transactional backend privacy and bearer HTTP contract (offline)
         run: |
           node --check backend/location/location-service.mjs
