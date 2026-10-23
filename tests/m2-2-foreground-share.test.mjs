@@ -203,7 +203,8 @@ test('UI scaffold remains unmounted, without a live endpoint, URL or EAS permiss
  assert.match(panel,/Location\.requestForegroundPermissionsAsync/);
  assert.match(panel,/Location\.getForegroundPermissionsAsync/);
  assert.match(panel,/Location\.hasServicesEnabledAsync/);
- assert.match(panel,/watching=false;watcher\.remove\(\)/);
+ assert.match(panel,/bindVerifiedForegroundWatch\(/);
+ assert.match(panel,/watching=false;subscription\.remove\(\)/);
  assert.match(panel,/t\('m2Unavailable'\)/);
  assert.doesNotMatch(panel+session,/https?:\/\/|fetch\(|getDatabase\(|setDoc\(|backgroundLocation|startLocationUpdatesAsync|requestBackgroundPermissionsAsync/);
 });
