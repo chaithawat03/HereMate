@@ -319,3 +319,53 @@ test('M4 current-account async native OS DENIED reports failure and permits retr
  assert.equal(await x.controller.start(OWNER,true),true);
  x.controller.stop();
 });
+
+test('M4 retired expiry callback cannot stop a newer explicitly opted-in Android watcher',async()=>{
+ const x=rig();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const expired=x.timers[0];
+ x.controller.stop();
+ assert.equal(expired.cancelled,true);
+ assert.equal(x.stats().removed,1);
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const active=x.timers[1];
+ assert.equal(x.controller.getPhase(),'watching');
+ // clearTimeout cannot retract a callback already queued on the JS thread.
+ expired.fn();
+ assert.equal(x.controller.getPhase(),'watching',
+   'a previous generation cannot turn off the current opt-in');
+ assert.equal(x.stats().removed,1,'new native watcher must remain installed');
+ assert.equal(active.cancelled,false,'new timeout must remain armed');
+ x.send();
+ await flush();
+ assert.deepEqual(x.events,['enter'],'current watcher remains functional');
+ active.fn();
+ assert.equal(x.controller.getPhase(),'off','current expiry still stops');
+ assert.equal(x.stats().removed,2);
+ assert.equal(active.cancelled,true);
+});
+
+test('M4 canceled old expiry cannot abort replacement during asynchronous native bind',async()=>{
+ let releaseSecond,binds=0,removed=0;
+ const waiting=new Promise(resolve=>{releaseSecond=resolve;});
+ const x=rig({watch:async()=>{
+   if(++binds===2)await waiting;
+   return {remove:()=>{removed++;}};
+ }});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const expired=x.timers[0];
+ x.controller.interrupted();
+ assert.equal(expired.cancelled,true);
+ const replacement=x.controller.start(OWNER,true);
+ await flush();
+ assert.equal(x.controller.getPhase(),'starting');
+ expired.fn();
+ assert.equal(x.controller.getPhase(),'starting');
+ assert.equal(removed,1);
+ releaseSecond();
+ assert.equal(await replacement,true);
+ assert.equal(x.controller.getPhase(),'watching');
+ assert.equal(x.timers.length,2);
+ x.controller.stop();
+ assert.equal(removed,2);
+});
