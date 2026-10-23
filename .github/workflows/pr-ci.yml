@@ -243,6 +243,29 @@ jobs:
           if(!fs.existsSync(path.join(root,'metadata.json'))) throw Error('Metro metadata missing');
           console.log('Guest-enabled Android/iOS Hermes bundles present, staging flag set and Metro compilation succeeded');
           JS
+      - name: Android M2 live-Staging opt-in Hermes export (no cloud tokens or GPS)
+        env:
+          EXPO_PUBLIC_ENVIRONMENT: staging
+          EXPO_PUBLIC_ENABLE_FIREBASE_GUEST: 'true'
+          EXPO_PUBLIC_ENABLE_M1_PROFILE: 'true'
+          EXPO_PUBLIC_ENABLE_M1_FRIENDS: 'true'
+          EXPO_PUBLIC_ENABLE_M2_SHARING: 'true'
+        run: |
+          ./node_modules/.bin/expo export --platform android --output-dir "$RUNNER_TEMP/heremate-m2-android-export"
+          node - "$RUNNER_TEMP/heremate-m2-android-export" <<'JS'
+          const fs=require('node:fs'),path=require('node:path');
+          const root=process.argv[2];const entries=[];
+          function scan(dir){
+            for(const item of fs.readdirSync(dir,{withFileTypes:true})){
+              const p=path.join(dir,item.name);
+              if(item.isDirectory())scan(p);
+              else if(item.name.endsWith('.hbc'))entries.push(p);
+            }
+          }
+          scan(root);
+          if(entries.length!==1 || fs.statSync(entries[0]).size<100000)
+            throw Error('Android M2 Hermes bundle missing');
+          JS
       - name: Test EAS release and build gates
         run: node --test tests/release-gates.test.mjs
       - name: Android/iOS JavaScript Metro export smoke
