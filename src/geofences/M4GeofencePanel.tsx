@@ -1,6 +1,7 @@
 /**
  * M4 opt-in two-party geofence consent UI for a future reviewed Staging API.
- * Unmounted by default in Android/iOS build profiles. Never auto-samples GPS.
+ * Unmounted by default in Android/iOS build profiles. GPS observation is
+ * optional, explicitly started, foreground-only and capped at 60 seconds.
  * Tracked subject reviews exact proposed circle BEFORE approval and always
  * has an independent revoke control, including after a friendship is removed.
  * Circle and observed event live only in React memory and clear on
@@ -18,6 +19,7 @@ import {otherParticipant,type FriendRequest} from '../friends/friendModel';
 import {usePreferences} from '../ui/PreferencesProvider';
 import type {Palette} from '../ui/preferencesModel';
 import type {GeofenceCircle,M4Transport} from './m4StagingTransport';
+import {createM4ForegroundZoneWatch,type M4WatchPhase} from './m4ForegroundZoneWatch';
 
 type Props=Readonly<{transport:M4Transport;backendReviewedAndEnabled:boolean}>;
 export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
@@ -33,9 +35,12 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState(false);
  const [message,setMessage]=useState('');
+ const [watchPhase,setWatchPhase]=useState<M4WatchPhase>('off');
+ const zoneWatch=useRef<ReturnType<typeof createM4ForegroundZoneWatch>|null>(null);
  const identity=useRef<string|null>(null);
  const seq=useRef(0),alive=useRef(false),processing=useRef(false);
  const clearSensitive=useCallback(()=>{
+   zoneWatch.current?.stop();
    ++seq.current;
    if(alive.current){
      setReviewed(null);setMessage('');setError(false);
@@ -60,6 +65,51 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      identity.current=null;
    };
  },[backendReviewedAndEnabled,clearSensitive]);
+ // This watcher only exists in a separately reviewed, opt-in M4 Staging
+ // build. It never registers a background location task or a push token.
+ useEffect(()=>{
+   if(!backendReviewedAndEnabled)return;
+   const controller=createM4ForegroundZoneWatch({
+     identity:()=>getStagingGuestAuth().currentUser?.uid??null,
+     isForeground:()=>AppState.currentState==='active',
+     requestPermission:async()=>{
+       if(AppState.currentState!=='active'||
+          !(await Location.hasServicesEnabledAsync()))return false;
+       const grant=await Location.requestForegroundPermissionsAsync();
+       return grant.granted===true&&AppState.currentState==='active';
+     },
+     hasPermission:async()=>AppState.currentState==='active'&&
+       (await Location.hasServicesEnabledAsync())&&
+       (await Location.getForegroundPermissionsAsync()).granted===true,
+     watch:async(onFix,onError)=>{
+       const sub=await Location.watchPositionAsync({
+         accuracy:Location.Accuracy.Balanced,timeInterval:10_000,
+         distanceInterval:10
+       },gps=>onFix({
+         latitude:gps.coords.latitude,longitude:gps.coords.longitude,
+         accuracyMeters:gps.coords.accuracy??Infinity,
+         capturedAtMs:gps.timestamp
+       }),onError);
+       return {remove:()=>sub.remove()};
+     },
+     evaluate:async(ownerUid,fix)=>(await transport.evaluate(ownerUid,fix)).event,
+     now:Date.now,
+     schedule:(fn,ms)=>setTimeout(fn,ms),
+     cancel:handle=>clearTimeout(handle as ReturnType<typeof setTimeout>),
+     onPhase:phase=>{if(alive.current)setWatchPhase(phase);},
+     onEvent:event=>{
+       if(alive.current)setMessage(event==='enter'?
+         (language==='th'?'ยืนยันว่าเข้าสู่พื้นที่':'Confirmed zone entry'):
+         (language==='th'?'ยืนยันว่าออกจากพื้นที่':'Confirmed zone exit'));
+     },
+     onFailure:()=>{if(alive.current)setError(true);}
+   });
+   zoneWatch.current=controller;
+   return()=>{
+     controller.dispose();
+     if(zoneWatch.current===controller)zoneWatch.current=null;
+   };
+ },[backendReviewedAndEnabled,transport,language]);
  const reload=useCallback(async()=>{
    if(!backendReviewedAndEnabled||AppState.currentState!=='active')return;
    const user=identity.current;
@@ -83,6 +133,9 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
  const peer=current&&uid?otherParticipant(current,uid):null;
  const relationApproved=!!current&&current.status==='accepted'&&
    current.senderConsent===true&&current.recipientConsent===true;
+ useEffect(()=>{
+   if(!relationApproved)zoneWatch.current?.stop();
+ },[relationApproved,selected]);
  const validCircleInput=()=>{
    if(!lat.trim()||!lon.trim()||!radius.trim())return null;
    const latitude=Number(lat),longitude=Number(lon),radiusMeters=Number(radius);
@@ -155,7 +208,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      const selectedNow=selected===friend.id;
      return <Pressable key={friend.id} accessibilityRole="button"
        disabled={busy} accessibilityState={{selected:selectedNow}}
-       onPress={()=>{setSelected(friend.id);setReviewed(null);setMessage('');setError(false);}}
+       onPress={()=>{zoneWatch.current?.stop();setSelected(friend.id);setReviewed(null);setMessage('');setError(false);}}
        style={[s.item,selectedNow&&s.selected]}>
        <Text style={s.itemText}>{other.displayName}</Text>
        <Text style={s.note}>{friend.status==='accepted'&&
@@ -234,6 +287,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
        <Text style={s.label}>{label('ถอนความยินยอมได้ตลอดเวลา','Revoke either zone at any time')}</Text>
        <Pressable accessibilityRole="button" disabled={busy} style={s.destructive}
          onPress={()=>void run(async()=>{
+           zoneWatch.current?.stop();
            await transport.revoke(peer.uid,uid);
            setReviewed(null);
            return label('ถอนอนุญาตที่เพื่อนสร้างให้คุณแล้ว',
@@ -243,20 +297,43 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
          )}</Text></Pressable>
        <Pressable accessibilityRole="button" disabled={busy} style={s.secondary}
          onPress={()=>void run(async()=>{
+           zoneWatch.current?.stop();
            await transport.revoke(uid,peer.uid);
            return label('ยกเลิกพื้นที่ที่คุณเสนอแล้ว','Revoked zone you proposed');
          })}><Text style={s.secondaryText}>{label(
            'ยกเลิกพื้นที่ที่ฉันเสนอให้เพื่อน','Revoke my proposed zone'
          )}</Text></Pressable>
      </View>
-     {relationApproved?<Pressable accessibilityRole="button" disabled={busy}
-       style={s.secondary}
+     {relationApproved?<Pressable accessibilityRole="button"
+       disabled={busy||watchPhase!=='off'} style={s.secondary}
        onPress={()=>void run(()=>checkCurrentLocation(peer.uid))}>
        <Text style={s.secondaryText}>{label(
          'ตรวจเข้า–ออกพื้นที่จาก GPS ตอนนี้ (ต้องแชร์กับเพื่อนอยู่)',
          'Check my current zone (requires active M2 sharing)'
        )}</Text>
      </Pressable>:null}
+     {relationApproved?<View style={s.subpanel}>
+       <Text style={s.note}>{label(
+         'การเฝ้าดูพื้นที่เป็นตัวเลือก: ใช้ GPS เฉพาะตอนเปิดแอป สูงสุด 60 วินาที ต้องมี M2 sharing และพื้นที่ที่อีกฝ่ายอนุมัติแล้ว ไม่มี Push หรือการติดตามเบื้องหลัง',
+         'Optional: watch the zone for up to 60 seconds while this app is open. Requires active M2 sharing and subject-approved zone. No push or background tracking'
+       )}</Text>
+       <Pressable accessibilityRole="button" disabled={busy}
+         style={watchPhase==='off'?s.primary:s.destructive}
+         onPress={()=>{
+           if(watchPhase==='off'){
+             setError(false);setMessage('');
+             void zoneWatch.current?.start(peer.uid,relationApproved);
+           }else zoneWatch.current?.stop();
+         }}>
+         <Text style={watchPhase==='off'?s.primaryText:s.destructiveText}>
+           {watchPhase==='off'?label('เริ่มเฝ้าดู 60 วินาที','Start 60-second zone watch'):
+             label('หยุดเฝ้าดูทันที','Stop zone watch')}
+         </Text>
+       </Pressable>
+       {watchPhase==='watching'?<Text style={s.note}>
+         {label('กำลังตรวจพื้นที่เฉพาะตอนเปิดแอป','Foreground zone watch active')}
+       </Text>:null}
+     </View>:null}
    </>:<Text style={s.note}>{label(
      'เลือกเพื่อนที่มีอยู่เพื่อจัดการพื้นที่และเพิกถอนสิทธิ์',
      'Select an existing friend to manage zones and revocation'
