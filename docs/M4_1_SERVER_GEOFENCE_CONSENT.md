@@ -12,8 +12,11 @@ domain test only.
   24h pending proposal expiry, no implicit subject acceptance.
 - \`review\`: only the tracked subject can see the exact proposed latitude,
   longitude and radius before informed acceptance.
-- \`decide\`: subject alone approves or rejects. Approval is bound to the
-  **precise Firestore relationship revision**; expires after 7 days.
+- \`decide\`: subject alone approves or rejects. Both decisions require the
+  **exact reviewed proposal creation timestamp** returned by \`review\`;
+  an expired/replaced proposal cannot be approved or rejected using an older
+  review. Approval also binds the **precise Firestore relationship revision**
+  and expires after 7 days.
 - \`evaluate\`: only the tracked subject may submit its own transient
   foreground location fix. The server transaction independently checks
   current accepted M1 friendship, both M1 sharing-consent flags, current

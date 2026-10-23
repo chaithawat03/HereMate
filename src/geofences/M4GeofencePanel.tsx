@@ -31,7 +31,9 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
  const [lat,setLat]=useState('');
  const [lon,setLon]=useState('');
  const [radius,setRadius]=useState('350');
- const [reviewed,setReviewed]=useState<GeofenceCircle|null>(null);
+ const [reviewed,setReviewed]=useState<{
+   ownerUid:string;circle:GeofenceCircle;proposalCreatedAtMs:number;
+ }|null>(null);
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState(false);
  const [message,setMessage]=useState('');
@@ -271,15 +273,16 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
        <Pressable accessibilityRole="button" disabled={busy} style={s.secondary}
          onPress={()=>void run(async isCurrent=>{
            const pending=await transport.review(peer.uid);
-           if(isCurrent())setReviewed(pending.circle);
+           if(isCurrent())setReviewed({ownerUid:peer.uid,
+             circle:pending.circle,proposalCreatedAtMs:pending.proposalCreatedAtMs});
            return label('ตรวจพิกัดและรัศมีด้านล่างก่อนตัดสินใจ',
              'Inspect exact coordinates/radius before deciding');
          })}><Text style={s.secondaryText}>{label('ตรวจคำขอที่รออนุมัติ','Review pending proposal')}</Text>
        </Pressable>
-       {reviewed?<View style={s.review}>
-         <Text style={s.itemText}>{label('ละติจูด','Latitude')}: {String(reviewed.latitude)}</Text>
-         <Text style={s.itemText}>{label('ลองจิจูด','Longitude')}: {String(reviewed.longitude)}</Text>
-         <Text style={s.itemText}>{label('รัศมี','Radius')}: {String(reviewed.radiusMeters)} m</Text>
+       {reviewed?.ownerUid===peer.uid?<View style={s.review}>
+         <Text style={s.itemText}>{label('ละติจูด','Latitude')}: {String(reviewed.circle.latitude)}</Text>
+         <Text style={s.itemText}>{label('ลองจิจูด','Longitude')}: {String(reviewed.circle.longitude)}</Text>
+         <Text style={s.itemText}>{label('รัศมี','Radius')}: {String(reviewed.circle.radiusMeters)} m</Text>
          <Text style={s.note}>{label(
            'การอนุมัติอนุญาตการตรวจเข้า–ออกพื้นที่นี้เท่านั้น ไม่ใช่อนุญาตการบันทึกประวัติ GPS',
            'Approval covers this exact zone only, not GPS history retention'
@@ -287,13 +290,13 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
          <View style={s.actions}>
            <Pressable accessibilityRole="button" disabled={busy} style={s.primary}
              onPress={()=>void run(async()=>{
-               await transport.decide(peer.uid,true);
+               await transport.decide(peer.uid,true,reviewed.proposalCreatedAtMs);
                setReviewed(null);
                return label('อนุมัติพื้นที่นี้แล้ว','Zone approved');
              })}><Text style={s.primaryText}>{label('อนุมัติ','Approve')}</Text></Pressable>
            <Pressable accessibilityRole="button" disabled={busy} style={s.secondary}
              onPress={()=>void run(async()=>{
-               await transport.decide(peer.uid,false);
+               await transport.decide(peer.uid,false,reviewed.proposalCreatedAtMs);
                setReviewed(null);
                return label('ปฏิเสธคำขอแล้ว','Proposal rejected');
              })}><Text style={s.secondaryText}>{label('ปฏิเสธ','Reject')}</Text></Pressable>

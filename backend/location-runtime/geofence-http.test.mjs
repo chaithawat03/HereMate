@@ -31,7 +31,8 @@ test('every M4 route requires strict path/body, and authenticates by token not c
  const inputs=[
   ['/v1/geofences/propose',{subjectUid:B,circle}],
   ['/v1/geofences/review',{ownerUid:A}],
-  ['/v1/geofences/decide',{ownerUid:A,approve:false}],
+  ['/v1/geofences/decide',{ownerUid:A,approve:false,
+    proposalCreatedAtMs:1_800_000_000_000}],
   ['/v1/geofences/revoke',{ownerUid:A,subjectUid:B}],
   ['/v1/geofences/evaluate',{ownerUid:A,
     point:{latitude:0,longitude:0,accuracyMeters:15,capturedAtMs:1800000000000},
@@ -53,7 +54,12 @@ test('every M4 route requires strict path/body, and authenticates by token not c
      method:'GET'
    }),svc)).status,405);
  }
- assert.equal(seen.length,inputs.length);
+ assert.equal((await handleGeofenceHttp(requestTo('/v1/geofences/decide',
+   {ownerUid:A,approve:true}),svc)).status,400);
+ assert.equal((await handleGeofenceHttp(requestTo('/v1/geofences/decide',
+   {ownerUid:A,approve:true,proposalCreatedAtMs:1_800_000_000_000.5}),svc)).status,200);
+ // HTTP validates shape; trusted service validates the version is an integer.
+ assert.equal(seen.length,inputs.length+1);
  assert.ok(seen.every(x=>x.idToken===TOKEN));
  assert.equal(Object.keys(GEOFENCE_ROUTES).length,5);
  assert.equal((await handleGeofenceHttp(requestTo('/v1/geofences/unknown',{}),svc)).status,404);

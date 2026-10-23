@@ -21,7 +21,9 @@ export const MAX_GEOFENCE_REQUEST_BYTES=2048;
 export const GEOFENCE_ROUTES=Object.freeze({
  '/v1/geofences/propose':{method:'propose',keys:['subjectUid','circle']},
  '/v1/geofences/review':{method:'review',keys:['ownerUid']},
- '/v1/geofences/decide':{method:'decide',keys:['ownerUid','approve']},
+ '/v1/geofences/decide':{method:'decide',keys:[
+   'ownerUid','approve','proposalCreatedAtMs'
+ ]},
  '/v1/geofences/revoke':{method:'revoke',keys:['ownerUid','subjectUid']},
  '/v1/geofences/evaluate':{method:'evaluate',keys:[
    'ownerUid','point','appInForeground','foregroundPermissionGranted'
