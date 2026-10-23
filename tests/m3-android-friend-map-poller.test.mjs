@@ -1,0 +1,103 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {
+ createAndroidFriendMapPoller,ANDROID_FRIEND_MAP_POLL_MS,
+ ANDROID_FRIEND_MAP_READ_LIMIT_PER_TICK,ANDROID_FRIEND_MAP_MAX_READS_PER_60S
+} from '../src/location/androidFriendMapPoller.ts';
+
+const USER='androidvieweruid00001';
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+function rig(extra={}){
+ let uid=USER,foreground=true,android=true,reads=0,cancelled=0;
+ const intervals=[],states=[];
+ const controller=createAndroidFriendMapPoller({
+   isAndroid:()=>android,isForeground:()=>foreground,currentUid:()=>uid,
+   scheduleInterval:(fn,ms)=>{
+     const row={fn,ms,cancelled:false};
+     intervals.push(row);return row;
+   },
+   cancelInterval:row=>{row.cancelled=true;cancelled++;},
+   refresh:async()=>{reads++;},
+   onActive:x=>states.push(x),
+   ...extra
+ });
+ return {controller,intervals,states,stats:()=>({reads,cancelled}),
+   setUid:x=>{uid=x;},setAndroid:x=>{android=x;},
+   setForeground:x=>{foreground=x;},tick:()=>intervals.at(-1).fn()};
+}
+test('Android only; explicit tap starts bounded 30 second authenticated reads',async()=>{
+ const x=rig();
+ assert.equal(ANDROID_FRIEND_MAP_READ_LIMIT_PER_TICK,8);
+ assert.equal(ANDROID_FRIEND_MAP_POLL_MS,30000);
+ assert.ok(ANDROID_FRIEND_MAP_MAX_READS_PER_60S<=30);
+ assert.equal(x.stats().reads,0);
+ assert.equal(x.controller.isActive(),false);
+ assert.equal(x.controller.start(),true);
+ await flush();
+ assert.deepEqual(x.states,[true]);
+ assert.equal(x.intervals.length,1);
+ assert.equal(x.intervals[0].ms,ANDROID_FRIEND_MAP_POLL_MS);
+ assert.equal(x.stats().reads,1);
+ x.tick();await flush();
+ assert.equal(x.stats().reads,2);
+ assert.equal(x.controller.start(),false);
+ x.controller.stop();
+ assert.deepEqual(x.states,[true,false]);
+ assert.equal(x.stats().cancelled,1);
+ x.tick();await flush(); // already-cancelled callback can never refresh
+ assert.equal(x.stats().reads,2);
+});
+test('foreground, device, valid identity and account switch all fail closed',async()=>{
+ const x=rig();
+ x.setAndroid(false);
+ assert.equal(x.controller.start(),false);
+ x.setAndroid(true);x.setForeground(false);
+ assert.equal(x.controller.start(),false);
+ x.setForeground(true);x.setUid(null);
+ assert.equal(x.controller.start(),false);
+ x.setUid(USER);
+ assert.equal(x.controller.start(),true);
+ await flush();
+ x.setUid('anotherdeviceuid0003');
+ x.tick();await flush();
+ assert.equal(x.controller.isActive(),false);
+ assert.deepEqual(x.states,[true,false]);
+ assert.equal(x.stats().reads,1);
+ x.setUid(USER);
+ assert.equal(x.controller.start(),true);
+ x.setForeground(false);
+ x.tick();await flush();
+ assert.equal(x.controller.isActive(),false);
+ assert.equal(x.stats().reads,2); // second explicit start read only
+});
+test('overlapping HTTP batches cannot accumulate; disposal does not restart polling',async()=>{
+ let resume;
+ const pending=new Promise(resolve=>{resume=resolve;});
+ let runs=0;
+ const x=rig({refresh:async()=>{runs++;await pending;}});
+ x.controller.start();
+ await flush();
+ x.tick();x.tick();await flush();
+ assert.equal(runs,1);
+ x.controller.stop();
+ resume();await flush();
+ x.tick();await flush();
+ assert.equal(runs,1);
+ x.controller.dispose();
+ assert.equal(x.controller.start(),false);
+});
+test('Android panel never polls automatically, iPhone path remains deferred and no GPS publishing',()=>{
+ const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
+ const panel=read('src/location/M2FriendLocationPanel.tsx');
+ const control=read('src/location/androidFriendMapPoller.ts');
+ const eas=read('eas.json');
+ assert.match(panel,/Platform\.OS==='android'/);
+ assert.match(panel,/poller\.current\?\.start\(\)/);
+ assert.match(panel,/poller\.current\?\.stop\(\)/);
+ assert.match(panel,/AppState\.addEventListener/);
+ assert.match(panel,/onAuthStateChanged/);
+ assert.match(panel,/MAX_MAP_FRIEND_READS/);
+ assert.doesNotMatch(control,/watchPositionAsync|startLocationUpdatesAsync|TaskManager|AsyncStorage|setDoc\(|addDoc\(|fetch\(/);
+ assert.doesNotMatch(eas,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS/);
+});
