@@ -20,6 +20,7 @@ import {usePreferences} from '../ui/PreferencesProvider';
 import type {Palette} from '../ui/preferencesModel';
 import type {GeofenceCircle,M4Transport} from './m4StagingTransport';
 import {createM4ForegroundZoneWatch,type M4WatchPhase} from './m4ForegroundZoneWatch';
+import {createAccountScopedFriendRefresh} from '../location/accountScopedFriendRefresh';
 
 type Props=Readonly<{transport:M4Transport;backendReviewedAndEnabled:boolean}>;
 export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
@@ -35,6 +36,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
    ownerUid:string;circle:GeofenceCircle;proposalCreatedAtMs:number;
  }|null>(null);
  const [busy,setBusy]=useState(false);
+ const [foregroundRevision,setForegroundRevision]=useState(0);
  const [error,setError]=useState(false);
  const [message,setMessage]=useState('');
  const [watchPhase,setWatchPhase]=useState<M4WatchPhase>('off');
@@ -43,13 +45,17 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
  const alertsRef=useRef(false);
  const zoneWatch=useRef<ReturnType<typeof createM4ForegroundZoneWatch>|null>(null);
  const identity=useRef<string|null>(null);
+ const friendGate=useRef<ReturnType<typeof createAccountScopedFriendRefresh>|null>(null);
  const seq=useRef(0),alive=useRef(false),processing=useRef(false);
  const clearSensitive=useCallback(()=>{
    zoneWatch.current?.stop();
+   friendGate.current?.invalidate();
    alertsRef.current=false;
-   if(alive.current)setForegroundAlerts(false);
    ++seq.current;
+   processing.current=false;
    if(alive.current){
+     setForegroundAlerts(false);
+     setFriends([]);setBusy(false);
      setReviewed(null);setMessage('');setError(false);
      setLat('');setLon('');setSelected(null);
    }
@@ -57,18 +63,39 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
  useEffect(()=>{
    if(!backendReviewedAndEnabled)return;
    alive.current=true;
-   identity.current=getStagingGuestAuth().currentUser?.uid??null;
-   const sub=onAuthStateChanged(getStagingGuestAuth(),user=>{
+   const auth=getStagingGuestAuth();
+   identity.current=auth.currentUser?.uid??null;
+   const gate=createAccountScopedFriendRefresh({
+     // Consult actual Firebase, not the last asynchronous auth callback.
+     currentUid:()=>{
+       const actual=auth.currentUser?.uid??null;
+       return actual===identity.current?actual:null;
+     },
+     isForeground:()=>AppState.currentState==='active'
+   });
+   friendGate.current=gate;
+   const sub=onAuthStateChanged(auth,user=>{
      const uid=user?.uid??null;
      if(uid!==identity.current){
-       identity.current=uid;setFriends([]);clearSensitive();
+       identity.current=uid;
+       clearSensitive();
+       if(AppState.currentState==='active')
+         setForegroundRevision(v=>v+1);
      }
-   },()=>{identity.current=null;setFriends([]);clearSensitive();});
+   },()=>{
+     identity.current=null;
+     clearSensitive();
+   });
    const app=AppState.addEventListener('change',status=>{
      if(status!=='active')clearSensitive();
+     else setForegroundRevision(v=>v+1);
    });
    return()=>{
-     alive.current=false;seq.current++;sub();app.remove();
+     alive.current=false;
+     gate.dispose();
+     if(friendGate.current===gate)friendGate.current=null;
+     seq.current++;sub();app.remove();
+     zoneWatch.current?.stop();
      identity.current=null;
    };
  },[backendReviewedAndEnabled,clearSensitive]);
@@ -131,22 +158,14 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
  },[backendReviewedAndEnabled,transport,language]);
  const reload=useCallback(async()=>{
    if(!backendReviewedAndEnabled||AppState.currentState!=='active')return;
-   const user=identity.current;
-   if(!user)return;
-   const current=++seq.current;
-   try{
-     const rows=await listOwnRequests();
-     if(alive.current&&current===seq.current&&identity.current===user&&
-        AppState.currentState==='active'){
-       setFriends(rows.filter(r=>r.senderUid===user||r.recipientUid===user));
-       setError(false);
-     }
-   }catch{
-     if(alive.current&&current===seq.current)setError(true);
-   }
+   await friendGate.current?.run(listOwnRequests,(rows,user)=>{
+     if(!alive.current)return;
+     setFriends(rows.filter(r=>r.senderUid===user||r.recipientUid===user));
+     setError(false);
+   },()=>{if(alive.current)setError(true);});
  },[backendReviewedAndEnabled]);
  useEffect(()=>{if(backendReviewedAndEnabled)void reload();},
-   [backendReviewedAndEnabled,reload]);
+   [backendReviewedAndEnabled,reload,foregroundRevision]);
  const uid=identity.current;
  const current=friends.find(f=>f.id===selected);
  const peer=current&&uid?otherParticipant(current,uid):null;
@@ -170,17 +189,20 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
    processing.current=true;setBusy(true);setError(false);setMessage('');
    const currentRun=++seq.current;
    const isCurrent=()=>alive.current&&seq.current===currentRun&&
-     identity.current===actor&&AppState.currentState==='active';
+     identity.current===actor&&
+     getStagingGuestAuth().currentUser?.uid===actor&&
+     AppState.currentState==='active';
    try{
      const success=await work(isCurrent);
-     if(alive.current&&seq.current===currentRun&&identity.current===actor&&
-        AppState.currentState==='active')setMessage(success);
+     if(isCurrent())setMessage(success);
    }catch{
-     if(alive.current&&seq.current===currentRun&&identity.current===actor&&
-        AppState.currentState==='active')setError(true);
+     if(isCurrent())setError(true);
    }finally{
-     processing.current=false;
-     if(alive.current)setBusy(false);
+     // Cancelled requests must not release the mutex of a newer request.
+     if(seq.current===currentRun){
+       processing.current=false;
+       if(alive.current)setBusy(false);
+     }
    }
  }
  async function checkCurrentLocation(ownerUid:string){
