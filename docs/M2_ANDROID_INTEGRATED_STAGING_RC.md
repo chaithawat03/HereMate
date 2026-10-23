@@ -14,7 +14,8 @@ foreground-only sharing, and consent-filtered friend location schematic.
 Normal Demo/Guest EAS profiles and iOS remain unchanged.
 
 GitHub Actions workflow `android-m2-native-staging-apk.yml` is a
-**manual-only** single native release APK build. It uses locked Expo dependencies,
+**single operator-triggered** native release APK build (GitHub UI dispatch or
+one exact owner comment on Issue #43). It uses locked Expo dependencies,
 `expo prebuild`, Android Gradle `assembleRelease` with the local debug signing
 configuration intended strictly for owner-device testing (not Google Play
 production signing), and an APK/immutable SHA-256 manifest as one 7-day
@@ -22,10 +23,24 @@ Actions artifact. It uses no EAS cloud build or extra OAuth/GCP credentials.
 The workflow may fail if GitHub hosted Android builds are incompatible or
 exceed compute limits; do not claim an APK exists without a successful job.
 
-To run after merge/green PR CI, open GitHub Actions →
-**HereMate M2 Android APK — one manual test build**, select `main`, enter
-`heremate/android-m2-staging` and click **Run workflow once**. When finished
-SUCCESS, download `HereMate-M2-Android-Staging-Test-APK` from the run's
+To start after merge/green PR CI, choose exactly one trigger:
+
+- From ChatGPT after explicit owner instruction: add a **new** owner-authored
+  comment with exactly `/heremate-build-m2-staging` on
+  [Issue #43](https://github.com/chaithawat03/HereMate/issues/43).
+  The GitHub `issue_comment` event uses the default-branch workflow; the
+  job checks repository, `main`, issue number 43, a non-PR issue,
+  `created` action, entire exact comment body, owner login **and numeric
+  GitHub user ID**, author association OWNER, webhook sender and actor.
+  Comments with other content/authors are skipped; comment edit never builds.
+  Never put credentials in a comment. Connector-authored comment trigger must
+  be verified on its first actual execution; do not claim Build has started
+  before GitHub reports the run.
+- Alternatively open [GitHub Actions](https://github.com/chaithawat03/HereMate/actions/workflows/android-m2-native-staging-apk.yml),
+  select `main`, enter `heremate/android-m2-staging` in the
+  `workflow_dispatch` input and click Run workflow once.
+
+**Do not post both triggers for the same APK.** When finished SUCCESS, download `HereMate-M2-Android-Staging-Test-APK` from the run's
 Artifacts, unzip, verify SHA-256 against `android-m2-rc-manifest.json`, then
 install on owner-approved Android devices. This test APK may require
 uninstalling a different-signature package version already installed with

@@ -25,11 +25,26 @@ test('M2 root is opt-in Android Staging; original EAS/Demo flows unchanged',()=>
  assert.match(old,/android-guest-staging/);
 });
 
-test('native Android release build is ONE manual APK, without EAS usage or app secrets',()=>{
+test('native Android release build is ONE owner-gated APK, without EAS usage or app secrets',()=>{
  assert.match(workflow,/^  workflow_dispatch:/m);
- assert.doesNotMatch(workflow,/^  push:|^  schedule:|^  pull_request:/m);
+ assert.match(workflow,/^  issue_comment:/m);
+ assert.match(workflow,/^    types: \[created\]/m);
+ assert.doesNotMatch(workflow,/^  push:|^  schedule:|^  pull_request:|^  pull_request_target:/m);
  assert.match(workflow,/github\.ref == 'refs\/heads\/main'/);
  assert.match(workflow,/inputs\.confirm_target == 'heremate\/android-m2-staging'/);
+ // Exactly one Issue #43 owner comment can start a job. Others are skipped.
+ assert.match(workflow,/github\.event_name == 'issue_comment'/);
+ assert.match(workflow,/github\.event\.action == 'created'/);
+ assert.match(workflow,/github\.event\.issue\.number == 43/);
+ assert.match(workflow,/github\.event\.issue\.pull_request == null/);
+ assert.match(workflow,/github\.event\.comment\.body == '\/heremate-build-m2-staging'/);
+ assert.match(workflow,/github\.event\.comment\.user\.login == 'chaithawat03'/);
+ assert.match(workflow,/github\.event\.comment\.user\.id == 29879036/);
+ assert.match(workflow,/github\.event\.comment\.author_association == 'OWNER'/);
+ assert.match(workflow,/github\.event\.sender\.login == 'chaithawat03'/);
+ assert.match(workflow,/github\.actor == 'chaithawat03'/);
+ assert.match(workflow,/^permissions:\n  contents: read/m);
+ assert.match(workflow,/concurrency:[\s\S]*?cancel-in-progress: false/);
  assert.match(workflow,/EXPO_PUBLIC_ENABLE_M2_SHARING: 'true'/);
  assert.match(workflow,/EXPO_PUBLIC_ENABLE_FIREBASE_GUEST: 'true'/);
  assert.match(workflow,/expo prebuild --platform android --non-interactive --clean/);
