@@ -31,6 +31,12 @@ const fields=(obj:unknown,keys:readonly string[]):boolean=>{
 };
 const unavailable=():never=>{throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');};
 const validNumber=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
+/** Provider-confirmed Cloud Run origins in the one approved HereMate project.
+ * Reject every other *.run.app host before Firebase bearer or GPS transfer. */
+export const APPROVED_M2_STAGING_ORIGINS=Object.freeze([
+  'https://heremate-m2-location-staging-976775896533.asia-southeast1.run.app',
+  'https://heremate-m2-location-staging-2inhowyo2a-as.a.run.app'
+]);
 const validFix=(p:unknown):p is ShareFix=>{
   if(!fields(p,['latitude','longitude','accuracyMeters','capturedAtMs']))return false;
   const v=p as Record<string,unknown>;
@@ -42,9 +48,13 @@ const validFix=(p:unknown):p is ShareFix=>{
 function validUrl(input:string):string {
   let url:URL;
   try{url=new URL(input);}catch{return unavailable();}
-  // No developer tunnel, arbitrary host, IP, plain HTTP or URL credentials.
-  if(url.protocol!=='https:'||!url.hostname.endsWith('.run.app')||
-    url.username||url.password||url.port||url.pathname!=='/'||url.search||url.hash)
+  // Enforce the EXACT deployed project's reviewed Cloud Run origin.
+  // A general *.run.app wildcard would exfiltrate bearer tokens and GPS
+  // if an integration caller ever supplied its own Cloud Run service.
+  if(url.protocol!=='https:'||!APPROVED_M2_STAGING_ORIGINS.includes(url.origin)||
+     url.username||url.password||url.port||url.pathname!=='/'||
+     url.search||url.hash||
+     (input!==url.origin&&input!==url.origin+'/'))
     unavailable();
   return url.origin;
 }
@@ -86,6 +96,9 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     try {
       const response=await ports.fetchImpl(origin+endpoint,{
         method:'POST',
+        // A 307/308 redirect could forward a private GPS POST body to a
+        // different origin even though the initial URL was allowlisted.
+        redirect:'error',
         headers:{
           'Authorization':'Bearer '+jwt,
           'Content-Type':'application/json',

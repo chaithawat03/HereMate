@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {createM2StagingTransport} from '../src/location/m2StagingTransport.ts';
+import {createM2StagingTransport,APPROVED_M2_STAGING_ORIGINS} from '../src/location/m2StagingTransport.ts';
 import {handleLocationHttp} from '../backend/location/http.mjs';
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const A='owner000000000001',B='friend00000000002';
@@ -48,7 +48,7 @@ function rig(){
   return {ok:reply.status===200,status:reply.status,json:async()=>reply.body};
  };
  const ports={
-  approvedCloudRunUrl:'https://heremate-location-abc.a.run.app/',
+  approvedCloudRunUrl:APPROVED_M2_STAGING_ORIGINS[1]+'/',
   projectId:'heremate',currentIdentity:()=>identity,
   isForeground:()=>foreground,
   foregroundPermissionGranted:async()=>permission,
@@ -76,6 +76,7 @@ test('client and backend HTTP endpoint shapes integrate with bearer only; no act
  ]);
  for(const x of r.requests){
   assert.equal(x.init.method,'POST');
+  assert.equal(x.init.redirect,'error','Never forward GPS POST bodies to a 307/308 redirect');
   assert.equal(x.init.headers.Authorization,'Bearer '+token);
   assert.equal(x.init.headers['Cache-Control'],'no-store');
   assert.equal(x.init.headers['Content-Type'],'application/json');
@@ -89,6 +90,15 @@ test('invalid projects or non-Cloud-Run / unsafe URLs are forbidden, not accepte
    'http://test.a.run.app/','https://127.0.0.1/','https://evil.com/',
    'https://my.run.app.evil.example/','https://user:pass@test.a.run.app/',
    'https://test.a.run.app/private','https://test.a.run.app/?token=private',
+   // A third-party Cloud Run host has a valid Google TLS certificate but
+   // must never receive HereMate Firebase bearer tokens or coordinates.
+   'https://attacker-controlled-service-abc.a.run.app',
+   'https://heremate-m2-location-staging-2inhowyo2a-as.a.run.app.evil.invalid',
+   APPROVED_M2_STAGING_ORIGINS[1]+'/v1/locations/points/read',
+   APPROVED_M2_STAGING_ORIGINS[1]+'?access=token',
+   APPROVED_M2_STAGING_ORIGINS[1]+'#frag',
+   'HTTPS://heremate-m2-location-staging-2inhowyo2a-as.a.run.app',
+   'https://HEREMATE-M2-LOCATION-STAGING-2inhowyo2a-as.a.run.app',
  ]) assert.throws(()=>createM2StagingTransport({...base,approvedCloudRunUrl:url}),/UNAVAILABLE/);
  assert.throws(()=>createM2StagingTransport({...base,projectId:'production'}),/UNAVAILABLE/);
 });
@@ -133,7 +143,7 @@ test('mobile M2 remains strictly unmounted; no Cloud Run URL in app, no M2 EAS f
  assert.doesNotMatch(app,/M2FriendLocationPanel|M2SharingPanel|m2StagingTransport|EXPO_PUBLIC_ENABLE_M2/);
  assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_M2_SHARING,undefined);
  assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_M2_MAP,undefined);
- assert.ok(code.includes("url.hostname.endsWith('.run.app')"));
+ assert.match(code,/APPROVED_M2_STAGING_ORIGINS\.includes\(url\.origin\)/);
  assert.doesNotMatch(code,/AsyncStorage|setDoc\(|onSnapshot|requestBackgroundPermissionsAsync|startLocationUpdatesAsync|console\.log/);
 });
 
@@ -155,4 +165,25 @@ test('location read validates numeric finite coordinates, bounds and expiry shap
  const r=rig();r.setIdentity({uid:B,getIdToken:async()=>token});
  r.setServer('untrustedPoint');
  await assert.rejects(r.transport.read(A),/UNAVAILABLE/);
+});
+
+test('only the two independently reviewed Staging Cloud Run service origins are admitted',()=>{
+ const baseline=rig().ports;
+ assert.deepEqual(APPROVED_M2_STAGING_ORIGINS,[
+  'https://heremate-m2-location-staging-976775896533.asia-southeast1.run.app',
+  'https://heremate-m2-location-staging-2inhowyo2a-as.a.run.app'
+ ]);
+ for(const approved of APPROVED_M2_STAGING_ORIGINS){
+  const t=createM2StagingTransport({...baseline,approvedCloudRunUrl:approved});
+  assert.equal(typeof t.start,'function');
+  assert.equal(typeof t.emergencyStop,'function');
+ }
+ // Alternate account/project, even under Google's Cloud Run domain: deny.
+ for(const rejected of [
+   'https://heremate-m2-location-staging-123456789999.asia-southeast1.run.app',
+   'https://heremate-m2-location-staging-999999999999.us-central1.run.app',
+   'https://not-heremate-2inhowyo2a-as.a.run.app'
+ ])assert.throws(()=>createM2StagingTransport({
+   ...baseline,approvedCloudRunUrl:rejected
+ }),/M2_LOCATION_TRANSPORT_UNAVAILABLE/);
 });
