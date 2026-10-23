@@ -23,43 +23,53 @@ export type FriendMapPollPorts=Readonly<{
 }>;
 export function createAndroidFriendMapPoller(p:FriendMapPollPorts){
  let active=false,actor:string|null=null,handle:unknown=null;
- let inFlight=false,disposed=false;
- let lastBudgetUid:string|null=null,readStarts:number[]=[];
+ let generation=0,inFlightGeneration:number|null=null,disposed=false;
+ // Account switching must not reset the rolling read budget for an account
+ // that returns within the same minute. No coordinates or tokens are stored.
+ const readStartsByUid=new Map<string,number[]>();
  function stop(){
+   ++generation; // invalidate queued callbacks from the old interval
    if(handle!==null){p.cancelInterval(handle);handle=null;}
    actor=null;
    if(active){active=false;if(!disposed)p.onActive(false);}
  }
- function allowed(){
-   return active&&!disposed&&p.isAndroid()&&p.isForeground()&&
+ function allowed(run:number){
+   return run===generation&&active&&!disposed&&p.isAndroid()&&p.isForeground()&&
      actor!==null&&p.currentUid()===actor;
  }
- async function tick(){
-   if(!active||disposed)return;
-   if(!allowed()){stop();return;}
-   if(inFlight)return; // Never overlap full friend-list + HTTP batches.
+ async function tick(run:number){
+   if(!active||disposed||run!==generation)return;
+   if(!allowed(run)){stop();return;}
+   // A canceled old-account HTTP read must not block a new account's
+   // explicitly started session. Its completion must not unlock this one.
+   if(inFlightGeneration===run)return;
    const now=p.now();
    if(!Number.isSafeInteger(now)||now<=0){stop();return;}
-   // Bound transient retries/restarts too, not just uninterrupted 30s
-   // intervals. A per-owner rolling-minute allowance of 2 x 8 reads
-   // leaves sufficient capacity for one manual refresh.
-   readStarts=readStarts.filter(t=>t>now-WINDOW_MS);
+   for(const [uid,starts] of readStartsByUid){
+     const recent=starts.filter(t=>t>now-WINDOW_MS);
+     if(recent.length)readStartsByUid.set(uid,recent);
+     else readStartsByUid.delete(uid);
+   }
+   const uid=actor;
+   if(!uid)return;
+   const readStarts=readStartsByUid.get(uid)??[];
    if(readStarts.length>=MAX_WINDOW_BATCHES)return;
    readStarts.push(now);
-   inFlight=true;
+   readStartsByUid.set(uid,readStarts);
+   inFlightGeneration=run;
    try{await p.refresh();}
    catch{/* The view independently displays the failed fetch, not stale pins. */}
-   finally{inFlight=false;}
+   finally{if(inFlightGeneration===run)inFlightGeneration=null;}
  }
  function start(){
    if(active||disposed||!p.isAndroid()||!p.isForeground())return false;
    const uid=p.currentUid();
    if(!uid||!UID.test(uid))return false;
+   const run=++generation;
    actor=uid;active=true;
-   if(lastBudgetUid!==uid){lastBudgetUid=uid;readStarts=[];}
    p.onActive(true);
-   handle=p.scheduleInterval(()=>{void tick();},ANDROID_FRIEND_MAP_POLL_MS);
-   void tick(); // An explicit user tap starts first read immediately.
+   handle=p.scheduleInterval(()=>{void tick(run);},ANDROID_FRIEND_MAP_POLL_MS);
+   void tick(run); // An explicit user tap starts first read immediately.
    return true;
  }
  function dispose(){stop();disposed=true;}
