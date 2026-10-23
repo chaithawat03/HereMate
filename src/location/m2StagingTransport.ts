@@ -82,6 +82,10 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     if(!CODE.test(first.uid))unavailable();
     if(requireForeground&&(!ports.isForeground()||
        await ports.foregroundPermissionGranted()!==true))unavailable();
+    // The OS permission check is async. Identity/foreground may have changed
+    // silently before the Firebase auth/AppState callbacks are delivered.
+    if(ports.currentIdentity()?.uid!==first.uid||
+       (requireForeground&&!ports.isForeground()))unavailable();
     let jwt:string;
     try{jwt=await first.getIdToken();}
     catch{return unavailable();}
@@ -89,6 +93,10 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     if(ports.currentIdentity()?.uid!==first.uid)unavailable();
     if(requireForeground&&(!ports.isForeground()||
        await ports.foregroundPermissionGranted()!==true))unavailable();
+    // Never send the captured bearer/GPS under a different live account or
+    // after backgrounding while the final permission promise was pending.
+    if(ports.currentIdentity()?.uid!==first.uid||
+       (requireForeground&&!ports.isForeground()))unavailable();
     const body=JSON.stringify(payload);
     if(body.length>1024)unavailable();
     const ctrl=new AbortController();
@@ -117,6 +125,10 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       // any coordinate response to the UI after the original permission check.
       if(requireForeground&&(!ports.isForeground()||
          await ports.foregroundPermissionGranted()!==true))unavailable();
+      // A late account/background transition during the final permission
+      // await must not return another user's private response to the UI.
+      if(ports.currentIdentity()?.uid!==first.uid||
+         (requireForeground&&!ports.isForeground()))unavailable();
       return result;
     }catch{return unavailable();}
     finally{clearTimeout(timer);}

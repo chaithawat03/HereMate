@@ -73,6 +73,8 @@ jobs:
         run: node --test tests/m3-android-account-scoped-friend-map.test.mjs
       - name: M3 native transport capability memory safety (offline)
         run: node --test tests/m3-device-session-transport.test.mjs
+      - name: M3/M4 async Android OS permission identity and foreground race tests (offline)
+        run: node --test tests/m3-m4-transport-permission-race.test.mjs
       - name: M3 publisher session V2 HTTP strict schema and identity (offline)
         run: node --test tests/m3-device-session-http.test.mjs
       - name: Test M2.1 transactional backend privacy and bearer HTTP contract (offline)
