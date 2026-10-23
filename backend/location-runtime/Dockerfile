@@ -7,6 +7,9 @@ COPY backend/location-runtime/package.json backend/location-runtime/package-lock
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 WORKDIR /srv/heremate
 COPY backend/location/location-service.mjs backend/location/firestore-location-adapters.mjs backend/location/http.mjs ./location/
+# M4 source is included for a future explicit, TTL-reviewed Staging rollout.
+# Default runtime flags keep this entire route unmounted; M2 stays M2-only.
+COPY backend/geofences/geofence-policy.mjs backend/geofences/geofence-service.mjs backend/geofences/firestore-geofence-store.mjs backend/geofences/geofence-rate-limiter.mjs backend/geofences/geofence-http.mjs backend/geofences/geofence-edge.mjs ./geofences/
 COPY backend/location-runtime/edge.mjs backend/location-runtime/main.mjs ./runtime/
 WORKDIR /srv/heremate/runtime
 USER node
