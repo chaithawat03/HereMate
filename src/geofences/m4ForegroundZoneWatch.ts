@@ -61,12 +61,12 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    notify('starting');
    try{
      const granted=await p.requestPermission();
-     if(!active(epoch))return false;
+     if(!active(epoch)){if(epoch===generation)stop();return false;}
      if(!granted||!(await p.hasPermission())){
        if(active(epoch)){stop();p.onFailure();}
        return false;
      }
-     if(!active(epoch))return false;
+     if(!active(epoch)){if(epoch===generation)stop();return false;}
      const sub=await p.watch(fix=>{void observe(fix,epoch);},()=>{
        if(active(epoch)){stop();p.onFailure();}
      });
@@ -94,7 +94,11 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      if(!active(epoch)||!(await p.hasPermission()))throw Error('revoked');
      if(event==='enter'||event==='exit')p.onEvent(event);
    }catch{
-     if(active(epoch)){stop();p.onFailure();}
+     if(!disposed&&epoch===generation){
+       const shouldWarn=p.isForeground()&&p.identity()===actor;
+       stop();
+       if(shouldWarn)p.onFailure();
+     }
    }finally{
      if(epoch===generation)processing=false;
    }
