@@ -1,6 +1,10 @@
-name: HereMate M2 Android APK — one manual test build
+name: HereMate M2 Android APK — owner command or manual build
 
 on:
+  # Comment-only command from the authenticated repository owner, on Issue #43.
+  # Every other comment is ignored at the job gate below.
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       confirm_target:
@@ -20,8 +24,18 @@ jobs:
     if: >-
       github.repository == 'chaithawat03/HereMate' &&
       github.ref == 'refs/heads/main' &&
-      github.event_name == 'workflow_dispatch' &&
-      inputs.confirm_target == 'heremate/android-m2-staging'
+      ((github.event_name == 'workflow_dispatch' &&
+        inputs.confirm_target == 'heremate/android-m2-staging') ||
+       (github.event_name == 'issue_comment' &&
+        github.event.action == 'created' &&
+        github.event.issue.number == 43 &&
+        github.event.issue.pull_request == null &&
+        github.event.comment.body == '/heremate-build-m2-staging' &&
+        github.event.comment.user.login == 'chaithawat03' &&
+        github.event.comment.user.id == 29879036 &&
+        github.event.comment.author_association == 'OWNER' &&
+        github.event.sender.login == 'chaithawat03' &&
+        github.actor == 'chaithawat03'))
     runs-on: ubuntu-latest
     timeout-minutes: 100
     permissions:
