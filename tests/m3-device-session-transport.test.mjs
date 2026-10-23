@@ -99,3 +99,43 @@ test('v1 Android remains unchanged while iOS M3 and opt-in Android use v2',()=>{
  assert.doesNotMatch(eas,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS/);
  assert.match(read('src/location/m2StagingTransport.ts'),/deviceSession/);
 });
+
+test('M3 concurrent START is single-flight and cannot overwrite the device capability',async()=>{
+ let release,requestSeen;
+ const gate=new Promise(resolve=>{release=resolve;});
+ const seen=new Promise(resolve=>{requestSeen=resolve;});
+ let starts=0;
+ const x=harness({fetchImpl:async(url)=>{
+   if(new URL(url).pathname!=='/v2/locations/sessions/start')
+     throw Error('unexpected_request');
+   starts++;requestSeen();
+   await gate;
+   return {ok:true,status:200,json:async()=>({
+     enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+   })};
+ }});
+ const first=x.transport.start(PEER);
+ await seen;
+ await assert.rejects(x.transport.start(PEER),/UNAVAILABLE/);
+ assert.equal(starts,1,'only the first START reaches authenticated backend');
+ release();
+ assert.equal((await first).enabled,true);
+ await assert.rejects(x.transport.start(PEER),/UNAVAILABLE/);
+ assert.equal(starts,1,'active capability cannot be overwritten');
+});
+
+test('M3 failed START releases local lock for an explicit retry without caching a token',async()=>{
+ let attempts=0;
+ const x=harness({fetchImpl:async()=>{
+   attempts++;
+   if(attempts===1)return {ok:false,status:503,json:async()=>({})};
+   return {ok:true,status:200,json:async()=>({
+     enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+   })};
+ }});
+ await assert.rejects(x.transport.start(PEER),/UNAVAILABLE/);
+ assert.equal((await x.transport.start(PEER)).enabled,true);
+ assert.equal(attempts,2);
+ await assert.rejects(x.transport.start(PEER),/UNAVAILABLE/);
+ assert.equal(attempts,2);
+});
