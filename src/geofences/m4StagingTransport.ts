@@ -97,6 +97,9 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    try{
      const res=await ports.fetchImpl(origin+endpoint,{
        method:'POST',
+       // Prevent 307/308 redirects forwarding private zone coordinates, GPS
+       // and authenticated POST data outside this exact Staging origin.
+       redirect:'error',
        headers:{Authorization:'Bearer '+jwt,'Content-Type':'application/json',
          Accept:'application/json','Cache-Control':'no-store'},
        body:json,signal:controller.signal
