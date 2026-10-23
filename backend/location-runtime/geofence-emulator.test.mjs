@@ -141,7 +141,7 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  // exercises a legitimate next-window retry without touching live GCP.
  await assert.rejects(geofence.propose(args),GeofenceLimited);
  now+=60_001;
- const replacementCircle={...circle,latitude:0.01};
+ const replacementCircle={...circle,radiusMeters:500};
  await geofence.propose({...args,circle:replacementCircle});
  // An earlier reviewed proposal must NOT authorize a different replacement
  // after expiry/reproposal. Rejected stale decisions leave it pending.
