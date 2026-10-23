@@ -20,6 +20,7 @@ const clockNow=clock=>{
 export class GeofenceDenied extends Error{constructor(){super('not_available');}}
 export class GeofenceInvalid extends Error{constructor(){super('invalid_request');}}
 export class GeofenceBusy extends Error{constructor(){super('temporarily_unavailable');}}
+export class GeofenceLimited extends Error{constructor(){super('too_many_requests');}}
 function relationRevision(r){
  const ts=r?.updatedAt;
  if(!Number.isSafeInteger(ts?.seconds)||ts.seconds<0||
@@ -52,11 +53,12 @@ function activeM2Grant(grant,publisher,owner,subject,relation,now){
     publisher.ownerUid!==subject||publisher.viewerUid!==owner||
     publisher.expiresAtMs!==grant.expiresAtMs)deny();
 }
-export function createGeofenceService({adminAuth,store,clock=Date.now}){
+export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.now}){
  if(adminAuth?.app?.options?.projectId!==STAGING_PROJECT||
     typeof adminAuth.verifyIdToken!=='function'||
     store?.projectId!==STAGING_PROJECT||
-    typeof store.transactZone!=='function'||typeof clock!=='function')
+    typeof store.transactZone!=='function'||rateLimiter?.persistent!==true||
+    typeof rateLimiter.consume!=='function'||typeof clock!=='function')
     throw new GeofenceBusy();
  async function actor(idToken){
    if(typeof idToken!=='string'||idToken.length<32||idToken.length>8192)deny();
@@ -67,6 +69,12 @@ export function createGeofenceService({adminAuth,store,clock=Date.now}){
       claims.iss!=='https://securetoken.google.com/'+STAGING_PROJECT)deny();
    return claims.uid;
  }
+ async function limit(who,route){
+   let accepted;
+   try{accepted=await rateLimiter.consume({actor:who,route});}
+   catch{throw new GeofenceBusy();}
+   if(accepted!==true)throw new GeofenceLimited();
+ }
  function tx(ownerUid,subjectUid,work){
    if(!goodUid(ownerUid)||!goodUid(subjectUid)||ownerUid===subjectUid)invalid();
    return store.transactZone({ownerUid,subjectUid},work);
@@ -75,6 +83,7 @@ export function createGeofenceService({adminAuth,store,clock=Date.now}){
    async propose({idToken,subjectUid,circle}){
      const ownerUid=await actor(idToken);
      if(!validCircle(circle))invalid();
+     await limit(ownerUid,'propose');
      return tx(ownerUid,subjectUid,async ({relation,zone,setZone,deleteState})=>{
        const now=clockNow(clock),revision=authorizeRelation(relation,ownerUid,subjectUid);
        // Each pair can have only one pending/active geofence, never parallel
@@ -90,6 +99,7 @@ export function createGeofenceService({adminAuth,store,clock=Date.now}){
    },
    async review({idToken,ownerUid}){
      const subjectUid=await actor(idToken);
+     await limit(subjectUid,'review');
      return tx(ownerUid,subjectUid,async ({relation,zone})=>{
        const now=clockNow(clock),revision=authorizeRelation(relation,ownerUid,subjectUid);
        const proposal=sameZone(zone,ownerUid,subjectUid,revision,now,'pending');
@@ -100,6 +110,7 @@ export function createGeofenceService({adminAuth,store,clock=Date.now}){
    async decide({idToken,ownerUid,approve}){
      const subjectUid=await actor(idToken);
      if(typeof approve!=='boolean')invalid();
+     await limit(subjectUid,'decide');
      return tx(ownerUid,subjectUid,async ({relation,zone,setZone,deleteZone,deleteState})=>{
        const now=clockNow(clock),revision=authorizeRelation(relation,ownerUid,subjectUid);
        const proposal=sameZone(zone,ownerUid,subjectUid,revision,now,'pending');
@@ -126,6 +137,7 @@ export function createGeofenceService({adminAuth,store,clock=Date.now}){
      if(appInForeground!==true||foregroundPermissionGranted!==true)deny();
      const now=clockNow(clock);
      if(!validFix(point,now))invalid();
+     await limit(subjectUid,'evaluate');
      return tx(ownerUid,subjectUid,async ({
        relation,zone,state,grant,publisher,setState,deleteState
      })=>{
