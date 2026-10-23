@@ -117,7 +117,14 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
   }
   function tx(ownerUid,viewerUid,work) {
     // All friend, grant, point and owner-wide publisher-lease reads occur in ONE Firestore transaction.
-    return store.transactPair({ownerUid,viewerUid},work);
+    // All routes, including START and PUBLISH, must fail closed on a
+    // legacy pair-key collision before overwriting or deleting any record.
+    // Valid Firebase UIDs can contain "__", making the old key ambiguous.
+    return store.transactPair({ownerUid,viewerUid},async context=>{
+      verifiedStoredPair(context.grant,ownerUid,viewerUid);
+      verifiedStoredPair(context.point,ownerUid,viewerUid);
+      return work(context);
+    });
   }
   return Object.freeze({
     async start({idToken,viewerUid}) {
