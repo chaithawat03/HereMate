@@ -271,3 +271,51 @@ test('M4 stale native rejection cannot tear down a newer explicit opt-in',async(
  x.controller.stop();
  assert.equal(removed,1);
 });
+
+test('M4 async native OS DENIED after silent account/background change releases starting',async()=>{
+ for(const incident of ['account-switch','background']){
+   let resolvePermission,checks=0;
+   const delayed=new Promise(resolve=>{resolvePermission=resolve;});
+   const x=rig({hasPermission:()=>++checks===1?delayed:Promise.resolve(true)});
+   const first=x.controller.start(OWNER,true);
+   await flush();
+   assert.equal(x.controller.getPhase(),'starting');
+   if(incident==='account-switch')x.setActor('anotherSubjectUid00002');
+   else x.setForeground(false);
+   resolvePermission(false); // OS returns a normal denial, not a rejection
+   assert.equal(await first,false);
+   assert.equal(x.controller.getPhase(),'off',incident+' cannot strand starting');
+   assert.deepEqual(x.failures,[],incident+' is not a current-account GPS error');
+   assert.equal(x.stats().watchCount,0);
+   assert.equal(x.timers.length,0);
+   x.setActor(SUBJECT);x.setForeground(true);
+   assert.equal(await x.controller.start(OWNER,true),true,
+     'new explicit opt-in must not be blocked by stale starting');
+   x.controller.stop();
+ }
+});
+
+test('M4 stale async native OS DENIED cannot stop newer explicit opt-in',async()=>{
+ let resolveOld,checks=0;
+ const delayed=new Promise(resolve=>{resolveOld=resolve;});
+ const x=rig({hasPermission:()=>++checks===1?delayed:Promise.resolve(true)});
+ const first=x.controller.start(OWNER,true);
+ await flush();
+ x.controller.stop();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ resolveOld(false);
+ assert.equal(await first,false);
+ assert.equal(x.controller.getPhase(),'watching');
+ assert.deepEqual(x.failures,[]);
+ x.controller.stop();
+});
+
+test('M4 current-account async native OS DENIED reports failure and permits retry',async()=>{
+ let checks=0;
+ const x=rig({hasPermission:async()=>++checks!==1});
+ assert.equal(await x.controller.start(OWNER,true),false);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.deepEqual(x.failures,['error']);
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.controller.stop();
+});
