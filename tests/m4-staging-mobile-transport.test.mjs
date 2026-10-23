@@ -7,7 +7,7 @@ import {
 
 const UID='geofencesubjectuid002',PEER='geofenceowneruid00001';
 const SECRET='T'.repeat(72);
-const URL=APPROVED_M4_STAGING_ORIGINS[1];
+const ORIGIN=APPROVED_M4_STAGING_ORIGINS[1];
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const circle={latitude:13.7563,longitude:100.5018,radiusMeters:350};
 const now=()=>Date.now();
@@ -16,7 +16,7 @@ function make(extra={}){
  let active=true,permission=true,user=UID;
  const origin=()=>({uid:user,getIdToken:async()=>SECRET});
  const ports={
-   approvedCloudRunUrl:URL,projectId:'heremate',
+   approvedCloudRunUrl:ORIGIN,projectId:'heremate',
    currentIdentity:()=>origin(),isForeground:()=>active,
    foregroundPermissionGranted:async()=>permission,
    fetchImpl:async(input,init)=>{
@@ -41,9 +41,9 @@ test('only exact owner-reviewed Cloud Run HTTPS origins can be used',()=>{
  for(const origin of [
   'https://example.com',
   'http://heremate-m2-location-staging-2inhowyo2a-as.a.run.app',
-  URL+'/v1/geofences/review',
-  URL+'?debug=1',
-  URL+'.evil.invalid'
+  ORIGIN+'/v1/geofences/review',
+  ORIGIN+'?debug=1',
+  ORIGIN+'.evil.invalid'
  ])assert.throws(()=>createM4StagingTransport({
    approvedCloudRunUrl:origin,projectId:'heremate',
    currentIdentity:()=>({uid:UID,getIdToken:async()=>SECRET}),
