@@ -90,6 +90,8 @@ test('new Cloud Run workflow is manual-only, guarded by GitHub variables and rev
  assert.ok(preflight.includes('artifact-policy.json'));
  assert.ok(preflight.includes('artifacts repositories get-iam-policy'));
  assert.ok(preflight.includes('heremate-m2-build@heremate.iam.gserviceaccount.com'));
- assert.match(old,/^  push:/m);
+ // Legacy EAS is now explicit-only to preserve the owner's single final APK campaign.
+ assert.doesNotMatch(old,/^  push:/m);
+ assert.match(old,/^  workflow_dispatch:/m);
  assert.doesNotMatch(workflow+cloud+preflight,/gcloud iam service-accounts create|gcloud projects add-iam-policy-binding|gcloud firestore fields ttls update|EXPO_TOKEN|GOOGLE_DRIVE_REFRESH_TOKEN/);
 });
