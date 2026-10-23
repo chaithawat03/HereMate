@@ -22,6 +22,8 @@ jobs:
       - run: node --check tests/m0.test.mjs
       - name: Verify owner-approved Guest-only trial exception, exact hashes and expiry
         run: node --test tests/security-guest-staging.test.mjs
+      - name: Verify manually gated integrated Android M2 native test APK (offline)
+        run: node --test tests/m2-integrated-android-native-rc.test.mjs
       - name: Test M2.4 dormant HTTPS transport against server HTTP handler (offline)
         run: node --test tests/m2-4-staging-transport.test.mjs
       - name: Test M2.4 Staging build packaging and approval-only deploy guard

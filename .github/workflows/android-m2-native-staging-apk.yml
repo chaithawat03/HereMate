@@ -1,0 +1,97 @@
+name: HereMate M2 Android APK — one manual test build
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_target:
+        description: "Confirm integrated Android test APK (not Production): heremate/android-m2-staging"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heremate-android-m2-native-test-rc
+  cancel-in-progress: false
+
+jobs:
+  build-integrated-android-apk:
+    if: >-
+      github.repository == 'chaithawat03/HereMate' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.confirm_target == 'heremate/android-m2-staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      contents: read
+    env:
+      EXPO_PUBLIC_ENVIRONMENT: staging
+      EXPO_PUBLIC_ENABLE_FIREBASE_GUEST: 'true'
+      EXPO_PUBLIC_ENABLE_LOCAL_GPS: 'true'
+      EXPO_PUBLIC_ENABLE_M1_PROFILE: 'true'
+      EXPO_PUBLIC_ENABLE_M1_FRIENDS: 'true'
+      EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN: 'true'
+      EXPO_PUBLIC_ENABLE_M2_SHARING: 'true'
+      CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: 'package-lock.json'
+      - name: Install locked Expo dependencies (no Expo billing)
+        run: npm ci --no-audit --no-fund
+      - name: Validate Android-only RC flags, native profile and TypeScript
+        run: |
+          node --test tests/m2-integrated-android-native-rc.test.mjs
+          npm run typecheck
+      - name: Generate Android native Gradle project locally
+        run: npx expo prebuild --platform android --non-interactive --clean
+      - name: Compile signed standalone Android release APK with bundled JS
+        run: |
+          set -euo pipefail
+          cd android
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+      - name: Verify installable release APK and record immutable SHA-256
+        run: |
+          set -euo pipefail
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          test -s "$apk"
+          unzip -l "$apk" | grep -Fq 'index.android.bundle'
+          python3 - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+          import json,os
+          apk=Path('android/app/build/outputs/apk/release/app-release.apk')
+          record={
+            'sourceSha':os.environ['GITHUB_SHA'],
+            'project':'heremate',
+            'region':'asia-southeast1',
+            'platform':'android',
+            'scope':'M2-staging-owner-device-testing-only',
+            'apkSha256':sha256(apk.read_bytes()).hexdigest(),
+            'apkBytes':apk.stat().st_size,
+          }
+          Path('android-m2-rc-manifest.json').write_text(json.dumps(record,indent=2)+'\n')
+          print('ANDROID_M2_RC_APK_VERIFIED: sha256='+record['apkSha256'])
+          PY
+      - name: Retain ONE Android Staging APK + SHA-256 manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: HereMate-M2-Android-Staging-Test-APK
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android-m2-rc-manifest.json
+          if-no-files-found: error
+          retention-days: 7
