@@ -144,7 +144,9 @@ test('M4 UI requires independent owner/subject consent, distinct revoke and expl
  assert.match(panels,/requestForegroundPermissionsAsync/);
  assert.match(panels,/getCurrentPositionAsync/);
  assert.match(panels,/if\(isCurrent\(\)\)setReviewed/);
- assert.doesNotMatch(panels,/watchPositionAsync|TaskManager|startLocationUpdatesAsync|AsyncStorage|setItem\(/);
+ assert.match(panels,/watchPositionAsync/);
+ assert.match(panels,/zoneWatch\.current\?\.start/);
+ assert.doesNotMatch(panels,/TaskManager|startLocationUpdatesAsync|AsyncStorage|setItem\(/);
  assert.doesNotMatch(androidWorkflow,/EXPO_PUBLIC_ENABLE_M4_GEOFENCES:/);
  assert.doesNotMatch(eas,/EXPO_PUBLIC_ENABLE_M4_GEOFENCES/);
  assert.doesNotMatch(read('App.tsx'),/M4GeofencePanel|M4GeofenceStagingScreens/);
