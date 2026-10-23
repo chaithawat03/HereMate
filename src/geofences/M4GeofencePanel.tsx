@@ -1,0 +1,293 @@
+/**
+ * M4 opt-in two-party geofence consent UI for a future reviewed Staging API.
+ * Unmounted by default in Android/iOS build profiles. Never auto-samples GPS.
+ * Tracked subject reviews exact proposed circle BEFORE approval and always
+ * has an independent revoke control, including after a friendship is removed.
+ * Circle and observed event live only in React memory and clear on
+ * background, auth change or unmount; no history/local storage/push.
+ */
+import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
+import {
+ AppState,Pressable,StyleSheet,Text,TextInput,View
+} from 'react-native';
+import * as Location from 'expo-location';
+import {onAuthStateChanged} from 'firebase/auth';
+import {getStagingGuestAuth} from '../auth/firebaseGuest';
+import {listOwnRequests} from '../friends/firestoreFriends';
+import {otherParticipant,type FriendRequest} from '../friends/friendModel';
+import {usePreferences} from '../ui/PreferencesProvider';
+import type {Palette} from '../ui/preferencesModel';
+import type {GeofenceCircle,M4Transport} from './m4StagingTransport';
+
+type Props=Readonly<{transport:M4Transport;backendReviewedAndEnabled:boolean}>;
+export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
+ const {colors:c,language}=usePreferences();
+ const s=useMemo(()=>styles(c),[c]);
+ const label=(th:string,en:string)=>language==='th'?th:en;
+ const [friends,setFriends]=useState<FriendRequest[]>([]);
+ const [selected,setSelected]=useState<string|null>(null);
+ const [lat,setLat]=useState('');
+ const [lon,setLon]=useState('');
+ const [radius,setRadius]=useState('350');
+ const [reviewed,setReviewed]=useState<GeofenceCircle|null>(null);
+ const [busy,setBusy]=useState(false);
+ const [error,setError]=useState(false);
+ const [message,setMessage]=useState('');
+ const identity=useRef<string|null>(null);
+ const seq=useRef(0),alive=useRef(false),processing=useRef(false);
+ const clearSensitive=useCallback(()=>{
+   ++seq.current;
+   if(alive.current){
+     setReviewed(null);setMessage('');setError(false);
+     setLat('');setLon('');setSelected(null);
+   }
+ },[]);
+ useEffect(()=>{
+   if(!backendReviewedAndEnabled)return;
+   alive.current=true;
+   identity.current=getStagingGuestAuth().currentUser?.uid??null;
+   const sub=onAuthStateChanged(getStagingGuestAuth(),user=>{
+     const uid=user?.uid??null;
+     if(uid!==identity.current){
+       identity.current=uid;setFriends([]);clearSensitive();
+     }
+   },()=>{identity.current=null;setFriends([]);clearSensitive();});
+   const app=AppState.addEventListener('change',status=>{
+     if(status!=='active')clearSensitive();
+   });
+   return()=>{
+     alive.current=false;seq.current++;sub();app.remove();
+     identity.current=null;
+   };
+ },[backendReviewedAndEnabled,clearSensitive]);
+ const reload=useCallback(async()=>{
+   if(!backendReviewedAndEnabled||AppState.currentState!=='active')return;
+   const user=identity.current;
+   if(!user)return;
+   const current=++seq.current;
+   try{
+     const rows=await listOwnRequests();
+     if(alive.current&&current===seq.current&&identity.current===user&&
+        AppState.currentState==='active'){
+       setFriends(rows.filter(r=>r.senderUid===user||r.recipientUid===user));
+       setError(false);
+     }
+   }catch{
+     if(alive.current&&current===seq.current)setError(true);
+   }
+ },[backendReviewedAndEnabled]);
+ useEffect(()=>{if(backendReviewedAndEnabled)void reload();},
+   [backendReviewedAndEnabled,reload]);
+ const uid=identity.current;
+ const current=friends.find(f=>f.id===selected);
+ const peer=current&&uid?otherParticipant(current,uid):null;
+ const relationApproved=!!current&&current.status==='accepted'&&
+   current.senderConsent===true&&current.recipientConsent===true;
+ const validCircleInput=()=>{
+   if(!lat.trim()||!lon.trim()||!radius.trim())return null;
+   const latitude=Number(lat),longitude=Number(lon),radiusMeters=Number(radius);
+   if(!Number.isFinite(latitude)||latitude< -90||latitude>90||
+      !Number.isFinite(longitude)||longitude< -180||longitude>180||
+      !Number.isFinite(radiusMeters)||radiusMeters<100||radiusMeters>5000)
+      return null;
+   return {latitude,longitude,radiusMeters};
+ };
+ async function run(work:()=>Promise<string>){
+   const actor=identity.current;
+   if(processing.current||!actor||AppState.currentState!=='active')return;
+   processing.current=true;setBusy(true);setError(false);setMessage('');
+   const currentRun=++seq.current;
+   try{
+     const success=await work();
+     if(alive.current&&seq.current===currentRun&&identity.current===actor&&
+        AppState.currentState==='active')setMessage(success);
+   }catch{
+     if(alive.current&&seq.current===currentRun&&identity.current===actor&&
+        AppState.currentState==='active')setError(true);
+   }finally{
+     processing.current=false;
+     if(alive.current)setBusy(false);
+   }
+ }
+ async function checkCurrentLocation(ownerUid:string){
+   if(AppState.currentState!=='active'||
+      !(await Location.hasServicesEnabledAsync()))
+     throw Error('foreground-only');
+   const permission=await Location.requestForegroundPermissionsAsync();
+   if(permission.granted!==true||AppState.currentState!=='active')
+     throw Error('permission-required');
+   const gps=await Location.getCurrentPositionAsync({
+     accuracy:Location.Accuracy.Balanced
+   });
+   if(AppState.currentState!=='active'||
+      !(await Location.getForegroundPermissionsAsync()).granted)
+     throw Error('permission-revoked');
+   const fix={latitude:gps.coords.latitude,longitude:gps.coords.longitude,
+     accuracyMeters:gps.coords.accuracy??Infinity,capturedAtMs:gps.timestamp};
+   const result=await transport.evaluate(ownerUid,fix);
+   // Clearing the fix is immediate: no coordinate state/local storage/logging.
+   if(AppState.currentState!=='active'||
+      !(await Location.getForegroundPermissionsAsync()).granted)
+     throw Error('permission-revoked');
+   return result.event==='enter'?label('เข้าสู่พื้นที่','Entered zone'):
+      result.event==='exit'?label('ออกจากพื้นที่','Exited zone'):
+      label('ไม่มีเหตุการณ์เข้า–ออกที่ยืนยันได้','No confirmed transition');
+ }
+ if(!backendReviewedAndEnabled)return <View style={s.panel}>
+   <Text style={s.title}>M4 Geofence</Text>
+   <Text style={s.note}>{label('ยังไม่เปิดใช้งาน','Not available')}</Text>
+ </View>;
+ return <View style={s.panel}>
+   <Text style={s.title}>{label('พื้นที่แจ้งเตือน (M4)','Geofence approvals (M4)')}</Text>
+   <Text style={s.note}>{label(
+     'แต่ละพื้นที่ต้องได้รับความยินยอมจากผู้ถูกติดตามก่อนเสมอ ไม่มีการเก็บประวัติการเดินทางหรือการติดตามเบื้องหลัง',
+     'The tracked person must approve each exact zone. No movement history or background tracking'
+   )}</Text>
+   <Pressable accessibilityRole="button" disabled={busy} style={s.secondary}
+     onPress={()=>void reload()}>
+     <Text style={s.secondaryText}>{label('รีเฟรชรายชื่อ','Refresh friends')}</Text>
+   </Pressable>
+   {friends.map(friend=>{
+     const other=uid?otherParticipant(friend,uid):null;
+     if(!other)return null;
+     const selectedNow=selected===friend.id;
+     return <Pressable key={friend.id} accessibilityRole="button"
+       disabled={busy} accessibilityState={{selected:selectedNow}}
+       onPress={()=>{setSelected(friend.id);setReviewed(null);setMessage('');setError(false);}}
+       style={[s.item,selectedNow&&s.selected]}>
+       <Text style={s.itemText}>{other.displayName}</Text>
+       <Text style={s.note}>{friend.status==='accepted'&&
+         friend.senderConsent&&friend.recipientConsent?
+         label('ทั้งคู่เปิดความยินยอม','Both currently consent'):
+         label('ไม่พร้อมสำหรับสร้างพื้นที่ใหม่ — ยังเพิกถอนได้',
+           'New proposals unavailable; revocation remains possible')}</Text>
+     </Pressable>;
+   })}
+   {peer&&current&&uid?<>
+     <Text style={s.note}>{label('เพื่อนที่เลือก: ','Selected friend: ')}{peer.displayName}</Text>
+     <Text style={s.note}>{label(
+       'เจ้าของพื้นที่สามารถเสนอพิกัดได้ แต่ไม่สามารถกดยินยอมแทนอีกฝ่าย',
+       'Zone owner can propose coordinates, but cannot approve for the tracked person'
+     )}</Text>
+     {relationApproved?<View style={s.subpanel}>
+       <Text style={s.label}>{label('เสนอพื้นที่ใหม่ให้เพื่อน','Propose a new zone to friend')}</Text>
+       <TextInput style={s.input} value={lat} onChangeText={setLat}
+         accessibilityLabel={label('ละติจูด','Latitude')}
+         placeholder={label('ละติจูด เช่น 13.75','Latitude e.g. 13.75')}
+         placeholderTextColor={c.muted} keyboardType="numbers-and-punctuation"/>
+       <TextInput style={s.input} value={lon} onChangeText={setLon}
+         accessibilityLabel={label('ลองจิจูด','Longitude')}
+         placeholder={label('ลองจิจูด เช่น 100.5','Longitude e.g. 100.5')}
+         placeholderTextColor={c.muted} keyboardType="numbers-and-punctuation"/>
+       <TextInput style={s.input} value={radius} onChangeText={setRadius}
+         accessibilityLabel={label('รัศมีเมตร','Radius meters')}
+         placeholder={label('รัศมี 100–5000 เมตร','Radius 100–5000 meters')}
+         placeholderTextColor={c.muted} keyboardType="numeric"/>
+       <Pressable accessibilityRole="button" disabled={busy||!validCircleInput()}
+         style={[s.primary,(busy||!validCircleInput())&&s.disabled]}
+         onPress={()=>void run(async()=>{
+           const circle=validCircleInput();
+           if(!circle)throw Error('invalid circle');
+           await transport.propose(peer.uid,circle);
+           return label('ส่งคำขอแล้ว ต้องรออีกฝ่ายอนุมัติ','Proposal sent; awaiting subject approval');
+         })}>
+         <Text style={s.primaryText}>{label('ส่งคำขอเสนอพื้นที่','Propose zone')}</Text>
+       </Pressable>
+     </View>:null}
+     {relationApproved?<View style={s.subpanel}>
+       <Text style={s.label}>{label('พื้นที่ที่เพื่อนเสนอให้คุณ','Zone proposed for you')}</Text>
+       <Pressable accessibilityRole="button" disabled={busy} style={s.secondary}
+         onPress={()=>void run(async()=>{
+           const pending=await transport.review(peer.uid);
+           setReviewed(pending.circle);
+           return label('ตรวจพิกัดและรัศมีด้านล่างก่อนตัดสินใจ',
+             'Inspect exact coordinates/radius before deciding');
+         })}><Text style={s.secondaryText}>{label('ตรวจคำขอที่รออนุมัติ','Review pending proposal')}</Text>
+       </Pressable>
+       {reviewed?<View style={s.review}>
+         <Text style={s.itemText}>{label('ละติจูด','Latitude')}: {String(reviewed.latitude)}</Text>
+         <Text style={s.itemText}>{label('ลองจิจูด','Longitude')}: {String(reviewed.longitude)}</Text>
+         <Text style={s.itemText}>{label('รัศมี','Radius')}: {String(reviewed.radiusMeters)} m</Text>
+         <Text style={s.note}>{label(
+           'การอนุมัติอนุญาตการตรวจเข้า–ออกพื้นที่นี้เท่านั้น ไม่ใช่อนุญาตการบันทึกประวัติ GPS',
+           'Approval covers this exact zone only, not GPS history retention'
+         )}</Text>
+         <View style={s.actions}>
+           <Pressable accessibilityRole="button" disabled={busy} style={s.primary}
+             onPress={()=>void run(async()=>{
+               await transport.decide(peer.uid,true);
+               setReviewed(null);
+               return label('อนุมัติพื้นที่นี้แล้ว','Zone approved');
+             })}><Text style={s.primaryText}>{label('อนุมัติ','Approve')}</Text></Pressable>
+           <Pressable accessibilityRole="button" disabled={busy} style={s.secondary}
+             onPress={()=>void run(async()=>{
+               await transport.decide(peer.uid,false);
+               setReviewed(null);
+               return label('ปฏิเสธคำขอแล้ว','Proposal rejected');
+             })}><Text style={s.secondaryText}>{label('ปฏิเสธ','Reject')}</Text></Pressable>
+         </View>
+       </View>:null}
+     </View>:null}
+     <View style={s.subpanel}>
+       <Text style={s.label}>{label('ถอนความยินยอมได้ตลอดเวลา','Revoke either zone at any time')}</Text>
+       <Pressable accessibilityRole="button" disabled={busy} style={s.destructive}
+         onPress={()=>void run(async()=>{
+           await transport.revoke(peer.uid,uid);
+           setReviewed(null);
+           return label('ถอนอนุญาตที่เพื่อนสร้างให้คุณแล้ว',
+             'Revoked zone proposed by your friend');
+         })}><Text style={s.destructiveText}>{label(
+           'เพิกถอนพื้นที่ที่เพื่อนสร้างให้ฉัน','Revoke a zone tracking me'
+         )}</Text></Pressable>
+       <Pressable accessibilityRole="button" disabled={busy} style={s.secondary}
+         onPress={()=>void run(async()=>{
+           await transport.revoke(uid,peer.uid);
+           return label('ยกเลิกพื้นที่ที่คุณเสนอแล้ว','Revoked zone you proposed');
+         })}><Text style={s.secondaryText}>{label(
+           'ยกเลิกพื้นที่ที่ฉันเสนอให้เพื่อน','Revoke my proposed zone'
+         )}</Text></Pressable>
+     </View>
+     {relationApproved?<Pressable accessibilityRole="button" disabled={busy}
+       style={s.secondary}
+       onPress={()=>void run(()=>checkCurrentLocation(peer.uid))}>
+       <Text style={s.secondaryText}>{label(
+         'ตรวจเข้า–ออกพื้นที่จาก GPS ตอนนี้ (ต้องแชร์กับเพื่อนอยู่)',
+         'Check my current zone (requires active M2 sharing)'
+       )}</Text>
+     </Pressable>:null}
+   </>:<Text style={s.note}>{label(
+     'เลือกเพื่อนที่มีอยู่เพื่อจัดการพื้นที่และเพิกถอนสิทธิ์',
+     'Select an existing friend to manage zones and revocation'
+   )}</Text>}
+   {error?<Text accessibilityRole="alert" style={s.error}>{label(
+     'ทำรายการไม่ได้ โปรดตรวจสิทธิ์และลองใหม่',
+     'Unavailable; verify permissions and try again'
+   )}</Text>:null}
+   {message?<Text accessibilityRole="alert" style={s.note}>{message}</Text>:null}
+ </View>;
+}
+const styles=(c:Palette)=>StyleSheet.create({
+ panel:{padding:16,backgroundColor:c.surface,borderRadius:15,borderWidth:1,
+   borderColor:c.line,gap:12},
+ title:{fontSize:17,color:c.accent,fontWeight:'800'},
+ note:{fontSize:12,color:c.muted,lineHeight:19},
+ label:{fontSize:13,color:c.text,fontWeight:'700'},
+ item:{padding:12,borderRadius:10,borderColor:c.line,borderWidth:1,gap:4},
+ selected:{borderColor:c.accent,borderWidth:2},
+ itemText:{color:c.text,fontSize:13,fontWeight:'700'},
+ subpanel:{padding:12,backgroundColor:c.surfaceAlt,borderRadius:10,gap:9},
+ input:{padding:11,borderRadius:9,borderWidth:1,borderColor:c.line,
+   backgroundColor:c.field,color:c.text,fontSize:13},
+ primary:{alignSelf:'flex-start',padding:11,borderRadius:9,backgroundColor:c.accent},
+ primaryText:{color:c.accentOn,fontSize:12,fontWeight:'800'},
+ secondary:{alignSelf:'flex-start',padding:10,borderRadius:9,
+   borderColor:c.line,borderWidth:1,backgroundColor:c.surfaceAlt},
+ secondaryText:{color:c.text,fontSize:12,fontWeight:'700'},
+ destructive:{alignSelf:'flex-start',padding:11,borderRadius:9,
+   backgroundColor:c.dangerButton},
+ destructiveText:{color:'#FFFFFF',fontSize:12,fontWeight:'800'},
+ actions:{flexDirection:'row',gap:12,flexWrap:'wrap'},
+ review:{gap:7,padding:10,borderColor:c.accent,borderWidth:1,borderRadius:9},
+ disabled:{opacity:.45},
+ error:{fontSize:12,color:c.error,fontWeight:'700'}
+});
