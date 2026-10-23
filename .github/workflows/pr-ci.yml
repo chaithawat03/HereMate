@@ -63,6 +63,8 @@ jobs:
         run: node --test tests/m3-android-external-maps.test.mjs
       - name: Test M2.2 foreground-only sharing and remote stop lifecycle (offline)
         run: node --test tests/m2-2-foreground-share.test.mjs
+      - name: Android M3 delayed GPS native binding and permission-revoke safety (offline)
+        run: node --test tests/m3-android-delayed-watch-bind.test.mjs
       - name: Android owner-wide emergency location STOP and failure UX (offline)
         run: node --test tests/m3-android-owner-emergency-stop.test.mjs
       - name: Android sharing friend-list auth scope and late-response privacy (offline)

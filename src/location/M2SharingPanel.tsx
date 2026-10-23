@@ -11,6 +11,7 @@ import {getStagingGuestAuth} from '../auth/firebaseGuest';
 import {listOwnRequests} from '../friends/firestoreFriends';
 import {otherParticipant,type FriendRequest} from '../friends/friendModel';
 import {createAccountScopedFriendRefresh} from './accountScopedFriendRefresh';
+import {bindVerifiedForegroundWatch} from './androidForegroundWatchBind';
 import {usePreferences} from '../ui/PreferencesProvider';
 import type {Palette} from '../ui/preferencesModel';
 import {
@@ -69,30 +70,55 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
         return result.granted===true;
       },
       watchForegroundFix:async(onFix,onError)=>{
+        // Capture the exact Firebase account BEFORE the asynchronous native
+        // binder starts, independently of the delayed auth-state callback.
+        const actor=auth.currentUser?.uid??null;
+        if(!actor||actor!==account.current||AppState.currentState!=='active')
+          throw Error('ANDROID_FOREGROUND_IDENTITY_CHANGED');
         let watching=true;
-        const watcher=await Location.watchPositionAsync(
-          {accuracy:Location.Accuracy.Balanced,timeInterval:10_000,distanceInterval:20},
-          value=>{
-            // Recheck the actual Android OS grant for EACH candidate fix.
-            // A foreground session or client boolean is never proof of
-            // ongoing permission after an OS Settings revocation.
-            void (async()=>{
-              if(!live||!watching)return;
-              if(AppState.currentState!=='active'||
-                 !await Location.hasServicesEnabledAsync()||
-                 !(await Location.getForegroundPermissionsAsync()).granted){
-                onError();return;
-              }
-              if(!live||!watching||AppState.currentState!=='active')return;
-              const coords=value.coords;
-              const fix:ShareFix={
-                latitude:coords.latitude,longitude:coords.longitude,
-                accuracyMeters:coords.accuracy??Infinity,capturedAtMs:value.timestamp,
-              };
-              onFix(fix);
-            })().catch(onError);
-          },onError);
-        return {remove:()=>{watching=false;watcher.remove();}};
+        // A queued native error from a removed previous-account watcher
+        // must never terminate a newly authorized sharing session.
+        const onCurrentWatchError=()=>{
+          if(live&&watching&&actor===account.current&&
+             auth.currentUser?.uid===actor)onError();
+        };
+        try {
+          const subscription=await bindVerifiedForegroundWatch(
+            ()=>Location.watchPositionAsync(
+              {accuracy:Location.Accuracy.Balanced,timeInterval:10_000,distanceInterval:20},
+              value=>{
+                void (async()=>{
+                  // A pending callback must not publish after a silent account
+                  // swap, foreground loss, Settings revoke or watcher removal.
+                  if(!live||!watching||actor!==account.current||
+                     auth.currentUser?.uid!==actor||
+                     AppState.currentState!=='active')return;
+                  if(!await Location.hasServicesEnabledAsync()||
+                     !(await Location.getForegroundPermissionsAsync()).granted){
+                    onError();return;
+                  }
+                  if(!live||!watching||actor!==account.current||
+                     auth.currentUser?.uid!==actor||
+                     AppState.currentState!=='active')return;
+                  const coords=value.coords;
+                  const fix:ShareFix={
+                    latitude:coords.latitude,longitude:coords.longitude,
+                    accuracyMeters:coords.accuracy??Infinity,capturedAtMs:value.timestamp,
+                  };
+                  onFix(fix);
+                })().catch(onCurrentWatchError);
+              },onCurrentWatchError),
+            async()=>live&&watching&&
+              actor===account.current&&auth.currentUser?.uid===actor&&
+              AppState.currentState==='active'&&
+              await Location.hasServicesEnabledAsync()&&
+              (await Location.getForegroundPermissionsAsync()).granted===true
+          );
+          return {remove:()=>{watching=false;subscription.remove();}};
+        }catch(error){
+          watching=false;
+          throw error;
+        }
       }
     });
     controller.current=ctrl;
