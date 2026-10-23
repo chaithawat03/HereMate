@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {loadAuthorizedFriendMap} from '../src/location/accountScopedFriendMapRead.ts';
+import {authorizedPeers} from '../src/location/m2FriendLocationView.ts';
 
 const A='androidvieweruid00001',B='anotherandroiduid00002';
 const peer=n=>'friendaccountuid'+String(n).padStart(4,'0');
@@ -20,7 +21,7 @@ function rig(rows=[relation(peer(1))]){
   let uid=A,foreground=true,revision=0,reads=[];
   const active=()=>uid===A&&foreground&&revision===0;
   const ports={viewerUid:A,isCurrent:active,
-    loadRelations:async()=>rows,
+    loadRelations:async()=>rows,selectPeers:authorizedPeers,
     readPeer:async id=>{reads.push(id);return fix;}};
   return {ports,reads,setUid:x=>{uid=x;},
     setForeground:x=>{foreground=x;},invalidate:()=>{revision++;}};
