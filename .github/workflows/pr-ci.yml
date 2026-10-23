@@ -169,6 +169,8 @@ jobs:
             --project demo-heremate-m053 \
             --config firebase.json \
             "node --test backend/location-runtime/emulator.test.mjs"
+      - name: Verify gated Android/iOS M4 subject consent UX and HTTPS client (offline)
+        run: node --test tests/m4-staging-mobile-transport.test.mjs
       - name: M4 bounded HTTP framing, privacy and error contract (offline)
         run: |
           node --check backend/geofences/geofence-http.mjs
