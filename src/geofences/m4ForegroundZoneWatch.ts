@@ -90,7 +90,16 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      timer=p.schedule(()=>stop(),M4_WATCH_MAX_MS);
      return true;
    }catch{
-     if(active(epoch)){stop();p.onFailure();}
+     // Android can reject a permission prompt or native watch bind AFTER a
+     // silent Firebase account switch/background transition. In that case
+     // active(epoch) is already false, but this generation still owns the
+     // 'starting' phase. Always release it, without blaming the new account.
+     // A stale rejected bind must NEVER stop a newer explicit opt-in session.
+     if(epoch===generation){
+       const warn=active(epoch);
+       stop();
+       if(warn)p.onFailure();
+     }
      return false;
    }
  }

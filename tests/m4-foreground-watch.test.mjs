@@ -211,3 +211,63 @@ test('M4 older async bind must not stop a newer explicit foreground session',asy
  x.controller.stop();
  assert.equal(removed,2);
 });
+
+test('M4 rejected Android native start after silent identity/background loss cannot strand starting',async()=>{
+ for(const stage of ['permission-request','permission-check','native-watch']){
+   let rejectNative;
+   const pending=new Promise((_,reject)=>{rejectNative=reject;});
+   let calls=0;
+   const once=()=>++calls===1?pending:Promise.resolve(
+     stage==='native-watch'?{remove(){}}:true);
+   const override=stage==='permission-request'?{requestPermission:once}:
+     stage==='permission-check'?{hasPermission:once}:{watch:once};
+   const x=rig(override);
+   const first=x.controller.start(OWNER,true);
+   await flush();
+   assert.equal(x.controller.getPhase(),'starting',stage);
+   // Delayed auth/AppState callbacks cannot be trusted to invoke interrupted().
+   if(stage==='native-watch')x.setForeground(false);
+   else x.setActor('anotherSubjectUid00002');
+   rejectNative(Error('native permission or watch interrupted'));
+   assert.equal(await first,false,stage);
+   assert.equal(x.controller.getPhase(),'off',stage+' must release the GPS UI');
+   assert.deepEqual(x.failures,[],stage+' is not a current-user GPS error');
+   assert.equal(x.timers.length,0);
+   x.setActor(SUBJECT);x.setForeground(true);
+   assert.equal(await x.controller.start(OWNER,true),true,
+     stage+' must permit a new explicit opt-in');
+   x.controller.stop();
+ }
+});
+test('M4 current-user native start rejection fails closed with an error and permits retry',async()=>{
+ for(const stage of ['permission-request','permission-check','native-watch']){
+   let calls=0;
+   const rejectOnce=()=>++calls===1?
+     Promise.reject(Error('Android native service failed')):
+     Promise.resolve(stage==='native-watch'?{remove(){}}:true);
+   const x=rig(stage==='permission-request'?{requestPermission:rejectOnce}:
+     stage==='permission-check'?{hasPermission:rejectOnce}:{watch:rejectOnce});
+   assert.equal(await x.controller.start(OWNER,true),false);
+   assert.equal(x.controller.getPhase(),'off');
+   assert.deepEqual(x.failures,['error']);
+   assert.equal(await x.controller.start(OWNER,true),true);
+   x.controller.stop();
+ }
+});
+test('M4 stale native rejection cannot tear down a newer explicit opt-in',async()=>{
+ let rejectOld,binds=0,removed=0;
+ const old=new Promise((_,reject)=>{rejectOld=reject;});
+ const x=rig({watch:()=>++binds===1?old:
+   Promise.resolve({remove:()=>{removed++;}})});
+ const first=x.controller.start(OWNER,true);
+ await flush();
+ x.controller.stop();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ rejectOld(Error('old Android binder rejected after cancellation'));
+ assert.equal(await first,false);
+ assert.equal(x.controller.getPhase(),'watching');
+ assert.deepEqual(x.failures,[]);
+ assert.equal(removed,0);
+ x.controller.stop();
+ assert.equal(removed,1);
+});
