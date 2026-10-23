@@ -20,6 +20,7 @@ import {usePreferences} from '../ui/PreferencesProvider';
 import type {Palette} from '../ui/preferencesModel';
 import type {GeofenceCircle,M4Transport} from './m4StagingTransport';
 import {createM4ForegroundZoneWatch,type M4WatchPhase} from './m4ForegroundZoneWatch';
+import {evaluateM4OneShotForegroundFix} from './m4OneShotForegroundFix';
 import {createAccountScopedFriendRefresh} from '../location/accountScopedFriendRefresh';
 
 type Props=Readonly<{transport:M4Transport;backendReviewedAndEnabled:boolean}>;
@@ -205,28 +206,31 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      }
    }
  }
- async function checkCurrentLocation(ownerUid:string){
-   if(AppState.currentState!=='active'||
-      !(await Location.hasServicesEnabledAsync()))
-     throw Error('foreground-only');
-   const permission=await Location.requestForegroundPermissionsAsync();
-   if(permission.granted!==true||AppState.currentState!=='active')
-     throw Error('permission-required');
-   const gps=await Location.getCurrentPositionAsync({
-     accuracy:Location.Accuracy.Balanced
+ async function checkCurrentLocation(ownerUid:string,isCurrent:()=>boolean){
+   const event=await evaluateM4OneShotForegroundFix({
+     // run() captures the exact Firebase UID, foreground state and operation
+     // generation. Recheck after EACH async native permission/GPS step before
+     // sending a private fix to the geofence API.
+     isCurrent,
+     servicesEnabled:()=>Location.hasServicesEnabledAsync(),
+     requestPermission:async()=>
+       (await Location.requestForegroundPermissionsAsync()).granted===true,
+     hasPermission:async()=>AppState.currentState==='active'&&
+       (await Location.hasServicesEnabledAsync())&&
+       (await Location.getForegroundPermissionsAsync()).granted===true,
+     getCurrentFix:async()=>{
+       const gps=await Location.getCurrentPositionAsync({
+         accuracy:Location.Accuracy.Balanced
+       });
+       return {latitude:gps.coords.latitude,longitude:gps.coords.longitude,
+         accuracyMeters:gps.coords.accuracy??Infinity,capturedAtMs:gps.timestamp};
+     },
+     evaluate:async fix=>(await transport.evaluate(ownerUid,fix)).event,
+     now:Date.now
    });
-   if(AppState.currentState!=='active'||
-      !(await Location.getForegroundPermissionsAsync()).granted)
-     throw Error('permission-revoked');
-   const fix={latitude:gps.coords.latitude,longitude:gps.coords.longitude,
-     accuracyMeters:gps.coords.accuracy??Infinity,capturedAtMs:gps.timestamp};
-   const result=await transport.evaluate(ownerUid,fix);
-   // Clearing the fix is immediate: no coordinate state/local storage/logging.
-   if(AppState.currentState!=='active'||
-      !(await Location.getForegroundPermissionsAsync()).granted)
-     throw Error('permission-revoked');
-   return result.event==='enter'?label('เข้าสู่พื้นที่','Entered zone'):
-      result.event==='exit'?label('ออกจากพื้นที่','Exited zone'):
+   // No coordinate state, persistence or logging. Never show a stale result.
+   return event==='enter'?label('เข้าสู่พื้นที่','Entered zone'):
+      event==='exit'?label('ออกจากพื้นที่','Exited zone'):
       label('ไม่มีเหตุการณ์เข้า–ออกที่ยืนยันได้','No confirmed transition');
  }
  if(!backendReviewedAndEnabled)return <View style={s.panel}>
@@ -311,15 +315,15 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
          )}</Text>
          <View style={s.actions}>
            <Pressable accessibilityRole="button" disabled={busy} style={s.primary}
-             onPress={()=>void run(async()=>{
+             onPress={()=>void run(async isCurrent=>{
                await transport.decide(peer.uid,true,reviewed.proposalCreatedAtMs);
-               setReviewed(null);
+               if(isCurrent())setReviewed(null);
                return label('อนุมัติพื้นที่นี้แล้ว','Zone approved');
              })}><Text style={s.primaryText}>{label('อนุมัติ','Approve')}</Text></Pressable>
            <Pressable accessibilityRole="button" disabled={busy} style={s.secondary}
-             onPress={()=>void run(async()=>{
+             onPress={()=>void run(async isCurrent=>{
                await transport.decide(peer.uid,false,reviewed.proposalCreatedAtMs);
-               setReviewed(null);
+               if(isCurrent())setReviewed(null);
                return label('ปฏิเสธคำขอแล้ว','Proposal rejected');
              })}><Text style={s.secondaryText}>{label('ปฏิเสธ','Reject')}</Text></Pressable>
          </View>
@@ -328,11 +332,11 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      <View style={s.subpanel}>
        <Text style={s.label}>{label('ถอนความยินยอมได้ตลอดเวลา','Revoke either zone at any time')}</Text>
        <Pressable accessibilityRole="button" disabled={busy} style={s.destructive}
-         onPress={()=>void run(async()=>{
+         onPress={()=>void run(async isCurrent=>{
            zoneWatch.current?.stop();
            alertsRef.current=false;setForegroundAlerts(false);
            await transport.revoke(peer.uid,uid);
-           setReviewed(null);
+           if(isCurrent())setReviewed(null);
            return label('ถอนอนุญาตที่เพื่อนสร้างให้คุณแล้ว',
              'Revoked zone proposed by your friend');
          })}><Text style={s.destructiveText}>{label(
@@ -350,7 +354,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      </View>
      {relationApproved?<Pressable accessibilityRole="button"
        disabled={busy||watchPhase!=='off'} style={s.secondary}
-       onPress={()=>void run(()=>checkCurrentLocation(peer.uid))}>
+       onPress={()=>void run(isCurrent=>checkCurrentLocation(peer.uid,isCurrent))}>
        <Text style={s.secondaryText}>{label(
          'ตรวจเข้า–ออกพื้นที่จาก GPS ตอนนี้ (ต้องแชร์กับเพื่อนอยู่)',
          'Check my current zone (requires active M2 sharing)'
