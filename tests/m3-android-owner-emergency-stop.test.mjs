@@ -139,3 +139,78 @@ test('Android has explicit per-known-friend revoke even after consent change; iO
  assert.match(transport,/\/v1\/locations\/grants\/stop/);
  assert.doesNotMatch(native,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS/);
 });
+
+test('owner STOP waits for an in-flight START and prevents a late v1/v2 location grant',async()=>{
+ for(const v2 of [false,true]){
+   let release,seen;
+   const gate=new Promise(resolve=>{release=resolve;});
+   const started=new Promise(resolve=>{seen=resolve;});
+   const paths=[];
+   const transport=createM2StagingTransport({
+     approvedCloudRunUrl:ORIGIN,projectId:'heremate',useDeviceSessions:v2,
+     currentIdentity:()=>({uid:SELF,getIdToken:async()=>TOKEN}),
+     isForeground:()=>true,foregroundPermissionGranted:async()=>true,
+     fetchImpl:async(url)=>{
+       const path=new URL(url).pathname;
+       paths.push(path);
+       if(path.endsWith('/start')){
+         seen();
+         await gate;
+         return {ok:true,status:200,json:async()=>v2?
+           {enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP}:
+           {enabled:true,expiresAtMs:Date.now()+50_000}};
+       }
+       if(path==='/v1/locations/grants/stop')
+         return {ok:true,status:200,json:async()=>({enabled:false})};
+       throw Error('unexpected_request');
+     }
+   });
+   const pendingStart=transport.start(PEER);
+   await started;
+   const stop=transport.emergencyStop(PEER);
+   await assert.rejects(transport.start(PEER),/UNAVAILABLE/,
+     'cannot reactivate while owner STOP is pending');
+   await assert.rejects(transport.emergencyStop(PEER),/UNAVAILABLE/,
+     'cannot issue duplicate STOP during serialized operation');
+   assert.equal(paths.length,1,'STOP must not run before the START response');
+   release();
+   await pendingStart;
+   assert.deepEqual(await stop,{enabled:false});
+   assert.deepEqual(paths,[v2?'/v2/locations/sessions/start':
+     '/v1/locations/grants/start','/v1/locations/grants/stop']);
+   if(v2){
+     await assert.rejects(transport.stop(PEER),/UNAVAILABLE/);
+     await assert.rejects(transport.publish(PEER,{
+       latitude:0,longitude:0,accuracyMeters:5,capturedAtMs:Date.now()-50
+     }),/UNAVAILABLE/);
+   }
+ }
+});
+test('failed pending START cannot suppress an independent owner STOP',async()=>{
+ let release,seen;
+ const waiting=new Promise(resolve=>{release=resolve;});
+ const started=new Promise(resolve=>{seen=resolve;});
+ const paths=[];
+ const transport=createM2StagingTransport({
+   approvedCloudRunUrl:ORIGIN,projectId:'heremate',useDeviceSessions:true,
+   currentIdentity:()=>({uid:SELF,getIdToken:async()=>TOKEN}),
+   isForeground:()=>true,foregroundPermissionGranted:async()=>true,
+   fetchImpl:async(url)=>{
+     const path=new URL(url).pathname;paths.push(path);
+     if(path==='/v2/locations/sessions/start'){
+       seen();await waiting;
+       return {ok:false,status:503,json:async()=>({})};
+     }
+     return {ok:true,status:200,json:async()=>({enabled:false})};
+   }
+ });
+ const start=transport.start(PEER);
+ await started;
+ const stop=transport.emergencyStop(PEER);
+ release();
+ await assert.rejects(start,/UNAVAILABLE/);
+ assert.deepEqual(await stop,{enabled:false});
+ assert.deepEqual(paths,[
+   '/v2/locations/sessions/start','/v1/locations/grants/stop'
+ ]);
+});
