@@ -59,6 +59,10 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   // A delayed first START must not allow another handset/session request to
   // race through this transport and overwrite its opaque publisher capability.
   let deviceSessionStartPending=false;
+  // A user-initiated owner-wide STOP must wait for a pending START to settle:
+  // otherwise a late START commit may recreate sharing after STOP was ACKed.
+  let startSettled:Promise<void>|null=null;
+  let emergencyStopPending=false;
   const validCapability=(value:unknown):value is string=>
     typeof value==='string'&&/^[0-9a-f]{64}$/.test(value);
   async function send(endpoint:string,payload:Readonly<Record<string,unknown>>,
@@ -111,6 +115,13 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   return Object.freeze({
     async start(peerUid:string){
       const viewerUid=safePeer(peerUid);
+      if(startSettled||emergencyStopPending)unavailable();
+      // Acquire before any network await, including legacy v1 START.
+      // This fence is shared by the explicit owner-wide emergency STOP.
+      let resolveStart!:()=>void;
+      const pending=new Promise<void>(resolve=>{resolveStart=resolve;});
+      startSettled=pending;
+      try {
       if(ports.useDeviceSessions===true){
         if(deviceSession!==null||deviceSessionStartPending)unavailable();
         const uid=ports.currentIdentity()?.uid;
@@ -140,6 +151,10 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       if(grant.enabled!==true||!validNumber(expiresAt))
         throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');
       return {enabled:true,expiresAtMs:expiresAt};
+      } finally {
+        if(startSettled===pending)startSettled=null;
+        resolveStart();
+      }
     },
     async stop(peerUid:string){
       const viewerUid=safePeer(peerUid);
@@ -186,15 +201,26 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       // session on a lost/other phone, without knowing that phone's capability.
       // Never infer success from a timeout or a rejected response.
       const viewerUid=safePeer(peerUid);
+      if(emergencyStopPending)unavailable();
       const uid=ports.currentIdentity()?.uid;
-      const result=await send('/v1/locations/grants/stop',{viewerUid},false);
-      if(!fields(result,['enabled'])||
-         (result as {enabled:unknown}).enabled!==false||
-         !uid||ports.currentIdentity()?.uid!==uid)unavailable();
-      const active=deviceSession;
-      if(active!==null&&active.uid===uid&&active.peerUid===viewerUid)
-        deviceSession=null;
-      return {enabled:false as const};
+      if(!uid)unavailable();
+      // Block new STARTs immediately; then wait for any in-flight START
+      // before issuing STOP. A confirmed STOP cannot race a late grant.
+      emergencyStopPending=true;
+      try {
+        if(startSettled)await startSettled;
+        if(ports.currentIdentity()?.uid!==uid)unavailable();
+        const result=await send('/v1/locations/grants/stop',{viewerUid},false);
+        if(!fields(result,['enabled'])||
+           (result as {enabled:unknown}).enabled!==false||
+           ports.currentIdentity()?.uid!==uid)unavailable();
+        const active=deviceSession;
+        if(active!==null&&active.uid===uid&&active.peerUid===viewerUid)
+          deviceSession=null;
+        return {enabled:false as const};
+      } finally {
+        emergencyStopPending=false;
+      }
     },
     async read(ownerUid:string){
       const result=await send('/v1/locations/points/read',{ownerUid:safePeer(ownerUid)},true);
