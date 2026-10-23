@@ -12,10 +12,11 @@ import type {FriendRequest} from '../friends/friendModel';
 import {usePreferences} from '../ui/PreferencesProvider';
 import type {Palette} from '../ui/preferencesModel';
 import {createAndroidFriendMapPoller} from './androidFriendMapPoller';
+import {loadAuthorizedFriendMap} from './accountScopedFriendMapRead';
 import {androidGeoUri} from './androidGeoHandoff';
 import {
   authorizedPeers,friendMapStates,plotLiveFriends,visibleFriendLocations,
-  validatedRemoteFix,MAX_MAP_FRIEND_READS,
+  validatedRemoteFix,
   type ServerRead,type LiveFriend
 } from './m2FriendLocationView';
 
@@ -70,34 +71,27 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
   const refresh=useCallback(async()=>{
     if(!backendReviewedAndEnabled||busy.current||AppState.currentState!=='active')return;
     const uid=session.current;
-    if(!uid)return;
+    if(!uid||getStagingGuestAuth().currentUser?.uid!==uid)return;
     busy.current=true;
     const run=++epoch.current;
     setLoading(true);setFailed(false);setPositions({});setFriends([]);
     const current=()=>alive.current&&run===epoch.current&&
-      session.current===uid&&AppState.currentState==='active';
+      session.current===uid&&getStagingGuestAuth().currentUser?.uid===uid&&
+      AppState.currentState==='active';
     try{
-      const relationRows=await listOwnRequests();
-      if(!current())return;
-      const eligible=[...authorizedPeers(uid,relationRows)]
-        .sort((a,b)=>a.uid.localeCompare(b.uid)).slice(0,MAX_MAP_FRIEND_READS);
-      // Every selected friend's location comes from a separate authenticated
-      // backend read, not a broad Firestore query. Failure never shows a
-      // cached coordinate from a previous account or refresh.
-      const outcomes=await Promise.allSettled(eligible.map(async peer=>({
-        uid:peer.uid,response:await transport.read(peer.uid)
-      })));
-      if(!current())return;
-      const live:Record<string,ServerRead>={};
-      let unavailable=false;
-      for(const row of outcomes){
-        if(row.status==='rejected'){unavailable=true;continue;}
-        live[row.value.uid]=row.value.response;
-      }
-      setFriends(relationRows);
-      setPositions(live);
+      // One account-scoped read transaction. A direct Firebase account
+      // change invalidates it even before the auth-state callback runs.
+      // Every peer HTTP request still receives its own server-side ACL check.
+      const snapshot=await loadAuthorizedFriendMap({
+        viewerUid:uid,isCurrent:current,
+        loadRelations:listOwnRequests,
+        readPeer:peerUid=>transport.read(peerUid)
+      });
+      if(!snapshot||!current())return;
+      setFriends(snapshot.relations);
+      setPositions(snapshot.reads);
       setNow(Date.now());
-      setFailed(unavailable);
+      setFailed(snapshot.partialFailure);
     }catch{
       if(current()){setPositions({});setFriends([]);setFailed(true);}
     }finally{
@@ -149,7 +143,9 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
     return()=>clearInterval(interval);
   },[backendReviewedAndEnabled]);
 
-  const activeUid=session.current;
+  const activeUid=AppState.currentState==='active'&&
+    session.current===getStagingGuestAuth().currentUser?.uid?
+    session.current:null;
   const liveLocations:LiveFriend[]=useMemo(()=>
     activeUid?visibleFriendLocations({
       viewerUid:activeUid,relations:friends,reads:positions,nowMs:now
@@ -161,7 +157,8 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
   function requestExternalMap(peerUid:string){
     const viewerUid=session.current;
     if(Platform.OS!=='android'||!backendReviewedAndEnabled||
-       !viewerUid||AppState.currentState!=='active'||
+       !viewerUid||getStagingGuestAuth().currentUser?.uid!==viewerUid||
+       AppState.currentState!=='active'||
        !liveLocations.some(peer=>peer.peerUid===peerUid))return;
     // A native confirmation is required BEFORE revealing a private coordinate
     // to whichever external mapping app handles this Android geo intent.
