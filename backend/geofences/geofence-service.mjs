@@ -53,8 +53,8 @@ function activeM2Grant(grant,publisher,owner,subject,relation,now){
     publisher.ownerUid!==subject||publisher.viewerUid!==owner||
     publisher.expiresAtMs!==grant.expiresAtMs)deny();
  // A matching UID/viewer/expiry alone is insufficient to prove that these
- // records belong to the same M3 device lease. An interrupted replacement
- // can leave a grant and owner-wide publisher from different capabilities.
+ // records belong to the same M3 device lease. Deny malformed or split
+ // lease records instead of trusting matching timestamps alone.
  // Preserve legacy v1 (neither record has a capability); otherwise require
  // the same well-formed server-issued SHA-256 digest on both records.
  const grantDigest=grant.sessionDigest,publisherDigest=publisher.sessionDigest;
