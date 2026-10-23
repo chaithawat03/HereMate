@@ -181,7 +181,8 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       if(!fields(result,['enabled'])||
          (result as {enabled:unknown}).enabled!==false||
          !uid||ports.currentIdentity()?.uid!==uid)unavailable();
-      if(deviceSession?.uid===uid&&deviceSession.peerUid===viewerUid)
+      const active=deviceSession;
+      if(active!==null&&active.uid===uid&&active.peerUid===viewerUid)
         deviceSession=null;
       return {enabled:false as const};
     },
