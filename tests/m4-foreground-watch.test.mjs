@@ -104,6 +104,38 @@ test('M4 suppresses in-flight events on revoked authorization and in-flight star
  assert.equal(y.stats().watchCount,0);
  assert.equal(y.controller.getPhase(),'off');
 });
+test('M4 never emits an old geofence event after final async OS permission check races with cancellation',async()=>{
+ for(const incident of ['account-switch','background','stop-restart']){
+   let release,checks=0;
+   const finalPermission=new Promise(resolve=>{release=resolve;});
+   const x=rig({hasPermission:async()=>{
+     // start() checks twice; observe() checks once before evaluation,
+     // then waits here AFTER the server-confirmed event.
+     if(++checks===4)return finalPermission;
+     return true;
+   }});
+   assert.equal(await x.controller.start(OWNER,true),true);
+   x.send();
+   await flush();
+   assert.equal(checks,4,'the last permission read is pending after evaluate');
+   assert.equal(x.stats().evalCount,1);
+   if(incident==='account-switch')x.setActor('anotherSubjectUid00002');
+   if(incident==='background')x.setForeground(false);
+   if(incident==='stop-restart'){
+     x.controller.stop();
+     assert.equal(await x.controller.start(OWNER,true),true);
+     assert.equal(x.controller.getPhase(),'watching');
+   }
+   release(true); // OS read itself succeeded, but session is no longer current
+   await flush();
+   assert.deepEqual(x.events,[],incident+' must not surface the old event');
+   assert.deepEqual(x.failures,[],'cancellation is not a current-account GPS error');
+   assert.equal(x.controller.getPhase(),
+     incident==='stop-restart'?'watching':'off');
+   x.controller.stop();
+ }
+});
+
 test('M4 watcher errors fail closed; no background services or GPS history',async()=>{
  const x=rig();
  await x.controller.start(OWNER,true);
