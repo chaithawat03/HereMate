@@ -85,11 +85,16 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    const actor=ports.currentIdentity();
    if(!actor||!CODE.test(actor.uid)||!ports.isForeground())return unavailable();
    if(requireGps&&!(await ports.foregroundPermissionGranted()))return unavailable();
+   // An OS permission promise can settle after a silent auth/background
+   // change, before Firebase/AppState listeners invalidate the UI.
+   if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
    let jwt:string;
    try{jwt=await actor.getIdToken();}catch{return unavailable();}
    if(typeof jwt!=='string'||jwt.length<32||jwt.length>8192||jwt.includes('\n')||
       ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
    if(requireGps&&!(await ports.foregroundPermissionGranted()))return unavailable();
+   // Do not transmit the original subject's GPS with a stale Firebase bearer.
+   if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
    const json=JSON.stringify(body);
    if(json.length>2048)return unavailable();
    const controller=new AbortController();
@@ -110,6 +115,9 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
      try{value=await res.json();}catch{return unavailable();}
      if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
      if(requireGps&&!(await ports.foregroundPermissionGranted()))return unavailable();
+     // Do not expose the server-confirmed event if the final OS permission
+     // await completed after logout, account switch or app background.
+     if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
      return value;
    }catch{return unavailable();}
    finally{clearTimeout(timer);}
