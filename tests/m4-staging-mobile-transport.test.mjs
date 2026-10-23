@@ -74,6 +74,7 @@ test('consent UX APIs send exact, authenticated, no-store POST bodies only',asyn
  for(const row of x.calls){
    assert.match(String(row.input),/^https:\/\//);
    assert.equal(row.init.method,'POST');
+   assert.equal(row.init.redirect,'error','Private zone/GPS POST must not follow redirects');
    assert.equal(row.init.headers.Authorization,'Bearer '+SECRET);
    assert.equal(row.init.headers['Cache-Control'],'no-store');
    assert.ok(!row.input.includes('?'));
@@ -161,4 +162,20 @@ test('M4 UI requires independent owner/subject consent, distinct revoke and expl
  assert.doesNotMatch(androidWorkflow,/EXPO_PUBLIC_ENABLE_M4_GEOFENCES:/);
  assert.doesNotMatch(eas,/EXPO_PUBLIC_ENABLE_M4_GEOFENCES/);
  assert.doesNotMatch(read('App.tsx'),/M4GeofencePanel|M4GeofenceStagingScreens/);
+});
+
+test('M4 rejects 307/308 responses rather than exposing a consented zone to redirected services',async()=>{
+ for(const status of [301,302,303,307,308]){
+   const seen=[];
+   const x=make({fetchImpl:async(input,init)=>{
+     seen.push({input,init});
+     return {status,ok:false,json:async()=>({location:'https://foreign.run.app/steal'})};
+   }});
+   await assert.rejects(x.transport.propose(PEER,circle),
+     /M4_GEOFENCE_NOT_AVAILABLE/);
+   assert.equal(seen.length,1);
+   assert.equal(seen[0].init.redirect,'error');
+   assert.equal(new URL(seen[0].input).origin,ORIGIN);
+   assert.ok(!String(seen[0].input).includes('foreign.run.app'));
+ }
 });
