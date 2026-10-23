@@ -34,6 +34,10 @@ gcloud iam service-accounts describe \
 gcloud artifacts repositories describe heremate-m2-staging \
   --location=asia-southeast1 --project=heremate \
   --format='value(format)' | grep -Fxq 'DOCKER'
+# AR Writer must be granted on this one dedicated Staging repository only.
+gcloud artifacts repositories get-iam-policy heremate-m2-staging \
+  --location=asia-southeast1 --project=heremate \
+  --format=json > "$tmp/artifact-policy.json"
 gcloud billing projects describe heremate --format=json > "$tmp/billing.json"
 gcloud projects get-iam-policy heremate --format=json > "$tmp/project-policy.json"
 gcloud iam service-accounts get-iam-policy \
@@ -47,4 +51,5 @@ gcloud firestore fields ttls list --project=heremate \
   --database='(default)' --format=json > "$tmp/ttl.json"
 node scripts/m2-staging-gcp-verify.mjs \
   "$tmp/billing.json" "$tmp/project-policy.json" \
-  "$tmp/ttl.json" "$tmp/runtime-policy.json" "$tmp/build-policy.json"
+  "$tmp/ttl.json" "$tmp/runtime-policy.json" "$tmp/build-policy.json" \
+  "$tmp/artifact-policy.json"

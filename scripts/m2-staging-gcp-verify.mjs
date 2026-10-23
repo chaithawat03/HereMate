@@ -19,7 +19,7 @@ const bindingsFor=(policy,member)=>new Set(
  (policy?.bindings||[]).filter(x=>Array.isArray(x.members)&&
  x.members.includes(member)&&!x.condition).map(x=>x.role)
 );
-export function assertM2CloudPreflight({project,region,billing,policy,ttl,runtimePolicy,buildPolicy}){
+export function assertM2CloudPreflight({project,region,billing,policy,ttl,runtimePolicy,buildPolicy,artifactPolicy}){
  if(project!==M2_PROJECT||region!==M2_REGION)block('project or region mismatch');
  if(billing!==true)block('GCP billing is disabled or unreadable');
  if(!policy||!Array.isArray(policy.bindings))block('project IAM unavailable');
@@ -30,8 +30,16 @@ export function assertM2CloudPreflight({project,region,billing,policy,ttl,runtim
    if(!runtime.has(role))block('runtime missing '+role);
  for(const role of ['roles/run.admin','roles/cloudbuild.builds.editor'])
    if(!deploy.has(role))block('dedicated deploy identity missing '+role);
- for(const role of ['roles/artifactregistry.writer','roles/logging.logWriter'])
-   if(!build.has(role))block('dedicated build identity missing '+role);
+ if(!build.has('roles/logging.logWriter'))
+   block('dedicated build identity missing roles/logging.logWriter');
+ // Writer must be scoped to only the Staging Docker repository. A
+ // project-level Artifact Registry Writer grant is unnecessarily broad.
+ if(build.has('roles/artifactregistry.writer'))
+   block('Cloud Build artifact writer must not be project-wide');
+ if(!artifactPolicy||!Array.isArray(artifactPolicy.bindings)||
+    !bindingsFor(artifactPolicy,'serviceAccount:'+M2_BUILD)
+      .has('roles/artifactregistry.writer'))
+   block('Cloud Build identity lacks Staging repository writer grant');
  for(const [actor,roles] of [['runtime',runtime],['build',build],['deploy',deploy]]){
    if(roles.has('roles/owner')||roles.has('roles/editor')||
       roles.has('roles/datastore.owner'))
@@ -58,11 +66,12 @@ export function assertM2CloudPreflight({project,region,billing,policy,ttl,runtim
 if(process.argv[1]===fileURLToPath(import.meta.url)){
  try {
    const files=process.argv.slice(2);
-   if(files.length!==5)block('five reviewed read-only input snapshots required');
-   const [billing,policy,ttl,runtimePolicy,buildPolicy]=files.map(p=>JSON.parse(readFileSync(p,'utf8')));
+   if(files.length!==6)block('six reviewed read-only input snapshots required');
+   const [billing,policy,ttl,runtimePolicy,buildPolicy,artifactPolicy]=
+     files.map(p=>JSON.parse(readFileSync(p,'utf8')));
    const result=assertM2CloudPreflight({
      project:process.env.M2_GCP_PROJECT,region:process.env.M2_GCP_REGION,
-     billing:billing.billingEnabled,policy,ttl,runtimePolicy,buildPolicy
+     billing:billing.billingEnabled,policy,ttl,runtimePolicy,buildPolicy,artifactPolicy
    });
    // Never emit principal details, project IAM bindings or credentials.
    process.stdout.write(JSON.stringify(result)+'\n');
