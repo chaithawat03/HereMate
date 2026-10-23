@@ -194,8 +194,13 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
       </Pressable>;
     })}
     {session.phase==='off'?<Pressable accessibilityRole="button"
-      disabled={!eligible} style={[s.button,!eligible&&s.disabled]}
+      disabled={!eligible||emergencyState?.status==='running'}
+      style={[s.button,(!eligible||emergencyState?.status==='running')&&s.disabled]}
       onPress={()=>{
+        // A racing START must never reactivate a lease while the owner is
+        // trying to revoke it on another handset.
+        if(emergencyLock.current)return;
+        setEmergencyState(null);
         if(chosen&&selectedUid)
           void controller.current?.start(selectedUid,toRelation(chosen));
       }}><Text style={s.buttonText}>{t('m2StartSharing')}</Text></Pressable>:
