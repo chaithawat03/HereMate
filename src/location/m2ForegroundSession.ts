@@ -133,7 +133,13 @@ export function createForegroundSharingController(p:SharePorts) {
         if(grant.enabled!==true||!Number.isFinite(grant.expiresAtMs)||
            grant.expiresAtMs<=now||grant.expiresAtMs>now+MAX_SHARE_SESSION_MS)
           throw Error('bad_grant');
-        const sub=await p.watchForegroundFix(onFix,()=>{void stop();});
+        // A canceled Android native watcher may still deliver queued GPS/error
+        // callbacks. Only the watcher belonging to this START may publish
+        // or revoke its lease; an old callback must not touch a newer session.
+        const sub=await p.watchForegroundFix(
+          fix=>{if(run===epoch)onFix(fix);},
+          ()=>{if(run===epoch)void stop();}
+        );
         if(!active()){
           sub.remove();
           if(run===epoch)void stop();
@@ -141,7 +147,9 @@ export function createForegroundSharingController(p:SharePorts) {
         }
         watch=sub;
         publishState({phase:'sharing',peerUid,expiresAtMs:grant.expiresAtMs,error:null});
-        alarm=p.schedule(()=>{void stop();},Math.max(0,grant.expiresAtMs-p.now()));
+        // Canceled timeout callbacks may already be queued on the JS thread.
+        alarm=p.schedule(()=>{if(run===epoch)void stop();},
+          Math.max(0,grant.expiresAtMs-p.now()));
       }catch{
         if(run===epoch){
           if(remoteGrantPossible){
