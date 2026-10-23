@@ -76,6 +76,12 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
         if(!actor||actor!==account.current||AppState.currentState!=='active')
           throw Error('ANDROID_FOREGROUND_IDENTITY_CHANGED');
         let watching=true;
+        // A queued native error from a removed previous-account watcher
+        // must never terminate a newly authorized sharing session.
+        const onCurrentWatchError=()=>{
+          if(live&&watching&&actor===account.current&&
+             auth.currentUser?.uid===actor)onError();
+        };
         try {
           const subscription=await bindVerifiedForegroundWatch(
             ()=>Location.watchPositionAsync(
@@ -100,8 +106,8 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
                     accuracyMeters:coords.accuracy??Infinity,capturedAtMs:value.timestamp,
                   };
                   onFix(fix);
-                })().catch(onError);
-              },onError),
+                })().catch(onCurrentWatchError);
+              },onCurrentWatchError),
             async()=>live&&watching&&
               actor===account.current&&auth.currentUser?.uid===actor&&
               AppState.currentState==='active'&&
