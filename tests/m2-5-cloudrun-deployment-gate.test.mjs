@@ -14,7 +14,6 @@ function rig(){
   binding('roles/firebaseauth.viewer',[actor(M2_RUNTIME)]),
   binding('roles/run.admin',[actor(M2_DEPLOY)]),
   binding('roles/cloudbuild.builds.editor',[actor(M2_DEPLOY)]),
-  binding('roles/artifactregistry.writer',[actor(M2_BUILD)]),
   binding('roles/logging.logWriter',[actor(M2_BUILD)]),
  ]};
  const ttl=M2_COLLECTIONS.map(g=>({
@@ -27,8 +26,11 @@ function rig(){
  const buildPolicy={bindings:[
   binding('roles/iam.serviceAccountUser',[actor(M2_DEPLOY)])
  ]};
+ const artifactPolicy={bindings:[
+  binding('roles/artifactregistry.writer',[actor(M2_BUILD)])
+ ]};
  return {project:M2_PROJECT,region:M2_REGION,billing:true,
-  policy:project,ttl,runtimePolicy,buildPolicy};
+  policy:project,ttl,runtimePolicy,buildPolicy,artifactPolicy};
 }
 test('approved project IAM, distinct runtime/build/deploy principals and ACTIVE TTL pass',()=>{
  const r=rig();const checked=assertM2CloudPreflight(r);
@@ -47,6 +49,11 @@ test('reject wrong GCP target, billing OFF, missing roles, editor and nonactive 
   {policy:{bindings:[...r.policy.bindings,{role:'roles/editor',members:[actor(M2_RUNTIME)]}]}},
   {runtimePolicy:{bindings:[]}},
   {buildPolicy:{bindings:[]}},
+  {artifactPolicy:{bindings:[]}},
+  {artifactPolicy:{bindings:[{role:'roles/artifactregistry.writer',
+    members:[actor(M2_RUNTIME)]}]}},
+  {policy:{bindings:[...r.policy.bindings,{
+    role:'roles/artifactregistry.writer',members:[actor(M2_BUILD)]}]}},
   {buildPolicy:{bindings:[{role:'roles/iam.serviceAccountUser',
      members:[actor(M2_RUNTIME)]}]}},
   {ttl:r.ttl.filter(x=>!x.name.includes('private_location_grants'))},
@@ -80,6 +87,8 @@ test('new Cloud Run workflow is manual-only, guarded by GitHub variables and rev
  assert.match(cloud,/scripts\/m2-4-readonly-cloudrun-smoke.mjs/);
  assert.match(preflight,/m2-staging-gcp-verify.mjs/);
  assert.ok(preflight.includes('build-policy.json'));
+ assert.ok(preflight.includes('artifact-policy.json'));
+ assert.ok(preflight.includes('artifacts repositories get-iam-policy'));
  assert.ok(preflight.includes('heremate-m2-build@heremate.iam.gserviceaccount.com'));
  assert.match(old,/^  push:/m);
  assert.doesNotMatch(workflow+cloud+preflight,/gcloud iam service-accounts create|gcloud projects add-iam-policy-binding|gcloud firestore fields ttls update|EXPO_TOKEN|GOOGLE_DRIVE_REFRESH_TOKEN/);
