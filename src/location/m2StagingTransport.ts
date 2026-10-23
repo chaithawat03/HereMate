@@ -19,7 +19,10 @@ type LocationTransportPorts=Readonly<{
   /** M3 Staging: reject same-account different-device publishing by capability. */
   useDeviceSessions?:boolean;
 }>;
-type LocationTransport=SharePorts['transport']&M2FriendLocationTransport;
+type LocationTransport=SharePorts['transport']&M2FriendLocationTransport&Readonly<{
+  /** Explicit owner action, independent of this handset's session capability. */
+  emergencyStop:(peerUid:string)=>Promise<{enabled:false}>;
+}>;
 const CODE=/^[A-Za-z0-9_-]{12,128}$/;
 const fields=(obj:unknown,keys:readonly string[]):boolean=>{
   if(!obj||typeof obj!=='object'||Array.isArray(obj))return false;
@@ -166,6 +169,22 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       if(row.stored!==true||!validNumber(expiresAt))
         throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');
       return {stored:true,expiresAtMs:expiresAt};
+    },
+    async emergencyStop(peerUid:string){
+      // User-initiated owner-wide STOP intentionally uses the stable v1 route:
+      // any signed-in owner handset may revoke an otherwise inaccessible v2
+      // session on a lost/other phone, without knowing that phone's capability.
+      // Never infer success from a timeout or a rejected response.
+      const viewerUid=safePeer(peerUid);
+      const uid=ports.currentIdentity()?.uid;
+      const result=await send('/v1/locations/grants/stop',{viewerUid},false);
+      if(!fields(result,['enabled'])||
+         (result as {enabled:unknown}).enabled!==false||
+         !uid||ports.currentIdentity()?.uid!==uid)unavailable();
+      const active=deviceSession;
+      if(active!==null&&active.uid===uid&&active.peerUid===viewerUid)
+        deviceSession=null;
+      return {enabled:false as const};
     },
     async read(ownerUid:string){
       const result=await send('/v1/locations/points/read',{ownerUid:safePeer(ownerUid)},true);
