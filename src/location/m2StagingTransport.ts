@@ -56,6 +56,9 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   const timeout=ports.timeoutMs??8000;
   if(!Number.isSafeInteger(timeout)||timeout<1000||timeout>10000)unavailable();
   let deviceSession:{uid:string;peerUid:string;token:string}|null=null;
+  // A delayed first START must not allow another handset/session request to
+  // race through this transport and overwrite its opaque publisher capability.
+  let deviceSessionStartPending=false;
   const validCapability=(value:unknown):value is string=>
     typeof value==='string'&&/^[0-9a-f]{64}$/.test(value);
   async function send(endpoint:string,payload:Readonly<Record<string,unknown>>,
@@ -109,19 +112,26 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     async start(peerUid:string){
       const viewerUid=safePeer(peerUid);
       if(ports.useDeviceSessions===true){
-        if(deviceSession!==null)unavailable();
+        if(deviceSession!==null||deviceSessionStartPending)unavailable();
         const uid=ports.currentIdentity()?.uid;
         if(typeof uid!=='string')return unavailable();
-        const result=await send('/v2/locations/sessions/start',{viewerUid},true);
-        if(!fields(result,['enabled','expiresAtMs','sessionToken']))
-          return unavailable();
-        const row=result as {enabled:unknown;expiresAtMs:unknown;sessionToken:unknown};
-        const expiry=row.expiresAtMs,token=row.sessionToken;
-        if(row.enabled!==true||!validNumber(expiry)||
-          !validCapability(token)||ports.currentIdentity()?.uid!==uid)
-          return unavailable();
-        deviceSession={uid,peerUid:viewerUid,token};
-        return {enabled:true,expiresAtMs:expiry};
+        // Acquire synchronously before the first await; release on every
+        // rejection, timeout or identity change without persisting a token.
+        deviceSessionStartPending=true;
+        try {
+          const result=await send('/v2/locations/sessions/start',{viewerUid},true);
+          if(!fields(result,['enabled','expiresAtMs','sessionToken']))
+            return unavailable();
+          const row=result as {enabled:unknown;expiresAtMs:unknown;sessionToken:unknown};
+          const expiry=row.expiresAtMs,token=row.sessionToken;
+          if(row.enabled!==true||!validNumber(expiry)||
+            !validCapability(token)||ports.currentIdentity()?.uid!==uid)
+            return unavailable();
+          deviceSession={uid,peerUid:viewerUid,token};
+          return {enabled:true,expiresAtMs:expiry};
+        } finally {
+          deviceSessionStartPending=false;
+        }
       }
       const result=await send('/v1/locations/grants/start',{viewerUid},true);
       if(!fields(result,['enabled','expiresAtMs']))unavailable();
