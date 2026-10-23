@@ -100,6 +100,39 @@ test('selected friend: explicit grant, fresh publish, authorized recipient read 
  assert.equal(x.db.rows.has('private_location_grants/'+pair),false);
  assert.equal(x.db.isOrdered(),true);
 });
+test('STOP remains available on per-owner quota exhaustion and repeats do not resurrect sharing',async()=>{
+ const x=setup();
+ await x.start();
+ await x.publish();
+ // Signed-in owner's normal STOP bucket has been exhausted by another
+ // device/session. Authorization is still required; a no-op reply is not enough.
+ const rateLimiter={
+   persistent:true,
+   async consume({route}){return route!=='stop';}
+ };
+ const controlled=createLocationService({
+   adminAuth:x.adminAuth,
+   store:createFirestoreLocationStore(x.db),
+   rateLimiter,clock:()=>now
+ });
+ const stop=()=>controlled.stop({idToken:bearer(A),viewerUid:B});
+ assert.deepEqual(await stop(),{enabled:false});
+ assert.equal(x.db.rows.has('private_latest_locations/'+pair),false);
+ assert.equal(x.db.rows.has('private_location_grants/'+pair),false);
+ assert.equal(x.db.rows.has('private_location_publishers/'+A),false);
+ await fails(x.view());
+ assert.deepEqual(await stop(),{enabled:false}); // idempotent
+ // STOP is idempotent for every authenticated account, but one account
+ // cannot erase another account's active grant or publisher lease.
+ await x.start(); await x.publish();
+ assert.deepEqual(await controlled.stop({idToken:bearer(C),viewerUid:B}),
+   {enabled:false});
+ assert.deepEqual((await x.view()).point,point());
+ await stop();
+ x.revoked.add(A);
+ await fails(stop());
+});
+
 test('server re-reads authoritative consents and friendship each operation; cannot use a cached grant',async()=>{
  const x=setup();
  await x.start();

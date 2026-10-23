@@ -126,11 +126,21 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       const ownerUid=await authenticate(idToken);
       assertUid(viewerUid);
       if(ownerUid===viewerUid)deny();
-      await limit(ownerUid,'stop');
-      // Always allow authenticated owner to revoke, even if friendship was removed.
-      return tx(ownerUid,viewerUid,async ({publisher,deletePublisher,deleteGrant,deletePoint})=>{
-        deleteGrant();
-        deletePoint();
+      // A transient per-account quota must NEVER prevent a signed-in owner
+      // from stopping the sharing lease. Consume the normal quota where
+      // possible, but treat ONLY a known quota-denial as a safety override;
+      // Firestore failures still fail closed rather than pretending STOP.
+      try {await limit(ownerUid,'stop');}
+      catch (error) {
+        if(!(error instanceof LocationLimited))throw error;
+      }
+      // No consent requirement: STOP remains valid even after unfriend/logout
+      // from the other device. Repeat STOP is idempotent and doesn't write.
+      return tx(ownerUid,viewerUid,async ({
+        grant,point,publisher,deletePublisher,deleteGrant,deletePoint
+      })=>{
+        if(grant)deleteGrant();
+        if(point)deletePoint();
         // Never delete another recipient's newer lease on a delayed Stop.
         if(publisher?.ownerUid===ownerUid &&
            publisher?.viewerUid===viewerUid)deletePublisher();

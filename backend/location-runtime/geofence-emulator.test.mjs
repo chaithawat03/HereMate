@@ -134,6 +134,8 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
    {revoked:true});
  assert.equal((await zoneRef.get()).exists,false);
  assert.equal((await stateRef.get()).exists,false);
+ assert.deepEqual(await geofence.revoke({idToken:bearer(B),ownerUid:A,subjectUid:B}),
+   {revoked:true}); // always revocable, even after prior successful revoke
  await assert.rejects(sample(),GeofenceDenied);
  await assert.rejects(geofence.revoke({
    idToken:bearer(C),ownerUid:A,subjectUid:B
