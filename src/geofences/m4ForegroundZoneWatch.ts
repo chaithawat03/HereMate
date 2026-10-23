@@ -63,7 +63,15 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      const granted=await p.requestPermission();
      if(!active(epoch)){if(epoch===generation)stop();return false;}
      if(!granted||!(await p.hasPermission())){
-       if(active(epoch)){stop();p.onFailure();}
+       // The OS may return DENIED after a silent account/background change.
+       // active(epoch) is then false, but this generation still owns the
+       // 'starting' phase. Release it without blaming the next account.
+       // Never tear down a newer explicit opt-in generation.
+       if(epoch===generation){
+         const warn=active(epoch);
+         stop();
+         if(warn)p.onFailure();
+       }
        return false;
      }
      if(!active(epoch)){if(epoch===generation)stop();return false;}
