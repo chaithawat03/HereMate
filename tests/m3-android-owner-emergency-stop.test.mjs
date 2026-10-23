@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createM2StagingTransport} from '../src/location/m2StagingTransport.ts';
+import {createForegroundSharingController} from '../src/location/m2ForegroundSession.ts';
 import {handleLocationHttp} from '../backend/location/http.mjs';
 
 const SELF='ownerdeviceuid000001',PEER='viewerdeviceuid000002';
@@ -90,6 +91,36 @@ test('no UI confirmation on invalid response, network failure or account-change 
  await assert.rejects(pending,/UNAVAILABLE/);
  x.setUid(null);
  await assert.rejects(x.transport.emergencyStop(PEER),/UNAVAILABLE/);
+});
+test('client sharing status becomes OFF only after explicit verified emergency acknowledgement',async()=>{
+ const phases=[];
+ const controller=createForegroundSharingController({
+   ownerUid:()=>SELF,
+   isForeground:()=>true,
+   askForegroundPermission:async()=>true,
+   watchForegroundFix:async()=>({remove:()=>{}}),
+   now:Date.now,
+   schedule:()=>({}),cancel:()=>{},
+   onState:s=>phases.push(s.phase),
+   transport:{
+     start:async()=>({enabled:true,expiresAtMs:Date.now()+50_000}),
+     publish:async()=>({stored:true,expiresAtMs:Date.now()+20_000}),
+     stop:async()=>{throw Error('network disconnected');}
+   }
+ });
+ const relation={senderUid:SELF,recipientUid:PEER,status:'accepted',
+   senderConsent:true,recipientConsent:true};
+ await controller.start(PEER,relation);
+ assert.equal(controller.getState().phase,'sharing');
+ await controller.stop();
+ assert.equal(controller.getState().phase,'stop-unconfirmed');
+ controller.acknowledgeEmergencyStop('unrelatedpeeruid0003');
+ assert.equal(controller.getState().phase,'stop-unconfirmed');
+ controller.acknowledgeEmergencyStop(PEER);
+ assert.equal(controller.getState().phase,'off');
+ assert.ok(phases.includes('stop-unconfirmed'));
+ assert.equal(phases.at(-1),'off');
+ controller.dispose();
 });
 test('Android has explicit per-known-friend revoke even after consent change; iOS remains deferred',()=>{
  const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
