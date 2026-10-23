@@ -36,6 +36,8 @@ jobs:
           bash -n scripts/m2-staging-cloudrun-deploy.sh
           node --check scripts/m2-staging-gcp-verify.mjs
           node --test tests/m2-5-cloudrun-deployment-gate.test.mjs
+      - name: Validate one-shot real Staging E2E runner offline (no GCP access)
+        run: node --test tests/m2-staging-live-e2e-contract.test.mjs
       - name: Test M2.3 authorized real friend map and status privacy (offline)
         run: node --test tests/m2-3-friend-map-privacy.test.mjs
       - name: Test M2.2 foreground-only sharing and remote stop lifecycle (offline)
