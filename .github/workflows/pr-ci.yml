@@ -65,6 +65,8 @@ jobs:
         run: node --test tests/m3-android-owner-emergency-stop.test.mjs
       - name: Android sharing friend-list auth scope and late-response privacy (offline)
         run: node --test tests/m3-android-account-scoped-friend-refresh.test.mjs
+      - name: Android friend-map read identity and late-response privacy (offline)
+        run: node --test tests/m3-android-account-scoped-friend-map.test.mjs
       - name: M3 native transport capability memory safety (offline)
         run: node --test tests/m3-device-session-transport.test.mjs
       - name: M3 publisher session V2 HTTP strict schema and identity (offline)
