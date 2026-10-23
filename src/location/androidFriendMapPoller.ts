@@ -7,12 +7,15 @@ export const ANDROID_FRIEND_MAP_POLL_MS=30_000;
 export const ANDROID_FRIEND_MAP_READ_LIMIT_PER_TICK=8;
 // 8 reads x up to 3 starts in a rolling 60 second interval = 24, below
 // the M2 server's 30-read/minute per-account quota, leaving headroom.
-export const ANDROID_FRIEND_MAP_MAX_READS_PER_60S=24;
+export const ANDROID_FRIEND_MAP_MAX_READS_PER_60S=16;
+const WINDOW_MS=60_000;
+const MAX_WINDOW_BATCHES=2;
 const UID=/^[A-Za-z0-9_-]{12,128}$/;
 export type FriendMapPollPorts=Readonly<{
  isAndroid:()=>boolean;
  isForeground:()=>boolean;
  currentUid:()=>string|null;
+ now:()=>number;
  scheduleInterval:(callback:()=>void,ms:number)=>unknown;
  cancelInterval:(handle:unknown)=>void;
  refresh:()=>Promise<void>;
@@ -21,6 +24,7 @@ export type FriendMapPollPorts=Readonly<{
 export function createAndroidFriendMapPoller(p:FriendMapPollPorts){
  let active=false,actor:string|null=null,handle:unknown=null;
  let inFlight=false,disposed=false;
+ let lastBudgetUid:string|null=null,readStarts:number[]=[];
  function stop(){
    if(handle!==null){p.cancelInterval(handle);handle=null;}
    actor=null;
@@ -34,6 +38,14 @@ export function createAndroidFriendMapPoller(p:FriendMapPollPorts){
    if(!active||disposed)return;
    if(!allowed()){stop();return;}
    if(inFlight)return; // Never overlap full friend-list + HTTP batches.
+   const now=p.now();
+   if(!Number.isSafeInteger(now)||now<=0){stop();return;}
+   // Bound transient retries/restarts too, not just uninterrupted 30s
+   // intervals. A per-owner rolling-minute allowance of 2 x 8 reads
+   // leaves sufficient capacity for one manual refresh.
+   readStarts=readStarts.filter(t=>t>now-WINDOW_MS);
+   if(readStarts.length>=MAX_WINDOW_BATCHES)return;
+   readStarts.push(now);
    inFlight=true;
    try{await p.refresh();}
    catch{/* The view independently displays the failed fetch, not stale pins. */}
@@ -44,6 +56,7 @@ export function createAndroidFriendMapPoller(p:FriendMapPollPorts){
    const uid=p.currentUid();
    if(!uid||!UID.test(uid))return false;
    actor=uid;active=true;
+   if(lastBudgetUid!==uid){lastBudgetUid=uid;readStarts=[];}
    p.onActive(true);
    handle=p.scheduleInterval(()=>{void tick();},ANDROID_FRIEND_MAP_POLL_MS);
    void tick(); // An explicit user tap starts first read immediately.
