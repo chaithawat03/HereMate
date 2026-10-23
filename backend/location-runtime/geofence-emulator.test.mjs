@@ -32,6 +32,44 @@ test('policy suppresses uncertain boundaries and first sightings without saving 
  assert.equal(advanceState(circle,fix(91),at).quality,'invalid');
  assert.equal(advanceState(circle,fix(0),at,EMPTY_STATE).event,null);
 });
+test('M4 replay and out-of-order captures cannot fabricate Enter/Exit',()=>{
+ const now=1_800_000_000_000;
+ const circle={latitude:0,longitude:0,radiusMeters:350};
+ const at=(latitude,capturedAtMs)=>({latitude,longitude:0,
+   accuracyMeters:12,capturedAtMs});
+ const base=advanceState(circle,at(0.02,now-200),now).next;
+ assert.equal(base.pending,'outside');
+ const same=advanceState(circle,at(0.02,now-200),now,base);
+ assert.equal(same.quality,'ambiguous');
+ assert.equal(same.next.streak,1);
+ assert.equal(same.next.zone,'unknown');
+ const established=advanceState(circle,at(0.02,now+800),now+1000,same.next);
+ assert.equal(established.next.zone,'outside');
+ const proposed=advanceState(circle,at(0,now+1800),now+2000,established.next);
+ assert.equal(proposed.next.streak,1);
+ const replay=advanceState(circle,at(0,now+1800),now+2000,proposed.next);
+ assert.equal(replay.event,null);
+ assert.equal(replay.next.zone,'outside');
+ const old=advanceState(circle,at(0,now+800),now+2000,replay.next);
+ assert.equal(old.event,null);
+ const changed=advanceState(circle,at(0,now+2800),now+3000,old.next);
+ assert.equal(changed.event,'enter');
+ const late=advanceState(circle,at(0.02,now+35_000),now+35_200,changed.next);
+ assert.equal(late.next.streak,1);
+ assert.equal(late.next.zone,'unknown'); // stale baseline cannot emit a fake Exit
+ const longGap=advanceState(circle,at(0.02,now+75_000),now+75_200,late.next);
+ assert.equal(longGap.event,null);
+ assert.equal(longGap.next.streak,1);
+ const oldSchema=advanceState(circle,at(0.02,now+1800),now+2000,
+   {zone:'inside',pending:'outside',streak:1,lastEventAtMs:null});
+ assert.equal(oldSchema.next.zone,'unknown');
+ assert.equal(oldSchema.event,null);
+ for(const s of [base,same.next,established.next,proposed.next,replay.next,changed.next]){
+   assert.equal(Object.hasOwn(s,'latitude'),false);
+   assert.equal(Object.hasOwn(s,'longitude'),false);
+   assert.equal(Object.hasOwn(s,'point'),false);
+ }
+});
 test('real isolated transactions: informed subject opt-in, active M2 lease, enter/exit and revoke',
  {timeout:90000},async t=>{
  assert.equal(process.env.FIRESTORE_EMULATOR_HOST,HOST);
@@ -112,15 +150,24 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
    appInForeground:true,foregroundPermissionGranted:true
  });
  let p=await out();assert.equal(p.event,null);
- p=await out();assert.equal(p.event,null); // baseline is outside
+ // A replay of the same source GPS fix cannot establish a baseline.
+ p=await out();assert.equal(p.event,null);
+ assert.equal((await stateRef.get()).data().streak,1);
+ now+=1000;
+ p=await out();assert.equal(p.event,null); // distinct fix establishes outside
+ now+=1000;
  p=await sample();assert.equal(p.event,null);
+ p=await sample();assert.equal(p.event,null); // replay must not emit Enter
+ now+=1000;
  p=await sample();assert.equal(p.event,'enter');
  let state=(await stateRef.get()).data();
  assert.ok(state.expireAt instanceof Timestamp);
  for(const forbidden of ['latitude','longitude','circle','point','fix','route','history'])
    assert.equal(Object.hasOwn(state,forbidden),false);
  assert.equal(state.lastEventAtMs,now);
+ now+=1000;
  p=await out();assert.equal(p.event,null);
+ now+=1000;
  p=await out();assert.equal(p.event,null); // cooldown suppresses transition
  // Consent changes invalidate both zone and M2 grant on the very next request.
  await rel.update({recipientConsent:false,updatedAt:Timestamp.fromMillis(now+2)});
