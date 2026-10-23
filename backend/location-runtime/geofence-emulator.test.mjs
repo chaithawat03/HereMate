@@ -95,6 +95,11 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  assert.deepEqual(await geofence.decide({idToken:bearer(B),ownerUid:A,approve:false}),
    {approved:false});
  assert.equal((await zoneRef.get()).exists,false);
+ // Four proposals in one minute (including denied attempts) exhaust
+ // the persistent per-actor quota; advancing the injected test clock
+ // exercises a legitimate next-window retry without touching live GCP.
+ await assert.rejects(geofence.propose(args),GeofenceLimited);
+ now+=60_001;
  await geofence.propose(args);
  const accepted=await geofence.decide({idToken:bearer(B),ownerUid:A,approve:true});
  assert.equal(accepted.approved,true);
@@ -134,8 +139,8 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
    idToken:bearer(C),ownerUid:A,subjectUid:B
  }),GeofenceDenied);
  // A stranger exhausting real persistent limiter cannot brute force review.
- // The earlier stranger review consumed 1 of the same 60-second window.
- for(let i=1;i<GEOFENCE_ROUTE_LIMITS.review;i++)
+ // The earlier review was in the previous 60-second window.
+ for(let i=0;i<GEOFENCE_ROUTE_LIMITS.review;i++)
    await assert.rejects(geofence.review({idToken:bearer(C),ownerUid:A}),GeofenceDenied);
  await assert.rejects(geofence.review({idToken:bearer(C),ownerUid:A}),GeofenceLimited);
  const limits=await db.collection('private_geofence_rate_limits').get();
