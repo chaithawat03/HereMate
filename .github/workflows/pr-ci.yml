@@ -22,6 +22,8 @@ jobs:
       - run: node --check tests/m0.test.mjs
       - name: Verify owner-approved Guest-only trial exception, exact hashes and expiry
         run: node --test tests/security-guest-staging.test.mjs
+      - name: M4 zero-history, double-consent geofence event core (offline)
+        run: node --test tests/m4-geofence-core.test.mjs
       - name: M3 iOS foreground privacy/source contract
         run: node --test tests/m3-ios-foreground-staging.test.mjs
       - name: Verify manually gated integrated Android M2 native test APK (offline)
