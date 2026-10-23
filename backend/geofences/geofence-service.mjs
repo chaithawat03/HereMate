@@ -52,6 +52,17 @@ function activeM2Grant(grant,publisher,owner,subject,relation,now){
     grant.expiresAtMs<=now||grant.expiresAtMs>now+60_000||
     publisher.ownerUid!==subject||publisher.viewerUid!==owner||
     publisher.expiresAtMs!==grant.expiresAtMs)deny();
+ // A matching UID/viewer/expiry alone is insufficient to prove that these
+ // records belong to the same M3 device lease. Deny malformed or split
+ // lease records instead of trusting matching timestamps alone.
+ // Preserve legacy v1 (neither record has a capability); otherwise require
+ // the same well-formed server-issued SHA-256 digest on both records.
+ const grantDigest=grant.sessionDigest,publisherDigest=publisher.sessionDigest;
+ if(grantDigest!==undefined||publisherDigest!==undefined){
+   if(typeof grantDigest!=='string'||
+      !/^[0-9a-f]{64}$/.test(grantDigest)||
+      grantDigest!==publisherDigest)deny();
+ }
 }
 export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.now}){
  if(adminAuth?.app?.options?.projectId!==STAGING_PROJECT||
