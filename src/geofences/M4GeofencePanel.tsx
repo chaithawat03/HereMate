@@ -92,13 +92,15 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
       return null;
    return {latitude,longitude,radiusMeters};
  };
- async function run(work:()=>Promise<string>){
+ async function run(work:(isCurrent:()=>boolean)=>Promise<string>){
    const actor=identity.current;
    if(processing.current||!actor||AppState.currentState!=='active')return;
    processing.current=true;setBusy(true);setError(false);setMessage('');
    const currentRun=++seq.current;
+   const isCurrent=()=>alive.current&&seq.current===currentRun&&
+     identity.current===actor&&AppState.currentState==='active';
    try{
-     const success=await work();
+     const success=await work(isCurrent);
      if(alive.current&&seq.current===currentRun&&identity.current===actor&&
         AppState.currentState==='active')setMessage(success);
    }catch{
@@ -197,9 +199,9 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      {relationApproved?<View style={s.subpanel}>
        <Text style={s.label}>{label('พื้นที่ที่เพื่อนเสนอให้คุณ','Zone proposed for you')}</Text>
        <Pressable accessibilityRole="button" disabled={busy} style={s.secondary}
-         onPress={()=>void run(async()=>{
+         onPress={()=>void run(async isCurrent=>{
            const pending=await transport.review(peer.uid);
-           setReviewed(pending.circle);
+           if(isCurrent())setReviewed(pending.circle);
            return label('ตรวจพิกัดและรัศมีด้านล่างก่อนตัดสินใจ',
              'Inspect exact coordinates/radius before deciding');
          })}><Text style={s.secondaryText}>{label('ตรวจคำขอที่รออนุมัติ','Review pending proposal')}</Text>
