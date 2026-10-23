@@ -90,6 +90,14 @@ export function createForegroundSharingController(p:SharePorts) {
     if(state.phase!=='stop-unconfirmed')return;
     return stop();
   }
+  function acknowledgeEmergencyStop(peerUid:string):void {
+    // Only the caller may invoke this after a successful authenticated
+    // server STOP response. A failed/timeout request must keep the UI in
+    // stop-unconfirmed; never silently switch to OFF.
+    if(!disposed&&state.phase==='stop-unconfirmed'&&state.peerUid===peerUid){
+      ++epoch;activeOwner=null;cancelLocal();publishState(off);
+    }
+  }
   async function start(peerUid:string,relation:ShareRelation):Promise<void> {
     if(disposed||state.phase!=='off'||inStart||inStop)return;
     const owner=p.ownerUid();
@@ -165,7 +173,7 @@ export function createForegroundSharingController(p:SharePorts) {
     void stop();
   }
   return Object.freeze({
-    start,stop,retryStop,interrupted,accountChanged,consentChanged,
+    start,stop,retryStop,acknowledgeEmergencyStop,interrupted,accountChanged,consentChanged,
     dispose:disposedNow,getState:()=>state
   });
 }
