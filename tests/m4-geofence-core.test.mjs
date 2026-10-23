@@ -94,6 +94,8 @@ test('cooldown allows event only after 5 minutes and new reliable samples',()=>{
 });
 test('offline core is not mobile mounted, no push jobs, persistent GPS log or history',()=>{
  const m=readFileSync(new URL('../src/geofences/m4GeofenceCore.ts',import.meta.url),'utf8');
- assert.doesNotMatch(m,/AsyncStorage|Firestore|setDoc\\(|addDoc\\(|expo-notifications|TaskManager|watchPositionAsync/);
+ assert.doesNotMatch(m,/AsyncStorage|Firestore|expo-notifications|TaskManager|watchPositionAsync/);
+ assert.equal(m.includes('setDoc('),false);
+ assert.equal(m.includes('addDoc('),false);
  assert.doesNotMatch(readFileSync(new URL('../App.tsx',import.meta.url),'utf8'),/m4GeofenceCore/);
 });
