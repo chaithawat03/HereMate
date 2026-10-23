@@ -1,0 +1,62 @@
+name: M4 Staging ACTIVE TTL — owner-only read-only check
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heremate-m4-staging-ttl-readonly
+  cancel-in-progress: false
+
+jobs:
+  inspect-staging-m4-ttl:
+    # Issue #54 contains the Android-first acceptance ledger. Only the
+    # authenticated owner may issue this exact command, never a PR comment.
+    if: >-
+      github.repository == 'chaithawat03/HereMate' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'issue_comment' &&
+      github.event.action == 'created' &&
+      github.event.issue.number == 54 &&
+      github.event.issue.pull_request == null &&
+      github.event.comment.body == '/heremate-check-m4-ttl' &&
+      github.event.comment.user.login == 'chaithawat03' &&
+      github.event.comment.user.id == 29879036 &&
+      github.event.comment.author_association == 'OWNER' &&
+      github.event.sender.login == 'chaithawat03' &&
+      github.actor == 'chaithawat03'
+    environment: m2-staging-deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      M4_GCP_PROJECT: heremate
+      M4_GCP_REGION: asia-southeast1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require isolated Staging deploy identity (never Drive OAuth)
+        env:
+          DEPLOY_ACCOUNT: ${{ vars.M2_STAGING_DEPLOY_SERVICE_ACCOUNT }}
+          WIF_PROVIDER: ${{ vars.M2_STAGING_WIF_PROVIDER }}
+        run: |
+          set -euo pipefail
+          test "$DEPLOY_ACCOUNT" = 'heremate-m2-deploy@heremate.iam.gserviceaccount.com'
+          test "$WIF_PROVIDER" = 'projects/976775896533/locations/global/workloadIdentityPools/heremate-m2-staging/providers/github-m2-staging'
+      - name: Authenticate short-lived Workload Identity Federation
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.M2_STAGING_WIF_PROVIDER }}
+          service_account: ${{ vars.M2_STAGING_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Observe M4 3 ACTIVE expireAt policies without writing any GCP resource
+        run: bash scripts/m4-staging-ttl-preflight.sh
