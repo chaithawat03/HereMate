@@ -9,7 +9,7 @@
  */
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {
- AppState,Pressable,StyleSheet,Text,TextInput,View
+ Alert,AppState,Platform,Pressable,StyleSheet,Text,TextInput,View
 } from 'react-native';
 import * as Location from 'expo-location';
 import {onAuthStateChanged} from 'firebase/auth';
@@ -36,11 +36,16 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
  const [error,setError]=useState(false);
  const [message,setMessage]=useState('');
  const [watchPhase,setWatchPhase]=useState<M4WatchPhase>('off');
+ // Session-only Android alert preference: OFF on every launch/revoke/background.
+ const [foregroundAlerts,setForegroundAlerts]=useState(false);
+ const alertsRef=useRef(false);
  const zoneWatch=useRef<ReturnType<typeof createM4ForegroundZoneWatch>|null>(null);
  const identity=useRef<string|null>(null);
  const seq=useRef(0),alive=useRef(false),processing=useRef(false);
  const clearSensitive=useCallback(()=>{
    zoneWatch.current?.stop();
+   alertsRef.current=false;
+   if(alive.current)setForegroundAlerts(false);
    ++seq.current;
    if(alive.current){
      setReviewed(null);setMessage('');setError(false);
@@ -98,9 +103,21 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      cancel:handle=>clearTimeout(handle as ReturnType<typeof setTimeout>),
      onPhase:phase=>{if(alive.current)setWatchPhase(phase);},
      onEvent:event=>{
-       if(alive.current)setMessage(event==='enter'?
+       if(!alive.current||AppState.currentState!=='active')return;
+       setMessage(event==='enter'?
          (language==='th'?'ยืนยันว่าเข้าสู่พื้นที่':'Confirmed zone entry'):
          (language==='th'?'ยืนยันว่าออกจากพื้นที่':'Confirmed zone exit'));
+       // A notification is NEVER generated from a stale/ambiguous fix,
+       // only a server-confirmed event returned to the tracked subject.
+       // This is a local foreground alert, NOT an OS push subscription.
+       if(Platform.OS==='android'&&alertsRef.current){
+         Alert.alert(
+           language==='th'?'แจ้งเตือนพื้นที่ (HereMate)':'HereMate zone update',
+           event==='enter'?
+             (language==='th'?'ตรวจพบการเข้าสู่พื้นที่ที่อนุมัติแล้ว':'Entered your approved zone'):
+             (language==='th'?'ตรวจพบการออกจากพื้นที่ที่อนุมัติแล้ว':'Exited your approved zone')
+         );
+       }
      },
      onFailure:()=>{if(alive.current)setError(true);}
    });
@@ -288,6 +305,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
        <Pressable accessibilityRole="button" disabled={busy} style={s.destructive}
          onPress={()=>void run(async()=>{
            zoneWatch.current?.stop();
+           alertsRef.current=false;setForegroundAlerts(false);
            await transport.revoke(peer.uid,uid);
            setReviewed(null);
            return label('ถอนอนุญาตที่เพื่อนสร้างให้คุณแล้ว',
@@ -298,6 +316,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
        <Pressable accessibilityRole="button" disabled={busy} style={s.secondary}
          onPress={()=>void run(async()=>{
            zoneWatch.current?.stop();
+           alertsRef.current=false;setForegroundAlerts(false);
            await transport.revoke(uid,peer.uid);
            return label('ยกเลิกพื้นที่ที่คุณเสนอแล้ว','Revoked zone you proposed');
          })}><Text style={s.secondaryText}>{label(
@@ -317,6 +336,17 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
          'การเฝ้าดูพื้นที่เป็นตัวเลือก: ใช้ GPS เฉพาะตอนเปิดแอป สูงสุด 60 วินาที ต้องมี M2 sharing และพื้นที่ที่อีกฝ่ายอนุมัติแล้ว ไม่มี Push หรือการติดตามเบื้องหลัง',
          'Optional: watch the zone for up to 60 seconds while this app is open. Requires active M2 sharing and subject-approved zone. No push or background tracking'
        )}</Text>
+       {Platform.OS==='android'?<Pressable accessibilityRole="button"
+         accessibilityState={{checked:foregroundAlerts}}
+         disabled={busy} style={s.secondary}
+         onPress={()=>{
+           const next=!alertsRef.current;
+           alertsRef.current=next;setForegroundAlerts(next);
+         }}>
+         <Text style={s.secondaryText}>{foregroundAlerts?
+           label('ปิดแจ้งเตือนเมื่อเปิดแอป','Disable in-app zone alerts'):
+           label('เปิดแจ้งเตือนเมื่อเปิดแอป','Enable in-app zone alerts')}</Text>
+       </Pressable>:null}
        <Pressable accessibilityRole="button" disabled={busy}
          style={watchPhase==='off'?s.primary:s.destructive}
          onPress={()=>{
