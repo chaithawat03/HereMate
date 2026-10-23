@@ -76,6 +76,7 @@ test('client and backend HTTP endpoint shapes integrate with bearer only; no act
  ]);
  for(const x of r.requests){
   assert.equal(x.init.method,'POST');
+  assert.equal(x.init.redirect,'error','Never forward GPS POST bodies to a 307/308 redirect');
   assert.equal(x.init.headers.Authorization,'Bearer '+token);
   assert.equal(x.init.headers['Cache-Control'],'no-store');
   assert.equal(x.init.headers['Content-Type'],'application/json');
