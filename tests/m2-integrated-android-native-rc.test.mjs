@@ -12,7 +12,7 @@ test('M2 root is opt-in Android Staging; original EAS/Demo flows unchanged',()=>
  assert.match(index,/Platform\.OS === 'android'/);
  assert.match(index,/process\.env\.EXPO_PUBLIC_ENVIRONMENT === 'staging'/);
  assert.match(index,/process\.env\.EXPO_PUBLIC_ENABLE_M2_SHARING === 'true'/);
- assert.match(index,/m2AndroidStaging \? M2StagingApp : App/);
+ assert.match(index,/m2AndroidStaging[\s\S]*?\? M2StagingApp/);
  assert.match(trial,/M2AndroidStagingScreens/);
  assert.match(trial,/backendReviewedAndEnabled=\{true\}/);
  assert.match(trial,/UserProfilePanel/);

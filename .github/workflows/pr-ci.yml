@@ -22,6 +22,10 @@ jobs:
       - run: node --check tests/m0.test.mjs
       - name: Verify owner-approved Guest-only trial exception, exact hashes and expiry
         run: node --test tests/security-guest-staging.test.mjs
+      - name: M4 zero-history, double-consent geofence event core (offline)
+        run: node --test tests/m4-geofence-core.test.mjs
+      - name: M3 iOS foreground privacy/source contract
+        run: node --test tests/m3-ios-foreground-staging.test.mjs
       - name: Verify manually gated integrated Android M2 native test APK (offline)
         run: node --test tests/m2-integrated-android-native-rc.test.mjs
       - name: Test M2.4 dormant HTTPS transport against server HTTP handler (offline)
@@ -242,6 +246,30 @@ jobs:
           }
           if(!fs.existsSync(path.join(root,'metadata.json'))) throw Error('Metro metadata missing');
           console.log('Guest-enabled Android/iOS Hermes bundles present, staging flag set and Metro compilation succeeded');
+          JS
+      - name: M3 iOS foreground opted-in Hermes export (offline simulator source smoke)
+        env:
+          EXPO_PUBLIC_ENVIRONMENT: staging
+          EXPO_PUBLIC_ENABLE_FIREBASE_GUEST: 'true'
+          EXPO_PUBLIC_ENABLE_M1_PROFILE: 'true'
+          EXPO_PUBLIC_ENABLE_M1_FRIENDS: 'true'
+          EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND: 'true'
+        run: |
+          ./node_modules/.bin/expo export --platform ios --output-dir "$RUNNER_TEMP/heremate-m3-ios-export"
+          node - "$RUNNER_TEMP/heremate-m3-ios-export" <<'JS'
+          const fs=require('node:fs'),path=require('node:path');
+          const root=process.argv[2],files=[];
+          function visit(dir){
+            for(const d of fs.readdirSync(dir,{withFileTypes:true})){
+              const p=path.join(dir,d.name);
+              if(d.isDirectory())visit(p);
+              else if(d.name.endsWith('.hbc'))files.push(p);
+            }
+          }
+          visit(root);
+          if(files.length!==1||fs.statSync(files[0]).size<100000)
+            throw Error('M3 iOS opt-in bundle absent');
+          console.log('M3 iOS foreground opted-in Metro bundle PASS (not physical iOS)');
           JS
       - name: Android M2 live-Staging opt-in Hermes export (no cloud tokens or GPS)
         env:
