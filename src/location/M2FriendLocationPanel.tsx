@@ -85,6 +85,7 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
       const snapshot=await loadAuthorizedFriendMap({
         viewerUid:uid,isCurrent:current,
         loadRelations:listOwnRequests,
+        selectPeers:authorizedPeers,
         readPeer:peerUid=>transport.read(peerUid)
       });
       if(!snapshot||!current())return;
