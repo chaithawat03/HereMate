@@ -33,6 +33,8 @@ jobs:
         run: node --test tests/m4-geofence-core.test.mjs
       - name: M4 Android opt-in privacy-safe in-app alert contract (offline)
         run: node --test tests/m4-android-foreground-alert-optin.test.mjs
+      - name: M4 Android foreground account switch and stale approval UI privacy (offline)
+        run: node --test tests/m4-android-foreground-lifecycle-privacy.test.mjs
       - name: M3 iOS foreground privacy/source contract
         run: node --test tests/m3-ios-foreground-staging.test.mjs
       - name: Verify manually gated integrated Android M2 native test APK (offline)
