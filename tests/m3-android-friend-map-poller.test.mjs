@@ -10,9 +10,11 @@ const USER='androidvieweruid00001';
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function rig(extra={}){
  let uid=USER,foreground=true,android=true,reads=0,cancelled=0;
+ let now=1_800_000_000_000;
  const intervals=[],states=[];
  const controller=createAndroidFriendMapPoller({
    isAndroid:()=>android,isForeground:()=>foreground,currentUid:()=>uid,
+   now:()=>now,
    scheduleInterval:(fn,ms)=>{
      const row={fn,ms,cancelled:false};
      intervals.push(row);return row;
@@ -24,7 +26,8 @@ function rig(extra={}){
  });
  return {controller,intervals,states,stats:()=>({reads,cancelled}),
    setUid:x=>{uid=x;},setAndroid:x=>{android=x;},
-   setForeground:x=>{foreground=x;},tick:()=>intervals.at(-1).fn()};
+   setForeground:x=>{foreground=x;},advance:ms=>{now+=ms;},
+   tick:()=>intervals.at(-1).fn()};
 }
 test('Android only; explicit tap starts bounded 30 second authenticated reads',async()=>{
  const x=rig();
@@ -39,6 +42,7 @@ test('Android only; explicit tap starts bounded 30 second authenticated reads',a
  assert.equal(x.intervals.length,1);
  assert.equal(x.intervals[0].ms,ANDROID_FRIEND_MAP_POLL_MS);
  assert.equal(x.stats().reads,1);
+ x.advance(ANDROID_FRIEND_MAP_POLL_MS);
  x.tick();await flush();
  assert.equal(x.stats().reads,2);
  assert.equal(x.controller.start(),false);
@@ -70,6 +74,23 @@ test('foreground, device, valid identity and account switch all fail closed',asy
  x.tick();await flush();
  assert.equal(x.controller.isActive(),false);
  assert.equal(x.stats().reads,2); // second explicit start read only
+});
+test('rolling minute cap survives explicit stop/start and resets on account change',async()=>{
+ const x=rig();
+ x.controller.start();await flush();
+ x.controller.stop();
+ x.controller.start();await flush();
+ assert.equal(x.stats().reads,2);
+ x.controller.stop();
+ x.controller.start();await flush();
+ assert.equal(x.stats().reads,2,'rapid restarts cannot exceed 16 reads/min');
+ x.advance(60_001);
+ x.tick();await flush();
+ assert.equal(x.stats().reads,3);
+ x.controller.stop();
+ x.setUid('separatesignedinuid003');
+ x.controller.start();await flush();
+ assert.equal(x.stats().reads,4,'new account has its own budget');
 });
 test('overlapping HTTP batches cannot accumulate; disposal does not restart polling',async()=>{
  let resume;
