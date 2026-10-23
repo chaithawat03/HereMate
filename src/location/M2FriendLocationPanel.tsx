@@ -112,6 +112,7 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
       isAndroid:()=>Platform.OS==='android',
       isForeground:()=>AppState.currentState==='active',
       currentUid:()=>getStagingGuestAuth().currentUser?.uid??null,
+      now:Date.now,
       scheduleInterval:(tick,ms)=>setInterval(tick,ms),
       cancelInterval:handle=>clearInterval(handle as ReturnType<typeof setInterval>),
       refresh,
