@@ -27,6 +27,8 @@ jobs:
           bash -n scripts/m4-staging-ttl-preflight.sh
           node --check scripts/m4-staging-ttl-verify.mjs
           node --test tests/m4-staging-ttl-gate.test.mjs
+      - name: M4 owner-only live read-only TTL audit safety contract (offline)
+        run: node --test tests/m4-owner-readonly-live-ttl-workflow.test.mjs
       - name: M4 zero-history, double-consent geofence event core (offline)
         run: node --test tests/m4-geofence-core.test.mjs
       - name: M4 Android opt-in privacy-safe in-app alert contract (offline)
