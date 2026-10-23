@@ -68,12 +68,15 @@ jobs:
           set -euo pipefail
           apk=android/app/build/outputs/apk/release/app-release.apk
           test -s "$apk"
-          unzip -l "$apk" | grep -Fq 'index.android.bundle'
           python3 - <<'PY'
           from hashlib import sha256
           from pathlib import Path
+          from zipfile import ZipFile
           import json,os
           apk=Path('android/app/build/outputs/apk/release/app-release.apk')
+          with ZipFile(apk) as contents:
+            if not any(name.endswith('index.android.bundle') for name in contents.namelist()):
+              raise SystemExit('M2_ANDROID_RC_BLOCKED: JavaScript bundle missing from release APK')
           record={
             'sourceSha':os.environ['GITHUB_SHA'],
             'project':'heremate',
