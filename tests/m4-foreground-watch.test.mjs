@@ -115,3 +115,66 @@ test('M4 watcher errors fail closed; no background services or GPS history',asyn
  const source=readFileSync(new URL('../src/geofences/m4ForegroundZoneWatch.ts',import.meta.url),'utf8');
  assert.doesNotMatch(source,/TaskManager|startLocationUpdatesAsync|AsyncStorage|setDoc\(|addDoc\(|expo-notifications/);
 });
+
+test('M4 late native watch bind is removed when actual Firebase identity changes',async()=>{
+ let resolveWatch;
+ const pending=new Promise(resolve=>{resolveWatch=resolve;});
+ const x=rig({watch:()=>pending});
+ const started=x.controller.start(OWNER,true);
+ await flush();
+ assert.equal(x.controller.getPhase(),'starting');
+ x.setActor('anotherSubjectUid00002'); // auth callback may still be pending
+ let removed=0;
+ resolveWatch({remove:()=>{removed++;}});
+ assert.equal(await started,false);
+ assert.equal(removed,1);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.deepEqual(x.failures,[]); // account switch is cancellation, not a GPS error
+ x.setActor(SUBJECT);
+ assert.equal(await x.controller.start(OWNER,true),false); // same rig watcher resolves to stale handle
+ assert.equal(x.controller.getPhase(),'off');
+});
+test('M4 permission revoked during async native watch bind removes watcher and fails closed',async()=>{
+ let resolveWatch;
+ const pending=new Promise(resolve=>{resolveWatch=resolve;});
+ const x=rig({watch:()=>pending});
+ const started=x.controller.start(OWNER,true);
+ await flush();
+ x.setPermission(false);
+ let removed=0;
+ resolveWatch({remove:()=>{removed++;}});
+ assert.equal(await started,false);
+ assert.equal(removed,1);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.deepEqual(x.failures,['error']);
+ assert.equal(x.timers.length,0);
+});
+test('M4 native permission recheck error after bind still removes watcher',async()=>{
+ let checks=0,removed=0;
+ const x=rig({
+   hasPermission:async()=>{if(++checks===2)throw Error('OS permission unavailable');return true;},
+   watch:async()=>({remove:()=>{removed++;}})
+ });
+ assert.equal(await x.controller.start(OWNER,true),false);
+ assert.equal(removed,1);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.deepEqual(x.failures,['error']);
+});
+test('M4 older async bind must not stop a newer explicit foreground session',async()=>{
+ let resolveOld,binds=0,removed=0;
+ const old=new Promise(resolve=>{resolveOld=resolve;});
+ const x=rig({watch:()=>{
+   if(++binds===1)return old;
+   return Promise.resolve({remove:()=>{removed++;}});
+ }});
+ const first=x.controller.start(OWNER,true);
+ await flush();
+ x.controller.stop();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ resolveOld({remove:()=>{removed++;}});
+ assert.equal(await first,false);
+ assert.equal(x.controller.getPhase(),'watching');
+ assert.equal(removed,1); // only stale subscription removed
+ x.controller.stop();
+ assert.equal(removed,2);
+});
