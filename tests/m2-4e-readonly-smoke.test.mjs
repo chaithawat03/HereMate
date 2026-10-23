@@ -66,9 +66,11 @@ test('A deployed edge allowing unauthorized read, wildcard CORS or cached errors
     fetchImpl:async()=>reply}),/M2_STAGING_SMOKE_BLOCKED/);
  }
 });
-test('Existing owner-approved EAS trigger snapshot stays byte-for-byte unchanged',()=>{
+test('Owner-approved EAS keeps manual build but avoids interim milestone auto-builds',()=>{
  const workflow=readFileSync(new URL('../.github/workflows/staging-eas-build.yml',import.meta.url),'utf8');
- assert.match(workflow,/^  push:/m);
+ assert.doesNotMatch(workflow,/^  push:/m);
+ assert.match(workflow,/^  workflow_dispatch:/m);
  assert.match(workflow,/STAGING_EAS_ENABLED/);
+ assert.match(workflow,/inputs\.run_mode == 'build'/);
  assert.doesNotMatch(src,/EXPO_TOKEN|STAGING_DRIVE_ENABLED|signInWith|refreshAccessToken/);
 });
