@@ -125,3 +125,57 @@ test('Android panel never polls automatically, iPhone path remains deferred and 
  assert.doesNotMatch(control,/watchPositionAsync|startLocationUpdatesAsync|TaskManager|AsyncStorage|setDoc\(|addDoc\(|fetch\(/);
  assert.doesNotMatch(eas,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS/);
 });
+
+test('old-account pending refresh cannot starve a newly opted-in account or unlock its batch',async()=>{
+ const resolvers=[];
+ let calls=0;
+ const x=rig({refresh:()=>{calls++;return new Promise(resolve=>resolvers.push(resolve));}});
+ x.controller.start();await flush();
+ assert.equal(calls,1);
+ const stale=x.intervals[0].fn;
+ x.controller.stop();
+ x.setUid('secondaccountuid0002');
+ assert.equal(x.controller.start(),true);
+ await flush();
+ assert.equal(calls,2,'new account must refresh even when old request is still pending');
+ stale();await flush();
+ assert.equal(calls,2,'canceled old timer cannot trigger the new session');
+ resolvers[0]();await flush();
+ x.advance(ANDROID_FRIEND_MAP_POLL_MS);
+ x.tick();await flush();
+ assert.equal(calls,2,'old completion cannot clear the new in-flight lock');
+ resolvers[1]();await flush();
+ x.tick();await flush();
+ assert.equal(calls,3,'new session can refresh after its own request settles');
+ resolvers[2]();await flush();
+ x.controller.stop();
+});
+test('canceled interval cannot spend new account read budget after stop/restart',async()=>{
+ let reads=0;
+ const x=rig({refresh:async()=>{reads++;}});
+ x.controller.start();await flush();
+ const oldTimer=x.intervals[0].fn;
+ x.controller.stop();
+ x.setUid('secondaccountuid0002');
+ x.controller.start();await flush();
+ assert.equal(reads,2);
+ x.advance(ANDROID_FRIEND_MAP_POLL_MS);
+ oldTimer();await flush();
+ assert.equal(reads,2);
+ x.tick();await flush();
+ assert.equal(reads,3);
+});
+test('A-B-A rapid account switch cannot reset account A rolling minute quota',async()=>{
+ let reads=0;
+ const x=rig({refresh:async()=>{reads++;}});
+ x.controller.start();await flush(); // A: 1
+ x.controller.stop();x.controller.start();await flush(); // A: 2
+ x.controller.stop();x.setUid('secondaccountuid0002');
+ x.controller.start();await flush(); // B: 1
+ x.controller.stop();x.setUid(USER);
+ x.controller.start();await flush(); // A: capped
+ assert.equal(reads,3);
+ x.advance(60_001);
+ x.tick();await flush();
+ assert.equal(reads,4,'A can read after the original minute window expires');
+});
