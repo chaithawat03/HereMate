@@ -133,6 +133,53 @@ test('STOP remains available on per-owner quota exhaustion and repeats do not re
  await fails(stop());
 });
 
+test('M3 capability-fenced device sessions prevent same Firebase account cross-device publishing',async()=>{
+ const x=setup();
+ const first=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
+ assert.equal(first.enabled,true);
+ assert.match(first.sessionToken,/^[0-9a-f]{64}$/);
+ assert.equal(first.expiresAtMs,now+GRANT_MS);
+ const privateGrant=x.db.rows.get('private_location_grants/'+pair);
+ const privateLease=x.db.rows.get('private_location_publishers/'+A);
+ assert.match(privateGrant.sessionDigest,/^[0-9a-f]{64}$/);
+ assert.equal(privateGrant.sessionDigest,privateLease.sessionDigest);
+ assert.equal(JSON.stringify([...x.db.rows.values()]).includes(first.sessionToken),false);
+ const share=secret=>x.svc.publishDevice({
+   idToken:bearer(A),viewerUid:B,sessionToken:secret,
+   point:point(),appInForeground:true,foregroundPermissionGranted:true
+ });
+ const stop=secret=>x.svc.stopDevice({
+   idToken:bearer(A),viewerUid:B,sessionToken:secret
+ });
+ // Legacy M2 publisher from a second phone has the same Firebase UID but
+ // no capability and cannot inject fixes into the newer M3 lease.
+ await fails(x.publish());
+ await fails(share('0'.repeat(64)));
+ await fails(stop('0'.repeat(64)));
+ await share(first.sessionToken);
+ assert.deepEqual((await x.view()).point,point());
+ await stop(first.sessionToken);
+ await fails(x.view());
+ // A stale STOP from the first phone cannot erase the newer same-viewer
+ // session created by the other phone under the same Firebase user.
+ const newer=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
+ assert.notEqual(newer.sessionToken,first.sessionToken);
+ await fails(stop(first.sessionToken));
+ await fails(share(first.sessionToken));
+ await share(newer.sessionToken);
+ assert.deepEqual((await x.view()).point,point());
+ // A signed-in owner can emergency revoke even without the capability.
+ assert.deepEqual(await x.stop(),{enabled:false});
+ await fails(x.view());
+});
+test('M3 sequential second START is denied while first device lease is active',async()=>{
+ const x=setup();
+ const first=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
+ assert.match(first.sessionToken,/^[0-9a-f]{64}$/);
+ await fails(x.svc.startDevice({idToken:bearer(A),viewerUid:B}));
+ // The in-memory store does not emulate Firestore's optimistic concurrency;
+ // true simultaneous START is separately verified in the Admin Emulator.
+});
 test('server re-reads authoritative consents and friendship each operation; cannot use a cached grant',async()=>{
  const x=setup();
  await x.start();

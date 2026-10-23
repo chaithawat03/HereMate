@@ -38,6 +38,9 @@ export function M3IOSStagingScreens({approvedCloudRunUrl,backendReviewedAndEnabl
              !await Location.hasServicesEnabledAsync())return false;
           return (await Location.getForegroundPermissionsAsync()).granted===true;
         },
+        // Current iOS EAS profiles never enable M3; once approved,
+        // use capability-bound sessions to prevent same-account device leaks.
+        useDeviceSessions:true,
         fetchImpl:fetch
       });
     }catch{return null;}

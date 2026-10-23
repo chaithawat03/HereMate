@@ -16,6 +16,8 @@ type LocationTransportPorts=Readonly<{
   foregroundPermissionGranted:()=>Promise<boolean>;
   fetchImpl:typeof fetch;
   timeoutMs?:number;
+  /** M3 Staging: reject same-account different-device publishing by capability. */
+  useDeviceSessions?:boolean;
 }>;
 type LocationTransport=SharePorts['transport']&M2FriendLocationTransport;
 const CODE=/^[A-Za-z0-9_-]{12,128}$/;
@@ -50,6 +52,9 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   const origin=validUrl(ports.approvedCloudRunUrl);
   const timeout=ports.timeoutMs??8000;
   if(!Number.isSafeInteger(timeout)||timeout<1000||timeout>10000)unavailable();
+  let deviceSession:{uid:string;peerUid:string;token:string}|null=null;
+  const validCapability=(value:unknown):value is string=>
+    typeof value==='string'&&/^[0-9a-f]{64}$/.test(value);
   async function send(endpoint:string,payload:Readonly<Record<string,unknown>>,
     requireForeground:boolean):Promise<unknown> {
     const first=ports.currentIdentity();
@@ -99,7 +104,23 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   };
   return Object.freeze({
     async start(peerUid:string){
-      const result=await send('/v1/locations/grants/start',{viewerUid:safePeer(peerUid)},true);
+      const viewerUid=safePeer(peerUid);
+      if(ports.useDeviceSessions===true){
+        if(deviceSession!==null)unavailable();
+        const uid=ports.currentIdentity()?.uid;
+        if(typeof uid!=='string')return unavailable();
+        const result=await send('/v2/locations/sessions/start',{viewerUid},true);
+        if(!fields(result,['enabled','expiresAtMs','sessionToken']))
+          return unavailable();
+        const row=result as {enabled:unknown;expiresAtMs:unknown;sessionToken:unknown};
+        const expiry=row.expiresAtMs,token=row.sessionToken;
+        if(row.enabled!==true||!validNumber(expiry)||
+          !validCapability(token)||ports.currentIdentity()?.uid!==uid)
+          return unavailable();
+        deviceSession={uid,peerUid:viewerUid,token};
+        return {enabled:true,expiresAtMs:expiry};
+      }
+      const result=await send('/v1/locations/grants/start',{viewerUid},true);
       if(!fields(result,['enabled','expiresAtMs']))unavailable();
       const grant=result as {enabled:unknown;expiresAtMs:unknown};
       const expiresAt=grant.expiresAtMs;
@@ -108,16 +129,37 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       return {enabled:true,expiresAtMs:expiresAt};
     },
     async stop(peerUid:string){
-      const result=await send('/v1/locations/grants/stop',{viewerUid:safePeer(peerUid)},false);
+      const viewerUid=safePeer(peerUid);
+      if(ports.useDeviceSessions===true){
+        const active=deviceSession;
+        if(!active||active.uid!==ports.currentIdentity()?.uid||
+           active.peerUid!==viewerUid)return unavailable();
+        const result=await send('/v2/locations/sessions/stop',{
+          viewerUid,sessionToken:active.token
+        },false);
+        if(!fields(result,['enabled'])||
+           (result as {enabled:unknown}).enabled!==false)unavailable();
+        if(deviceSession?.token===active.token)deviceSession=null;
+        return {enabled:false};
+      }
+      const result=await send('/v1/locations/grants/stop',{viewerUid},false);
       if(!fields(result,['enabled'])||(result as {enabled:unknown}).enabled!==false)unavailable();
       return {enabled:false};
     },
     async publish(peerUid:string,fix:ShareFix){
       if(!validFix(fix))unavailable();
-      const result=await send('/v1/locations/points/publish',{
-        viewerUid:safePeer(peerUid),point:fix,
-        appInForeground:true,foregroundPermissionGranted:true
+      const viewerUid=safePeer(peerUid);
+      const session=ports.useDeviceSessions===true?deviceSession:null;
+      if(ports.useDeviceSessions===true&&
+        (!session||session.uid!==ports.currentIdentity()?.uid||
+          session.peerUid!==viewerUid))unavailable();
+      const result=await send(ports.useDeviceSessions===true?
+        '/v2/locations/sessions/publish':'/v1/locations/points/publish',{
+        viewerUid,
+        ...(session?{sessionToken:session.token}:{}),
+        point:fix,appInForeground:true,foregroundPermissionGranted:true
       },true);
+      if(session&&deviceSession?.token!==session.token)unavailable();
       if(!fields(result,['stored','expiresAtMs']))unavailable();
       const row=result as {stored:unknown;expiresAtMs:unknown};
       const expiresAt=row.expiresAtMs;

@@ -3,6 +3,7 @@
  * Verified Firebase ID token + atomic Firestore data from trusted adapters only.
  * No Firebase credentials, coordinates or tokens are ever logged.
  */
+import {createHash,randomBytes} from 'node:crypto';
 export const STAGING_PROJECT = 'heremate';
 export const UID_PATTERN = /^[A-Za-z0-9_-]{12,128}$/;
 export const GRANT_MS = 60_000;
@@ -57,6 +58,18 @@ function validPublisher(publisher,ownerUid,viewerUid,now,grant) {
   if(!publisher || publisher.ownerUid!==ownerUid ||
     publisher.viewerUid!==viewerUid || !num(publisher.expiresAtMs) ||
     publisher.expiresAtMs<=now || publisher.expiresAtMs!==grant.expiresAtMs)deny();
+}
+// M3: short-lived device-session capability (never stored in plaintext).
+// This fences accidental concurrent publishers signed in under the same
+// Firebase account. A Firebase owner can still emergency-revoke via v1 STOP.
+const CAPABILITY=/^[0-9a-f]{64}$/;
+const digestSession=secret=>{
+  if(typeof secret!=='string'||!CAPABILITY.test(secret))invalid();
+  return createHash('sha256').update('m3-device-session:v1:'+secret).digest('hex');
+};
+function verifyDeviceSession(grant,publisher,sessionDigest){
+  if(!grant||!publisher||grant.sessionDigest!==sessionDigest||
+     publisher.sessionDigest!==sessionDigest)deny();
 }
 function validPoint(point,now) {
   if(!exactKeys(point,pointFields)||
@@ -161,11 +174,88 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         verifiedPair(relation,ownerUid,viewerUid);
         validGrant(grant,ownerUid,viewerUid,now,relation);
         validPublisher(publisher,ownerUid,viewerUid,now,grant);
+        // Legacy v1 publishers may not inject fixes into a newer
+        // device-fenced M3 lease, even when Firebase UID/viewer matches.
+        if(grant.sessionDigest||publisher.sessionDigest)deny();
         validPoint(point,now);
         const expiresAtMs=Math.min(grant.expiresAtMs,now+FIX_MAX_AGE_MS);
         setPoint({ownerUid,viewerUid,point:{...point},expiresAtMs,
           expireAt:new Date(expiresAtMs)});
         return {stored:true,expiresAtMs};
+      });
+    },
+    // M3 opt-in capability-bound START: the secret is generated on the
+    // server, returned only to the authenticated publisher and retained
+    // only as a salted-purpose SHA-256 digest in private Firestore docs.
+    async startDevice({idToken,viewerUid}){
+      const ownerUid=await authenticate(idToken);
+      assertUid(viewerUid);
+      if(ownerUid===viewerUid)deny();
+      await limit(ownerUid,'start');
+      return tx(ownerUid,viewerUid,async ({
+        relation,publisher,setGrant,setPublisher,deletePoint
+      })=>{
+        verifiedPair(relation,ownerUid,viewerUid);
+        const now=time(clock);
+        if(publisher&&(!num(publisher.expiresAtMs)||
+           publisher.expiresAtMs>now))deny();
+        const sessionToken=randomBytes(32).toString('hex');
+        const sessionDigest=digestSession(sessionToken);
+        const expiresAtMs=now+GRANT_MS;
+        setPublisher({ownerUid,viewerUid,expiresAtMs,
+          sessionDigest,expireAt:new Date(expiresAtMs)});
+        setGrant({ownerUid,viewerUid,enabled:true,
+          relationRevision:relationRevision(relation),
+          expiresAtMs,sessionDigest,expireAt:new Date(expiresAtMs)});
+        deletePoint();
+        return {enabled:true,expiresAtMs,sessionToken};
+      });
+    },
+    async publishDevice({idToken,viewerUid,sessionToken,point,
+      appInForeground,foregroundPermissionGranted}){
+      const ownerUid=await authenticate(idToken);
+      assertUid(viewerUid);
+      if(ownerUid===viewerUid)deny();
+      const sessionDigest=digestSession(sessionToken);
+      await limit(ownerUid,'publish');
+      if(appInForeground!==true||foregroundPermissionGranted!==true)deny();
+      if(!exactKeys(point,pointFields))invalid();
+      return tx(ownerUid,viewerUid,async ({
+        relation,grant,publisher,setPoint
+      })=>{
+        const now=time(clock);
+        verifiedPair(relation,ownerUid,viewerUid);
+        validGrant(grant,ownerUid,viewerUid,now,relation);
+        validPublisher(publisher,ownerUid,viewerUid,now,grant);
+        verifyDeviceSession(grant,publisher,sessionDigest);
+        validPoint(point,now);
+        const expiresAtMs=Math.min(grant.expiresAtMs,now+FIX_MAX_AGE_MS);
+        setPoint({ownerUid,viewerUid,point:{...point},expiresAtMs,
+          expireAt:new Date(expiresAtMs)});
+        return {stored:true,expiresAtMs};
+      });
+    },
+    async stopDevice({idToken,viewerUid,sessionToken}){
+      const ownerUid=await authenticate(idToken);
+      assertUid(viewerUid);
+      if(ownerUid===viewerUid)deny();
+      const sessionDigest=digestSession(sessionToken);
+      try{await limit(ownerUid,'stop');}
+      catch(error){if(!(error instanceof LocationLimited))throw error;}
+      return tx(ownerUid,viewerUid,async ({
+        grant,point,publisher,deleteGrant,deletePoint,deletePublisher
+      })=>{
+        if(!grant)return {enabled:false}; // idempotent expired session
+        if(grant.sessionDigest!==sessionDigest)deny();
+        // A delayed stop from another device cannot erase a newer
+        // same-viewer session nor a different viewer's active publisher.
+        if(publisher?.ownerUid===ownerUid&&publisher?.viewerUid===viewerUid&&
+           publisher?.sessionDigest!==sessionDigest)deny();
+        deleteGrant();
+        if(point)deletePoint();
+        if(publisher?.ownerUid===ownerUid&&publisher?.viewerUid===viewerUid)
+          deletePublisher();
+        return {enabled:false};
       });
     },
     async read({idToken,ownerUid}) {

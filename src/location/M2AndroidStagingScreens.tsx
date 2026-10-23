@@ -47,6 +47,9 @@ export function M2AndroidStagingScreens({
           const permission=await Location.getForegroundPermissionsAsync();
           return permission.granted===true;
         },
+        // Existing M2 APK remains v1. A separate reviewed M3 native build
+        // can opt into same-account capability-fenced publisher sessions.
+        useDeviceSessions:process.env.EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true',
         fetchImpl:fetch,
       });
     }catch{

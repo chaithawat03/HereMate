@@ -108,6 +108,42 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   await svc.stop({idToken:bearer(A),viewerUid:leaseSnap.data().viewerUid});
   assert.equal((await raw.collection('private_location_publishers').doc(A).get()).exists,false);
 
+  // M3 device-bound session works on real Admin Firestore transactions,
+  // and the raw capability must never be stored on private Firestore records.
+  const device=await svc.startDevice({idToken:bearer(A),viewerUid:B});
+  assert.match(device.sessionToken,/^[0-9a-f]{64}$/);
+  const deviceGrant=await raw.collection('private_location_grants').doc(A+'__'+B).get();
+  const devicePublisher=await raw.collection('private_location_publishers').doc(A).get();
+  assert.equal(deviceGrant.data().sessionDigest,devicePublisher.data().sessionDigest);
+  assert.notEqual(deviceGrant.data().sessionDigest,device.sessionToken);
+  await assert.rejects(pub(),LocationDenied); // v1 device cannot publish into v2.
+  const send=token=>svc.publishDevice({idToken:bearer(A),viewerUid:B,
+    sessionToken:token,point:fix,
+    appInForeground:true,foregroundPermissionGranted:true});
+  await assert.rejects(send('0'.repeat(64)),LocationDenied);
+  assert.deepEqual(await send(device.sessionToken),
+    {stored:true,expiresAtMs:now+30000});
+  assert.deepEqual((await read()).point,fix);
+  await assert.rejects(svc.stopDevice({idToken:bearer(A),viewerUid:B,
+    sessionToken:'0'.repeat(64)}),LocationDenied);
+  await svc.stopDevice({idToken:bearer(A),viewerUid:B,sessionToken:device.sessionToken});
+  assert.equal((await raw.collection('private_latest_locations').doc(A+'__'+B).get()).exists,false);
+  assert.equal((await raw.collection('private_location_publishers').doc(A).get()).exists,false);
+
+  // Genuine Firestore optimistic concurrency: two distinct phone STARTs
+  // for the same owner/viewer cannot both commit the single publisher lease.
+  await raw.collection('friendRequests').doc(C+'__'+B).set(relation(C,B));
+  const competingDevices=await Promise.allSettled([
+    svc.startDevice({idToken:bearer(C),viewerUid:B}),
+    svc.startDevice({idToken:bearer(C),viewerUid:B})
+  ]);
+  assert.equal(competingDevices.filter(x=>x.status==='fulfilled').length,1);
+  assert.equal(competingDevices.filter(x=>x.status==='rejected').length,1);
+  const current=competingDevices.find(x=>x.status==='fulfilled').value;
+  assert.match(current.sessionToken,/^[0-9a-f]{64}$/);
+  await svc.stopDevice({idToken:bearer(C),viewerUid:B,
+    sessionToken:current.sessionToken});
+
   // Separate actor checks actual persisted Firestore rate-limit transactions.
   for(let i=0;i<6;i++) {
     await svc.start({idToken:bearer(D),viewerUid:C});
