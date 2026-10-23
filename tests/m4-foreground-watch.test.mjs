@@ -131,7 +131,8 @@ test('M4 late native watch bind is removed when actual Firebase identity changes
  assert.equal(x.controller.getPhase(),'off');
  assert.deepEqual(x.failures,[]); // account switch is cancellation, not a GPS error
  x.setActor(SUBJECT);
- assert.equal(await x.controller.start(OWNER,true),false); // same rig watcher resolves to stale handle
+ assert.equal(await x.controller.start(OWNER,true),true); // a fresh opt-in can start
+ x.controller.stop();
  assert.equal(x.controller.getPhase(),'off');
 });
 test('M4 permission revoked during async native watch bind removes watcher and fails closed',async()=>{
