@@ -111,6 +111,7 @@ test('overlapping HTTP batches cannot accumulate; disposal does not restart poll
 test('Android panel never polls automatically, iPhone path remains deferred and no GPS publishing',()=>{
  const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
  const panel=read('src/location/M2FriendLocationPanel.tsx');
+ const scoped=read('src/location/accountScopedFriendMapRead.ts');
  const control=read('src/location/androidFriendMapPoller.ts');
  const eas=read('eas.json');
  assert.match(panel,/Platform\.OS==='android'/);
@@ -118,7 +119,9 @@ test('Android panel never polls automatically, iPhone path remains deferred and 
  assert.match(panel,/poller\.current\?\.stop\(\)/);
  assert.match(panel,/AppState\.addEventListener/);
  assert.match(panel,/onAuthStateChanged/);
- assert.match(panel,/MAX_MAP_FRIEND_READS/);
+ assert.match(panel,/loadAuthorizedFriendMap/);
+ assert.match(panel,/selectPeers:authorizedPeers/);
+ assert.match(scoped,/MAX_MAP_FRIEND_READS/);
  assert.doesNotMatch(control,/watchPositionAsync|startLocationUpdatesAsync|TaskManager|AsyncStorage|setDoc\(|addDoc\(|fetch\(/);
  assert.doesNotMatch(eas,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS/);
 });
