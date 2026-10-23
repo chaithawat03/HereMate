@@ -160,7 +160,7 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
     });
   },[backendReviewedAndEnabled]);
   useEffect(()=>{if(backendReviewedAndEnabled)void refresh();},
-    [backendReviewedAndEnabled,refresh,authRevision]);
+    [backendReviewedAndEnabled,refresh,authRevision,session.peerUid]);
   const owner=account.current;
   const emergencyAvailable=Platform.OS==='android'&&
     typeof transport.emergencyStop==='function';
