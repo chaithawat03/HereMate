@@ -208,3 +208,131 @@ test('UI scaffold remains unmounted, without a live endpoint, URL or EAS permiss
  assert.match(panel,/t\('m2Unavailable'\)/);
  assert.doesNotMatch(panel+session,/https?:\/\/|fetch\(|getDatabase\(|setDoc\(|backgroundLocation|startLocationUpdatesAsync|requestBackgroundPermissionsAsync/);
 });
+
+test('M3 delayed native permission completion after silent account switch never starts remote sharing',async()=>{
+ let resolvePermission,uid=a,starts=0,stops=0;
+ const pending=new Promise(resolve=>{resolvePermission=resolve;});
+ const ctrl=createForegroundSharingController({
+  ownerUid:()=>uid,isForeground:()=>true,
+  askForegroundPermission:()=>pending,
+  watchForegroundFix:async()=>({remove(){}}),
+  transport:{
+   start:async()=>{starts++;return {enabled:true,expiresAtMs:1_800_000_060_000};},
+   publish:async()=>({stored:true,expiresAtMs:0}),
+   stop:async()=>{stops++;return {enabled:false};}
+  },
+  now:()=>1_800_000_000_000,schedule:()=>null,cancel:()=>{},onState:()=>{}
+ });
+ const first=ctrl.start(b,rel());
+ await flush();
+ assert.equal(ctrl.getState().phase,'starting');
+ uid=c; // actual Firebase identity changed before onAuthStateChanged callback
+ resolvePermission(true);
+ await first;
+ assert.equal(ctrl.getState().phase,'off');
+ assert.equal(starts,0);
+ assert.equal(stops,0,'no server START means no remote STOP is needed');
+});
+test('M3 rejected native permission after silent background cannot strand the foreground controller',async()=>{
+ let rejectPermission,foreground=true,starts=0,stops=0;
+ const pending=new Promise((_,reject)=>{rejectPermission=reject;});
+ const ctrl=createForegroundSharingController({
+  ownerUid:()=>a,isForeground:()=>foreground,
+  askForegroundPermission:()=>pending,
+  watchForegroundFix:async()=>({remove(){}}),
+  transport:{
+   start:async()=>{starts++;return {enabled:true,expiresAtMs:1_800_000_060_000};},
+   publish:async()=>({stored:true,expiresAtMs:0}),
+   stop:async()=>{stops++;return {enabled:false};}
+  },
+  now:()=>1_800_000_000_000,schedule:()=>null,cancel:()=>{},onState:()=>{}
+ });
+ const first=ctrl.start(b,rel());
+ await flush();
+ foreground=false;
+ rejectPermission(Error('Android permission request rejected'));
+ await first;
+ assert.equal(ctrl.getState().phase,'off');
+ assert.equal(ctrl.getState().error,null);
+ assert.equal(starts,0);assert.equal(stops,0);
+});
+test('M3 delayed server START after silent account change must revoke possible grant before binding GPS',async()=>{
+ let resolveGrant,uid=a,starts=0,stops=0,watches=0;
+ const pending=new Promise(resolve=>{resolveGrant=resolve;});
+ const ctrl=createForegroundSharingController({
+  ownerUid:()=>uid,isForeground:()=>true,
+  askForegroundPermission:async()=>true,
+  watchForegroundFix:async()=>{watches++;return {remove(){}};},
+  transport:{
+   start:async()=>{starts++;return pending;},
+   publish:async()=>({stored:true,expiresAtMs:0}),
+   stop:async()=>{stops++;return {enabled:false};}
+  },
+  now:()=>1_800_000_000_000,schedule:()=>null,cancel:()=>{},onState:()=>{}
+ });
+ const first=ctrl.start(b,rel());
+ await flush();
+ assert.equal(starts,1);
+ uid=c; // no JS auth callback yet
+ resolveGrant({enabled:true,expiresAtMs:1_800_000_060_000});
+ await first;
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(watches,0);
+ assert.equal(stops,1,'a potentially committed remote grant requires STOP');
+ assert.equal(ctrl.getState().phase,'off');
+});
+test('M3 late native GPS watch binding after silent foreground loss releases handle and revokes grant',async()=>{
+ let resolveWatch,foreground=true,removed=0,stops=0;
+ const pending=new Promise(resolve=>{resolveWatch=resolve;});
+ const ctrl=createForegroundSharingController({
+  ownerUid:()=>a,isForeground:()=>foreground,
+  askForegroundPermission:async()=>true,
+  watchForegroundFix:()=>pending,
+  transport:{
+   start:async()=>({enabled:true,expiresAtMs:1_800_000_060_000}),
+   publish:async()=>({stored:true,expiresAtMs:0}),
+   stop:async()=>{stops++;return {enabled:false};}
+  },
+  now:()=>1_800_000_000_000,schedule:()=>null,cancel:()=>{},onState:()=>{}
+ });
+ const first=ctrl.start(b,rel());
+ await flush();
+ foreground=false;
+ resolveWatch({remove:()=>{removed++;}});
+ await first;
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(removed,1);
+ assert.equal(stops,1);
+ assert.equal(ctrl.getState().phase,'off');
+});
+test('M3 uncertain remote START on background and failed STOP is not mislabeled OFF',async()=>{
+ let rejectGrant,foreground=true,stops=0,failStop=true;
+ const pending=new Promise((_,reject)=>{rejectGrant=reject;});
+ const ctrl=createForegroundSharingController({
+  ownerUid:()=>a,isForeground:()=>foreground,
+  askForegroundPermission:async()=>true,
+  watchForegroundFix:async()=>{throw Error('must not bind GPS');},
+  transport:{
+   start:()=>pending,
+   publish:async()=>({stored:true,expiresAtMs:0}),
+   stop:async()=>{stops++;if(failStop)throw Error('network down');return {enabled:false};}
+  },
+  now:()=>1_800_000_000_000,schedule:()=>null,cancel:()=>{},onState:()=>{}
+ });
+ const first=ctrl.start(b,rel());
+ await flush();
+ foreground=false;
+ rejectGrant(Error('START response lost after possible commit'));
+ await first;
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(stops,1);
+ assert.equal(ctrl.getState().phase,'stop-unconfirmed');
+ failStop=false;foreground=true;
+ await ctrl.retryStop();
+ assert.equal(ctrl.getState().phase,'off');
+ assert.equal(stops,2);
+});
+test('Android M3 sharing owner source checks actual Firebase user, not only delayed callback',()=>{
+ const panel=read('src/location/M2SharingPanel.tsx');
+ assert.match(panel,/ownerUid:\(\)=>auth\.currentUser\?\.uid===account\.current\?account\.current:null/);
+});
