@@ -144,7 +144,7 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
     return()=>clearInterval(interval);
   },[backendReviewedAndEnabled]);
 
-  const activeUid=AppState.currentState==='active'&&
+  const activeUid=backendReviewedAndEnabled&&AppState.currentState==='active'&&
     session.current===getStagingGuestAuth().currentUser?.uid?
     session.current:null;
   const liveLocations:LiveFriend[]=useMemo(()=>
