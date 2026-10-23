@@ -96,6 +96,9 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     try {
       const response=await ports.fetchImpl(origin+endpoint,{
         method:'POST',
+        // A 307/308 redirect could forward a private GPS POST body to a
+        // different origin even though the initial URL was allowlisted.
+        redirect:'error',
         headers:{
           'Authorization':'Bearer '+jwt,
           'Content-Type':'application/json',
