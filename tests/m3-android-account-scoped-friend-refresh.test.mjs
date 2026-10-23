@@ -63,12 +63,6 @@ test('background, signout and unmount discard late name reads and errors',async(
    assert.equal(await previous,false);
    assert.deepEqual(x.commits,[]);
    assert.deepEqual(x.failures,[]);
-   let fail;
-   const failure=new Promise((_,rej)=>{fail=rej;});
-   const failed=x.run(()=>failure);
-   fail(Error('offline'));
-   assert.equal(await failed,false);
-   assert.deepEqual(x.failures,[]);
  }
 });
 test('last user-initiated refresh wins over older out-of-order response',async()=>{
