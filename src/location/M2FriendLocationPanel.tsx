@@ -4,7 +4,7 @@
  * transport only, never directly from Firestore or a public location feed.
  */
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {AppState,Platform,Pressable,StyleSheet,Text,View} from 'react-native';
+import {Alert,AppState,Linking,Platform,Pressable,StyleSheet,Text,View} from 'react-native';
 import {onAuthStateChanged} from 'firebase/auth';
 import {getStagingGuestAuth} from '../auth/firebaseGuest';
 import {listOwnRequests} from '../friends/firestoreFriends';
@@ -12,8 +12,10 @@ import type {FriendRequest} from '../friends/friendModel';
 import {usePreferences} from '../ui/PreferencesProvider';
 import type {Palette} from '../ui/preferencesModel';
 import {createAndroidFriendMapPoller} from './androidFriendMapPoller';
+import {androidGeoUri} from './androidGeoHandoff';
 import {
-  authorizedPeers,friendMapStates,plotLiveFriends,visibleFriendLocations,MAX_MAP_FRIEND_READS,
+  authorizedPeers,friendMapStates,plotLiveFriends,visibleFriendLocations,
+  validatedRemoteFix,MAX_MAP_FRIEND_READS,
   type ServerRead,type LiveFriend
 } from './m2FriendLocationView';
 
@@ -156,6 +158,54 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
   const states=useMemo(()=>activeUid?friendMapStates({viewerUid:activeUid,
     relations:friends,reads:positions,nowMs:now}):[],[activeUid,friends,positions,now]);
 
+  function requestExternalMap(peerUid:string){
+    const viewerUid=session.current;
+    if(Platform.OS!=='android'||!backendReviewedAndEnabled||
+       !viewerUid||AppState.currentState!=='active'||
+       !liveLocations.some(peer=>peer.peerUid===peerUid))return;
+    // A native confirmation is required BEFORE revealing a private coordinate
+    // to whichever external mapping app handles this Android geo intent.
+    Alert.alert(
+      language==='th'?'เปิดแอปแผนที่ภายนอก?':'Open an external Maps app?',
+      language==='th'
+        ?'พิกัดล่าสุดของเพื่อนจะถูกส่งไปยังแอปแผนที่ที่คุณเลือก โปรดเปิดเฉพาะเมื่อคุณต้องการ'
+        :'The selected mapping app will receive your friend\'s latest coordinates. Continue only if you agree.',
+      [
+        {text:language==='th'?'ยกเลิก':'Cancel',style:'cancel'},
+        {text:language==='th'?'เปิดแผนที่':'Open Maps',onPress:()=>{
+          void (async()=>{
+            try{
+              if(!alive.current||session.current!==viewerUid||
+                 AppState.currentState!=='active'||
+                 !authorizedPeers(viewerUid,friends).some(p=>p.uid===peerUid))return;
+              // Re-read AFTER confirmation. Cloud Run checks current M1
+              // friendship, both consents and the active M2 grant on each call.
+              // A revoked/stale fix must never be passed to an external app.
+              const response=await transport.read(peerUid);
+              if(!alive.current||session.current!==viewerUid||
+                 getStagingGuestAuth().currentUser?.uid!==viewerUid||
+                 AppState.currentState!=='active')return;
+              const current=validatedRemoteFix(response,Date.now());
+              const uri=current?androidGeoUri(
+                current.point.latitude,current.point.longitude):null;
+              if(!uri)throw Error('location_unavailable');
+              await Linking.openURL(uri);
+            }catch{
+              if(alive.current&&session.current===viewerUid&&
+                 AppState.currentState==='active')
+                Alert.alert(
+                  language==='th'?'ไม่สามารถเปิดแผนที่ได้':'Maps unavailable',
+                  language==='th'
+                    ?'ไม่พบตำแหน่งที่ยังได้รับอนุญาตหรือไม่มีแอปแผนที่ที่รองรับ'
+                    :'No fresh authorized location or compatible Maps app is available.'
+                );
+            }
+          })();
+        }}
+      ]
+    );
+  }
+
   if(!backendReviewedAndEnabled)return <View style={s.panel}>
     <Text style={s.title}>{t('m2MapTitle')}</Text>
     <Text style={s.note}>{t('m2Unavailable')}</Text>
@@ -203,6 +253,11 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
       <Text style={s.name}>{pin.displayName}</Text>
       <Text style={s.note}>{t('m2MapAccuracy')}: ±{Math.round(pin.accuracyMeters)} {t('meter')}</Text>
       <Text style={s.note}>{t('m2MapUpdated')}: {Math.max(0,Math.floor((now-pin.capturedAtMs)/1000))} {t('secondsUnit')}</Text>
+      {Platform.OS==='android'?<Pressable accessibilityRole="button"
+        style={s.refresh} onPress={()=>requestExternalMap(pin.peerUid)}>
+        <Text style={s.refreshText}>{language==='th'
+          ?'เปิดตำแหน่งในแอปแผนที่':'Open location in Maps'}</Text>
+      </Pressable>:null}
     </View>)}
     <Text style={s.note}>{t('m2MapSchematic')}</Text>
   </View>;
