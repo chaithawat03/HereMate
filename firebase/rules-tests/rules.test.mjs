@@ -76,8 +76,10 @@ test('M1.0 Firestore owner profile and reserved collections ACL', {timeout:60000
       await setDoc(doc(db,'private_latest_locations',DIGEST),{point:{latitude:1,longitude:2}});
       await setDoc(doc(db,'private_location_rate_limits',DIGEST),{count:1});
       await setDoc(doc(db,'private_location_publishers','uid-owner'),{viewerUid:'uid-other'});
+      await setDoc(doc(db,'private_geofence_zones',DIGEST),{status:'active'});
+      await setDoc(doc(db,'private_geofence_states',DIGEST),{zone:'inside'});
     });
-    const paths=[['private_phone_auth',DIGEST],['private_auth_rate_limits','auth-phone_'+DIGEST],['friendships','pair-1'],['friend_requests','request-1'],['locations','uid-owner'],['private_location_grants',DIGEST],['private_latest_locations',DIGEST],['private_location_rate_limits',DIGEST],['private_location_publishers','uid-owner'],['users/uid-owner/private','secret']];
+    const paths=[['private_phone_auth',DIGEST],['private_auth_rate_limits','auth-phone_'+DIGEST],['friendships','pair-1'],['friend_requests','request-1'],['locations','uid-owner'],['private_location_grants',DIGEST],['private_latest_locations',DIGEST],['private_location_rate_limits',DIGEST],['private_location_publishers','uid-owner'],['private_geofence_zones',DIGEST],['private_geofence_states',DIGEST],['users/uid-owner/private','secret']];
     for(const db of [anon,owner,other]){
       for(const [col,id] of paths){
         const ref=doc(db,col,id);
