@@ -130,6 +130,20 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   assert.equal((await raw.collection('private_latest_locations').doc(A+'__'+B).get()).exists,false);
   assert.equal((await raw.collection('private_location_publishers').doc(A).get()).exists,false);
 
+  // Genuine Firestore optimistic concurrency: two distinct phone STARTs
+  // for the same owner/viewer cannot both commit the single publisher lease.
+  await raw.collection('friendRequests').doc(C+'__'+B).set(relation(C,B));
+  const competingDevices=await Promise.allSettled([
+    svc.startDevice({idToken:bearer(C),viewerUid:B}),
+    svc.startDevice({idToken:bearer(C),viewerUid:B})
+  ]);
+  assert.equal(competingDevices.filter(x=>x.status==='fulfilled').length,1);
+  assert.equal(competingDevices.filter(x=>x.status==='rejected').length,1);
+  const current=competingDevices.find(x=>x.status==='fulfilled').value;
+  assert.match(current.sessionToken,/^[0-9a-f]{64}$/);
+  await svc.stopDevice({idToken:bearer(C),viewerUid:B,
+    sessionToken:current.sessionToken});
+
   // Separate actor checks actual persisted Firestore rate-limit transactions.
   for(let i=0;i<6;i++) {
     await svc.start({idToken:bearer(D),viewerUid:C});
