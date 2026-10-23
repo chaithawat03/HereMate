@@ -23,8 +23,11 @@ export type M4TransportPorts=Readonly<{
 }>;
 export type M4Transport=Readonly<{
  propose:(subjectUid:string,circle:GeofenceCircle)=>Promise<{proposed:true;expiresAtMs:number}>;
- review:(ownerUid:string)=>Promise<{circle:GeofenceCircle;expiresAtMs:number}>;
- decide:(ownerUid:string,approve:boolean)=>Promise<{approved:boolean;expiresAtMs?:number}>;
+ review:(ownerUid:string)=>Promise<{
+  circle:GeofenceCircle;expiresAtMs:number;proposalCreatedAtMs:number;
+ }>;
+ decide:(ownerUid:string,approve:boolean,proposalCreatedAtMs:number)=>
+  Promise<{approved:boolean;expiresAtMs?:number}>;
  revoke:(ownerUid:string,subjectUid:string)=>Promise<{revoked:true}>;
  evaluate:(ownerUid:string,point:ShareFix)=>Promise<GeofenceOutcome>;
 }>;
@@ -119,14 +122,19 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    },
    async review(ownerUid){
      const row=await send('/v1/geofences/review',{ownerUid:peer(ownerUid)},false);
-     if(!own(row,['circle','expiresAtMs'])||
+     if(!own(row,['circle','expiresAtMs','proposalCreatedAtMs'])||
        !validCircle((row as {circle:unknown}).circle)||
-       !number((row as {expiresAtMs:unknown}).expiresAtMs))return unavailable();
-     return row as {circle:GeofenceCircle;expiresAtMs:number};
+       !number((row as {expiresAtMs:unknown}).expiresAtMs)||
+       !Number.isSafeInteger((row as {proposalCreatedAtMs:unknown}).proposalCreatedAtMs)||
+       (row as {proposalCreatedAtMs:number}).proposalCreatedAtMs<=0)return unavailable();
+     return row as {circle:GeofenceCircle;expiresAtMs:number;proposalCreatedAtMs:number};
    },
-   async decide(ownerUid,approve){
-     if(typeof approve!=='boolean')return unavailable();
-     const row=await send('/v1/geofences/decide',{ownerUid:peer(ownerUid),approve},false);
+   async decide(ownerUid,approve,proposalCreatedAtMs){
+     if(typeof approve!=='boolean'||!Number.isSafeInteger(proposalCreatedAtMs)||
+        proposalCreatedAtMs<=0)return unavailable();
+     const row=await send('/v1/geofences/decide',{
+       ownerUid:peer(ownerUid),approve,proposalCreatedAtMs
+     },false);
      if(approve){
        if(!own(row,['approved','expiresAtMs'])||
           (row as {approved:unknown}).approved!==true||

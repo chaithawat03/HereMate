@@ -10,6 +10,7 @@ const SECRET='T'.repeat(72);
 const ORIGIN=APPROVED_M4_STAGING_ORIGINS[1];
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const circle={latitude:13.7563,longitude:100.5018,radiusMeters:350};
+const proposalCreatedAtMs=1_800_000_000_000;
 const now=()=>Date.now();
 function make(extra={}){
  const calls=[];
@@ -24,7 +25,8 @@ function make(extra={}){
      const path=new globalThis.URL(input).pathname;
      const replies={
        '/v1/geofences/propose':{proposed:true,expiresAtMs:now()+30_000},
-       '/v1/geofences/review':{circle,expiresAtMs:now()+30_000},
+       '/v1/geofences/review':{circle,expiresAtMs:now()+30_000,
+         proposalCreatedAtMs},
        '/v1/geofences/decide':JSON.parse(init.body).approve?
          {approved:true,expiresAtMs:now()+30_000}:{approved:false},
        '/v1/geofences/revoke':{revoked:true},
@@ -55,14 +57,20 @@ test('only exact owner-reviewed Cloud Run HTTPS origins can be used',()=>{
 test('consent UX APIs send exact, authenticated, no-store POST bodies only',async()=>{
  const x=make();
  assert.equal((await x.transport.propose(PEER,circle)).proposed,true);
- assert.deepEqual((await x.transport.review(PEER)).circle,circle);
- assert.equal((await x.transport.decide(PEER,true)).approved,true);
- assert.equal((await x.transport.decide(PEER,false)).approved,false);
+ const reviewed=await x.transport.review(PEER);
+ assert.deepEqual(reviewed.circle,circle);
+ assert.equal(reviewed.proposalCreatedAtMs,proposalCreatedAtMs);
+ assert.equal((await x.transport.decide(PEER,true,proposalCreatedAtMs)).approved,true);
+ assert.equal((await x.transport.decide(PEER,false,proposalCreatedAtMs)).approved,false);
  assert.equal((await x.transport.revoke(PEER,UID)).revoked,true);
  assert.equal((await x.transport.evaluate(PEER,{
    latitude:13.757,longitude:100.5,accuracyMeters:11,capturedAtMs:now()-500
  })).event,'enter');
  assert.equal(x.calls.length,6);
+ assert.deepEqual(JSON.parse(x.calls[2].init.body),
+   {ownerUid:PEER,approve:true,proposalCreatedAtMs});
+ assert.deepEqual(JSON.parse(x.calls[3].init.body),
+   {ownerUid:PEER,approve:false,proposalCreatedAtMs});
  for(const row of x.calls){
    assert.match(String(row.input),/^https:\/\//);
    assert.equal(row.init.method,'POST');
@@ -87,6 +95,8 @@ test('invalid coordinates, permission OFF or forged caller never send GPS or pro
  await assert.rejects(x.transport.evaluate(PEER,{
    latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-60_000
  }),/M4_GEOFENCE_NOT_AVAILABLE/);
+ await assert.rejects(x.transport.decide(PEER,true,NaN),/M4_GEOFENCE_NOT_AVAILABLE/);
+ await assert.rejects(x.transport.decide(PEER,false,0),/M4_GEOFENCE_NOT_AVAILABLE/);
  assert.equal(x.calls.length,0);
  x.setPermission(false);
  await assert.rejects(x.transport.evaluate(PEER,{
@@ -137,8 +147,9 @@ test('M4 UI requires independent owner/subject consent, distinct revoke and expl
  assert.match(wiring,/AppState\.currentState==='active'/);
  assert.match(wiring,/getStagingGuestAuth\(\)\.currentUser/);
  assert.match(panels,/transport\.review/);
- assert.match(panels,/transport\.decide\(peer\.uid,true\)/);
- assert.match(panels,/transport\.decide\(peer\.uid,false\)/);
+ assert.match(panels,/transport\.decide\(peer\.uid,true,reviewed\.proposalCreatedAtMs\)/);
+ assert.match(panels,/transport\.decide\(peer\.uid,false,reviewed\.proposalCreatedAtMs\)/);
+ assert.match(panels,/reviewed\?\.ownerUid===peer\.uid/);
  assert.match(panels,/transport\.revoke\(peer\.uid,uid\)/);
  assert.match(panels,/transport\.revoke\(uid,peer\.uid\)/);
  assert.match(panels,/requestForegroundPermissionsAsync/);

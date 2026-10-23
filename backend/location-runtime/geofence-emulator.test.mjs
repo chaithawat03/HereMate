@@ -128,9 +128,12 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  assert.ok(proposal.expiresAtMs>now);
  await assert.rejects(geofence.review({idToken:bearer(C),ownerUid:A}),GeofenceDenied);
  await assert.rejects(sample(),GeofenceDenied);
- assert.deepEqual((await geofence.review({idToken:bearer(B),ownerUid:A})).circle,circle);
+ const firstReview=await geofence.review({idToken:bearer(B),ownerUid:A});
+ assert.deepEqual(firstReview.circle,circle);
+ assert.equal(firstReview.proposalCreatedAtMs,now);
  await assert.rejects(geofence.propose(args),GeofenceDenied);
- assert.deepEqual(await geofence.decide({idToken:bearer(B),ownerUid:A,approve:false}),
+ assert.deepEqual(await geofence.decide({idToken:bearer(B),ownerUid:A,
+   approve:false,proposalCreatedAtMs:firstReview.proposalCreatedAtMs}),
    {approved:false});
  assert.equal((await zoneRef.get()).exists,false);
  // Four proposals in one minute (including denied attempts) exhaust
@@ -139,10 +142,23 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  await assert.rejects(geofence.propose(args),GeofenceLimited);
  now+=60_001;
  await geofence.propose(args);
- const accepted=await geofence.decide({idToken:bearer(B),ownerUid:A,approve:true});
+ // An earlier reviewed proposal must NOT authorize a different replacement
+ // after expiry/reproposal. Rejected stale decisions leave it pending.
+ await assert.rejects(geofence.decide({idToken:bearer(B),ownerUid:A,
+   approve:true,proposalCreatedAtMs:firstReview.proposalCreatedAtMs}),GeofenceDenied);
+ await assert.rejects(geofence.decide({idToken:bearer(B),ownerUid:A,
+   approve:false,proposalCreatedAtMs:firstReview.proposalCreatedAtMs}),GeofenceDenied);
+ assert.equal((await zoneRef.get()).data().status,'pending');
+ const secondReview=await geofence.review({idToken:bearer(B),ownerUid:A});
+ assert.notEqual(secondReview.proposalCreatedAtMs,firstReview.proposalCreatedAtMs);
+ await assert.rejects(geofence.decide({idToken:bearer(B),ownerUid:A,
+   approve:true,proposalCreatedAtMs:1.5}),GeofenceInvalid);
+ const accepted=await geofence.decide({idToken:bearer(B),ownerUid:A,
+   approve:true,proposalCreatedAtMs:secondReview.proposalCreatedAtMs});
  assert.equal(accepted.approved,true);
  assert.ok(accepted.expiresAtMs>now);
- await assert.rejects(geofence.decide({idToken:bearer(B),ownerUid:A,approve:true}),GeofenceDenied);
+ await assert.rejects(geofence.decide({idToken:bearer(B),ownerUid:A,
+   approve:true,proposalCreatedAtMs:secondReview.proposalCreatedAtMs}),GeofenceDenied);
  await assert.rejects(sample(),GeofenceDenied,'requires M2 publisher/grant');
  await location.start({idToken:bearer(B),viewerUid:A});
  const out=()=>geofence.evaluate({

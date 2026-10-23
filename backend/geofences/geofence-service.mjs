@@ -104,16 +104,21 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        const now=clockNow(clock),revision=authorizeRelation(relation,ownerUid,subjectUid);
        const proposal=sameZone(zone,ownerUid,subjectUid,revision,now,'pending');
        // Subject must see the exact location/radius before accepting it.
-       return {circle:{...proposal.circle},expiresAtMs:proposal.expiresAtMs};
+       return {circle:{...proposal.circle},expiresAtMs:proposal.expiresAtMs,
+         proposalCreatedAtMs:proposal.createdAtMs};
      });
    },
-   async decide({idToken,ownerUid,approve}){
+   async decide({idToken,ownerUid,approve,proposalCreatedAtMs}){
      const subjectUid=await actor(idToken);
-     if(typeof approve!=='boolean')invalid();
+     if(typeof approve!=='boolean'||!Number.isSafeInteger(proposalCreatedAtMs)||
+        proposalCreatedAtMs<=0)invalid();
      await limit(subjectUid,'decide');
      return tx(ownerUid,subjectUid,async ({relation,zone,setZone,deleteZone,deleteState})=>{
        const now=clockNow(clock),revision=authorizeRelation(relation,ownerUid,subjectUid);
        const proposal=sameZone(zone,ownerUid,subjectUid,revision,now,'pending');
+       // Never approve/reject a replacement circle that the subject did not
+       // review. A new proposal can replace an expired one between requests.
+       if(proposal.createdAtMs!==proposalCreatedAtMs)deny();
        deleteState();
        if(!approve){deleteZone();return {approved:false};}
        const expiresAtMs=now+MAX_ZONE_LIFETIME_MS;
