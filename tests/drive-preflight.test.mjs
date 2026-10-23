@@ -76,7 +76,7 @@ test('scheduled OAuth health job is read-only and never triggers EAS build/uploa
  assert.match(check,/environment: staging-drive/);
  assert.doesNotMatch(check,/eas build|publish-staging-drive\.mjs|upload-artifact@/);
  for(const section of [verify,build,publish]) {
-   assert.match(section,/github\.event_name == 'push'/);
+   assert.doesNotMatch(section,/github\.event_name == 'push'/);
    assert.match(section,/github\.event_name == 'workflow_dispatch'/);
    assert.match(section,/inputs\.run_mode == 'build'/);
    assert.doesNotMatch(section,/github\.event_name != 'workflow_dispatch'/);
