@@ -24,7 +24,10 @@ test('M3 iOS has distinct explicit opt-in and preserves Android existing root',(
  assert.match(panels,/createM2StagingTransport/);
 });
 test('M3 does not request background location, use GPS history or turn on iOS in EAS',()=>{
- assert.doesNotMatch(index+app+panels,
+ const source=(index+app+panels)
+   .replace(/\/\*[\s\S]*?\*\//g,'')
+   .replace(/^\s*\/\/.*$/gm,'');
+ assert.doesNotMatch(source,
    /requestBackgroundPermissionsAsync|startLocationUpdatesAsync|TaskManager|AsyncStorage|sendPushNotification/);
  assert.equal(eas.build['ios-guest-simulator'].env.EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND,undefined);
  assert.equal(eas.build['android-guest-staging'].env.EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND,undefined);
