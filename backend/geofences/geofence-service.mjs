@@ -125,10 +125,12 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
    async revoke({idToken,ownerUid,subjectUid}){
      const who=await actor(idToken);
      if(who!==ownerUid&&who!==subjectUid)deny();
-     return tx(ownerUid,subjectUid,async ({deleteZone,deleteState})=>{
+     return tx(ownerUid,subjectUid,async ({zone,state,deleteZone,deleteState})=>{
        // No relation/consent checks: a subject can ALWAYS revoke after
        // unfriending, even if the original grant is already gone.
-       deleteZone();deleteState();
+       // Idempotent retries don't perform unnecessary Firestore writes.
+       if(zone)deleteZone();
+       if(state)deleteState();
        return {revoked:true};
      });
    },
