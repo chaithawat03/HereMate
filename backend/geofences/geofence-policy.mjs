@@ -36,12 +36,19 @@ export const EMPTY_STATE=Object.freeze({zone:'unknown',pending:null,streak:0,
  lastEventAtMs:null,lastSampleCapturedAtMs:null});
 export function advanceState(circle,fix,now,previous=EMPTY_STATE){
  if(!validCircle(circle)||!validFix(fix,now))return {next:EMPTY_STATE,event:null,quality:'invalid'};
- const zone=['inside','outside'].includes(previous?.zone)?previous.zone:'unknown';
  const lastEvent=validClock(previous?.lastEventAtMs)?previous.lastEventAtMs:null;
  const lastSample=validClock(previous?.lastSampleCapturedAtMs)?
    previous.lastSampleCapturedAtMs:null;
- const pending=['inside','outside'].includes(previous?.pending)?previous.pending:null;
- const streak=previous?.streak===1?1:0;
+ // After a long gap or when migrating an older record, the past location
+ // classification is NOT a fresh baseline; avoid a spurious notification on
+ // resume or after app restart. Keep only the cooldown timestamp.
+ const stale=lastSample===null||
+   fix.capturedAtMs-lastSample>MAX_CONSECUTIVE_SAMPLE_GAP_MS;
+ const zone=!stale&&['inside','outside'].includes(previous?.zone)?
+   previous.zone:'unknown';
+ const pending=!stale&&['inside','outside'].includes(previous?.pending)?
+   previous.pending:null;
+ const streak=!stale&&previous?.streak===1?1:0;
  // An identical, out-of-order or too-close fix must never count as the
  // second confirmation for Enter/Exit. Keep the previous state unchanged.
  // Only a capture timestamp is retained; never a coordinate, path or history.
