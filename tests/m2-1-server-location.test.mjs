@@ -122,8 +122,13 @@ test('STOP remains available on per-owner quota exhaustion and repeats do not re
  assert.equal(x.db.rows.has('private_location_publishers/'+A),false);
  await fails(x.view());
  assert.deepEqual(await stop(),{enabled:false}); // idempotent
- // Still requires valid Firebase identity; cannot stop another person's grant.
- await fails(controlled.stop({idToken:bearer(C),viewerUid:B}));
+ // STOP is idempotent for every authenticated account, but one account
+ // cannot erase another account's active grant or publisher lease.
+ await x.start(); await x.publish();
+ assert.deepEqual(await controlled.stop({idToken:bearer(C),viewerUid:B}),
+   {enabled:false});
+ assert.deepEqual((await x.view()).point,point());
+ await stop();
  x.revoked.add(A);
  await fails(stop());
 });
