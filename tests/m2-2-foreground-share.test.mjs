@@ -256,7 +256,7 @@ test('M3 rejected native permission after silent background cannot strand the fo
  assert.equal(ctrl.getState().error,null);
  assert.equal(starts,0);assert.equal(stops,0);
 });
-test('M3 delayed server START after silent account change must revoke possible grant before binding GPS',async()=>{
+test('M3 delayed server START after silent account change attempts revoke and reports unconfirmed if old token is lost',async()=>{
  let resolveGrant,uid=a,starts=0,stops=0,watches=0;
  const pending=new Promise(resolve=>{resolveGrant=resolve;});
  const ctrl=createForegroundSharingController({
@@ -266,7 +266,7 @@ test('M3 delayed server START after silent account change must revoke possible g
   transport:{
    start:async()=>{starts++;return pending;},
    publish:async()=>({stored:true,expiresAtMs:0}),
-   stop:async()=>{stops++;return {enabled:false};}
+   stop:async()=>{stops++;throw Error('original account token no longer available');}
   },
   now:()=>1_800_000_000_000,schedule:()=>null,cancel:()=>{},onState:()=>{}
  });
@@ -278,8 +278,9 @@ test('M3 delayed server START after silent account change must revoke possible g
  await first;
  await new Promise(resolve=>setImmediate(resolve));
  assert.equal(watches,0);
- assert.equal(stops,1,'a potentially committed remote grant requires STOP');
- assert.equal(ctrl.getState().phase,'off');
+ assert.equal(stops,1,'a potentially committed remote grant requires a STOP attempt');
+ assert.equal(ctrl.getState().phase,'stop-unconfirmed',
+   'a new account cannot confirm revocation of the previous account grant');
 });
 test('M3 late native GPS watch binding after silent foreground loss releases handle and revokes grant',async()=>{
  let resolveWatch,foreground=true,removed=0,stops=0;
