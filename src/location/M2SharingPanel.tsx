@@ -4,7 +4,7 @@
  * or assign a no-op transport: the status must never pretend GPS is shared.
  */
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {AppState,Pressable,StyleSheet,Text,View} from 'react-native';
+import {AppState,Platform,Pressable,StyleSheet,Text,View} from 'react-native';
 import * as Location from 'expo-location';
 import {onAuthStateChanged} from 'firebase/auth';
 import {getStagingGuestAuth} from '../auth/firebaseGuest';
@@ -17,20 +17,26 @@ import {
   type ShareFix,type SharingState,type SharePorts, type ShareRelation
 } from './m2ForegroundSession';
 
-type Props={transport:SharePorts['transport'];backendReviewedAndEnabled:boolean};
+type Props={transport:SharePorts['transport']&Readonly<{
+  emergencyStop?:(peerUid:string)=>Promise<{enabled:false}>;
+}>;backendReviewedAndEnabled:boolean};
 const initial:SharingState={phase:'off',peerUid:null,expiresAtMs:null,error:null};
 function toRelation(r:FriendRequest):ShareRelation {
   return {senderUid:r.senderUid,recipientUid:r.recipientUid,status:r.status,
     senderConsent:r.senderConsent,recipientConsent:r.recipientConsent};
 }
 export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
-  const {colors:c,t}=usePreferences();
+  const {colors:c,t,language}=usePreferences();
   const s=useMemo(()=>styles(c),[c]);
   const [session,setSession]=useState<SharingState>(initial);
   const [friends,setFriends]=useState<FriendRequest[]>([]);
   const [selectedUid,setSelectedUid]=useState<string|null>(null);
   const [loadError,setLoadError]=useState(false);
   const [authRevision,setAuthRevision]=useState(0);
+  const [emergencyState,setEmergencyState]=useState<{
+    peerUid:string;status:'running'|'confirmed'|'failed';
+  }|null>(null);
+  const emergencyLock=useRef(false);
   const controller=useRef<ReturnType<typeof createForegroundSharingController>|null>(null);
   const account=useRef<string|null>(null);
 
@@ -81,11 +87,15 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
     });
     controller.current=ctrl;
     const app=AppState.addEventListener('change',next=>{
-      if(next!=='active')ctrl.interrupted();
+      if(next!=='active'){
+        ctrl.interrupted();setEmergencyState(null);
+      }
     });
     const authUnsub=onAuthStateChanged(auth,u=>{
       const uid=u?.uid??null;
-      if(account.current!==uid){account.current=uid;ctrl.accountChanged();}
+      if(account.current!==uid){
+        account.current=uid;ctrl.accountChanged();setEmergencyState(null);
+      }
       if(live)setAuthRevision(x=>x+1);
     },()=>{account.current=null;ctrl.accountChanged();});
     return()=>{
@@ -114,6 +124,38 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
   },[backendReviewedAndEnabled,session.peerUid,authRevision]);
   useEffect(()=>{if(backendReviewedAndEnabled)void refresh();},[backendReviewedAndEnabled,refresh]);
   const owner=account.current;
+  const emergencyAvailable=Platform.OS==='android'&&
+    typeof transport.emergencyStop==='function';
+  const safeToEmergency=()=>{
+    const phase=controller.current?.getState().phase;
+    return phase==='off'||phase==='stop-unconfirmed';
+  };
+  async function emergencyRevoke(peerUid:string){
+    const actor=account.current;
+    if(!emergencyAvailable||!actor||!backendReviewedAndEnabled||
+       emergencyLock.current||AppState.currentState!=='active'||
+       !safeToEmergency())return;
+    // Restrict the UI action to currently known participant relationships,
+    // including removed/declined records. Consent is NOT required for revoke.
+    const hasRelationship=friends.some(r=>
+      (r.senderUid===actor&&r.recipientUid===peerUid)||
+      (r.recipientUid===actor&&r.senderUid===peerUid));
+    if(!hasRelationship)return;
+    emergencyLock.current=true;
+    setEmergencyState({peerUid,status:'running'});
+    try{
+      const result=await transport.emergencyStop!(peerUid);
+      if(result.enabled!==false)throw Error('not_confirmed');
+      if(account.current!==actor||AppState.currentState!=='active')return;
+      controller.current?.acknowledgeEmergencyStop(peerUid);
+      setEmergencyState({peerUid,status:'confirmed'});
+    }catch{
+      if(account.current===actor&&AppState.currentState==='active')
+        setEmergencyState({peerUid,status:'failed'});
+    }finally{
+      emergencyLock.current=false;
+    }
+  }
   const accepted=friends.filter(r=>r.status==='accepted'&&owner&&
     (r.senderUid===owner||r.recipientUid===owner));
   const chosen=accepted.find(r=>
@@ -167,6 +209,36 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
     {session.error==='permission'?<Text style={s.error}>{t('m2PermissionDenied')}</Text>:null}
     {session.error==='backend'?<Text style={s.error}>{t('m2BackendError')}</Text>:null}
     {session.error==='ineligible'?<Text style={s.error}>{t('m2ConsentRequired')}</Text>:null}
+    {emergencyAvailable&&friends.length>0?<View style={s.emergencyArea}>
+      <Text style={s.optionText}>{language==='th'
+        ?'หยุดแชร์จากอุปกรณ์ทุกเครื่อง (บัญชีของฉัน)'
+        :'Emergency stop sharing from all my devices'}</Text>
+      <Text style={s.note}>{language==='th'
+        ?'ใช้เมื่อโทรศัพท์อีกเครื่องยังแชร์อยู่หรือปุ่มหยุดปกติไม่สำเร็จ คำสั่งหยุดจะยืนยันกับเซิร์ฟเวอร์ และไม่กระทบการแชร์ให้เพื่อนคนอื่น'
+        :'Use if another phone is sharing or normal Stop failed. Server confirmation is required; other friends are unaffected.'}</Text>
+      {friends.filter(r=>owner&&
+        (r.senderUid===owner||r.recipientUid===owner)).map(r=>{
+        const peer=otherParticipant(r,owner??'');
+        const current=emergencyState?.peerUid===peer.uid?emergencyState:null;
+        return <View key={'emergency-'+r.id} style={s.emergencyRow}>
+          <Text style={s.optionText}>{peer.displayName}</Text>
+          <Pressable accessibilityRole="button"
+            disabled={emergencyState?.status==='running'||!safeToEmergency()}
+            style={[s.stop,(emergencyState?.status==='running'||!safeToEmergency())&&s.disabled]}
+            onPress={()=>void emergencyRevoke(peer.uid)}>
+            <Text style={s.stopText}>{language==='th'
+              ?'ยืนยันหยุดแชร์ให้คนนี้จากทุกเครื่อง'
+              :'Confirm stop sharing to this person from all devices'}</Text>
+          </Pressable>
+          {current?.status==='confirmed'?<Text accessibilityRole="alert" style={s.note}>
+            {language==='th'?'เซิร์ฟเวอร์ยืนยันว่าหยุดแล้ว':'Server confirmed sharing stopped'}
+          </Text>:null}
+          {current?.status==='failed'?<Text accessibilityRole="alert" style={s.error}>
+            {language==='th'?'ยังยืนยันการหยุดไม่ได้ โปรดลองใหม่':'Stop not confirmed. Retry.'}
+          </Text>:null}
+        </View>;
+      })}
+    </View>:null}
     <Text style={s.note}>{t('m2LimitNote')}</Text>
   </View>;
 }
@@ -186,5 +258,7 @@ const styles=(c:Palette)=>StyleSheet.create({
   buttonText:{fontWeight:'800',color:c.accentOn},
   stop:{backgroundColor:c.dangerButton,alignSelf:'flex-start',padding:12,borderRadius:10},
   stopText:{fontWeight:'800',color:'#FFFFFF'},
+  emergencyArea:{padding:12,borderWidth:1,borderColor:c.line,borderRadius:11,gap:10},
+  emergencyRow:{padding:10,borderRadius:9,backgroundColor:c.surfaceAlt,gap:8},
   error:{color:c.error,fontSize:12,fontWeight:'700'},
 });
