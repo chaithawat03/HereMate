@@ -133,6 +133,11 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
      return tx(ownerUid,subjectUid,async ({zone,state,deleteZone,deleteState})=>{
        // No relation/consent checks: a subject can ALWAYS revoke after
        // unfriending, even if the original grant is already gone.
+       // Legacy Firestore pair IDs concatenate UIDs with "__", which is also
+       // allowed inside Firebase UIDs. Distinct pairs can share a document
+       // ID: never delete another pair's zone or dedupe state.
+       if((zone&&(zone.ownerUid!==ownerUid||zone.subjectUid!==subjectUid))||
+          (state&&(state.ownerUid!==ownerUid||state.subjectUid!==subjectUid)))deny();
        // Idempotent retries don't perform unnecessary Firestore writes.
        if(zone)deleteZone();
        if(state)deleteState();
