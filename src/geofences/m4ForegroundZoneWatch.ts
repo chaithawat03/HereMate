@@ -70,7 +70,21 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      const sub=await p.watch(fix=>{void observe(fix,epoch);},()=>{
        if(active(epoch)){stop();p.onFailure();}
      });
-     if(!active(epoch)){sub.remove();return false;}
+     // Permission or Firebase identity can change while the native watcher
+     // subscription is being established. Recheck AFTER the async bind and
+     // release its native handle before returning; otherwise a late bind can
+     // strand this controller in 'starting' with an unowned GPS subscription.
+     let stillPermitted=false;
+     try{stillPermitted=await p.hasPermission();}catch{/* fail closed */}
+     if(!active(epoch)||!stillPermitted){
+       sub.remove();
+       if(epoch===generation){
+         const warn=active(epoch)&&!stillPermitted;
+         stop();
+         if(warn)p.onFailure();
+       }
+       return false;
+     }
      watcher=sub;
      notify('watching');
      timer=p.schedule(()=>stop(),M4_WATCH_MAX_MS);
