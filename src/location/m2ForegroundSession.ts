@@ -110,26 +110,52 @@ export function createForegroundSharingController(p:SharePorts) {
     activeOwner=owner;
     publishState({phase:'starting',peerUid,expiresAtMs:null,error:null});
     const task=(async()=>{
+      // A timed-out START may have committed a remote grant even without an
+      // ACK. Permission checks cannot have created a remote grant yet.
+      let remoteGrantPossible=false;
       try {
         const permitted=await p.askForegroundPermission();
-        if(!active())return;
-        if(!permitted){publishState({...off,error:'permission'});return;}
+        if(!active()){
+          if(run===epoch){activeOwner=null;publishState(off);}
+          return;
+        }
+        if(!permitted){activeOwner=null;publishState({...off,error:'permission'});return;}
+        remoteGrantPossible=true;
         const grant=await p.transport.start(peerUid);
-        if(!active())return; // A concurrent stop waits and revokes this grant.
+        if(!active()){
+          // An auth/AppState callback may lag behind the actual account or
+          // foreground change. Revoke a possibly committed grant even when
+          // no explicit STOP event has arrived yet.
+          if(run===epoch)void stop();
+          return;
+        }
         const now=p.now();
         if(grant.enabled!==true||!Number.isFinite(grant.expiresAtMs)||
            grant.expiresAtMs<=now||grant.expiresAtMs>now+MAX_SHARE_SESSION_MS)
           throw Error('bad_grant');
         const sub=await p.watchForegroundFix(onFix,()=>{void stop();});
-        if(!active()){sub.remove();return;}
+        if(!active()){
+          sub.remove();
+          if(run===epoch)void stop();
+          return;
+        }
         watch=sub;
         publishState({phase:'sharing',peerUid,expiresAtMs:grant.expiresAtMs,error:null});
         alarm=p.schedule(()=>{void stop();},Math.max(0,grant.expiresAtMs-p.now()));
       }catch{
-        if(active()){
-          // Starting may have created a remote grant: always attempt revoke,
-          // including watcher failure, instead of simply setting UI to OFF.
-          void stop(); // Do not await ourselves: Stop waits for inStart to settle.
+        if(run===epoch){
+          if(remoteGrantPossible){
+            // The server may have committed START before an HTTP failure.
+            // Preserve stop-unconfirmed if revocation cannot be verified.
+            void stop(); // Do not await ourselves: Stop waits for inStart.
+          }else{
+            // A rejected native permission prompt cannot create a remote
+            // lease. A silent account/background change must not strand the
+            // controller in 'starting' or claim a backend STOP failed.
+            const warn=active();
+            activeOwner=null;
+            publishState({...off,error:warn?'permission':null});
+          }
         }
       }
     })();

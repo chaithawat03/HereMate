@@ -57,7 +57,9 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
     });
     refreshGate.current=gate;
     const ctrl=createForegroundSharingController({
-      ownerUid:()=>account.current,
+      // Do not trust a delayed onAuthStateChanged callback when a native
+      // permission dialog or HTTP START is still pending.
+      ownerUid:()=>auth.currentUser?.uid===account.current?account.current:null,
       isForeground:()=>AppState.currentState==='active',
       now:Date.now,
       schedule:(f,ms)=>setTimeout(f,ms),
