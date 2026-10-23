@@ -7,9 +7,10 @@ import assert from 'node:assert/strict';
 import {initializeApp,deleteApp} from 'firebase-admin/app';
 import {getFirestore,Timestamp} from 'firebase-admin/firestore';
 import {
- createGeofenceService,GeofenceDenied,GeofenceInvalid
+ createGeofenceService,GeofenceDenied,GeofenceInvalid,GeofenceLimited
 } from '../geofences/geofence-service.mjs';
 import {createFirestoreGeofenceStore} from '../geofences/firestore-geofence-store.mjs';
+import {createFirestoreGeofenceRateLimiter,GEOFENCE_ROUTE_LIMITS} from '../geofences/geofence-rate-limiter.mjs';
 import {createLocationService,STAGING_PROJECT} from '../location/location-service.mjs';
 import {createFirestoreLocationStore,createFirestoreLocationRateLimiter} from '../location/firestore-location-adapters.mjs';
 import {advanceState,EMPTY_STATE,distanceMeters} from '../geofences/geofence-policy.mjs';
@@ -56,6 +57,7 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  };
  const geofence=createGeofenceService({
    adminAuth:auth,store:createFirestoreGeofenceStore(projection),
+   rateLimiter:createFirestoreGeofenceRateLimiter(projection,()=>now),
    clock:()=>now
  });
  const location=createLocationService({
@@ -93,6 +95,11 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  assert.deepEqual(await geofence.decide({idToken:bearer(B),ownerUid:A,approve:false}),
    {approved:false});
  assert.equal((await zoneRef.get()).exists,false);
+ // Four proposals in one minute (including denied attempts) exhaust
+ // the persistent per-actor quota; advancing the injected test clock
+ // exercises a legitimate next-window retry without touching live GCP.
+ await assert.rejects(geofence.propose(args),GeofenceLimited);
+ now+=60_001;
  await geofence.propose(args);
  const accepted=await geofence.decide({idToken:bearer(B),ownerUid:A,approve:true});
  assert.equal(accepted.approved,true);
@@ -131,6 +138,16 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  await assert.rejects(geofence.revoke({
    idToken:bearer(C),ownerUid:A,subjectUid:B
  }),GeofenceDenied);
+ // A stranger exhausting real persistent limiter cannot brute force review.
+ // The earlier review was in the previous 60-second window.
+ for(let i=0;i<GEOFENCE_ROUTE_LIMITS.review;i++)
+   await assert.rejects(geofence.review({idToken:bearer(C),ownerUid:A}),GeofenceDenied);
+ await assert.rejects(geofence.review({idToken:bearer(C),ownerUid:A}),GeofenceLimited);
+ const limits=await db.collection('private_geofence_rate_limits').get();
+ assert.ok(limits.size>=3);
+ assert.ok(limits.docs.every(d=>/^[0-9a-f]{64}$/.test(d.id)));
+ assert.ok(limits.docs.every(d=>!d.id.includes(A)&&!d.id.includes(B)&&
+   d.data().expireAt instanceof Timestamp));
  // Separate real Firestore docs remain server-only and expire by finite TTL.
  assert.ok((await db.collection('private_location_grants').doc(B+'__'+A).get()).exists);
 });
