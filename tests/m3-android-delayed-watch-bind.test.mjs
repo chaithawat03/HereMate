@@ -69,6 +69,9 @@ test('M2 Android source verifies actual Firebase account and OS permission after
  assert.match(panel,/await Location\.hasServicesEnabledAsync\(\)/);
  assert.match(panel,/getForegroundPermissionsAsync\(\)/);
  assert.match(panel,/watching=false;subscription\.remove\(\)/);
+ assert.match(panel,/const onCurrentWatchError=\(\)=>/);
+ assert.match(panel,/auth\.currentUser\?\.uid===actor\)onError\(\)/);
+ assert.match(panel,/\}\,onCurrentWatchError\)\,/);
  assert.match(transport,/foregroundPermissionGranted/);
  assert.equal(manifest.expo.plugins.find(p=>Array.isArray(p)&&p[0]==='expo-location')[1].isAndroidBackgroundLocationEnabled,false);
  assert.doesNotMatch(panel,/startLocationUpdatesAsync|requestBackgroundPermissionsAsync|TaskManager|AsyncStorage/);
