@@ -3,7 +3,14 @@
  * No background TaskManager, persistent GPS, push subscription or auto-start.
  * A trusted Staging API revalidates zone/M1/M2 authorization for every fix.
  */
-import {freshShareFix,type ShareFix} from '../location/m2ForegroundSession';
+import type {ShareFix} from '../location/m2ForegroundSession';
+const freshFix=(fix:ShareFix,now:number)=>
+ Number.isSafeInteger(fix?.capturedAtMs)&&fix.capturedAtMs>=now-30_000&&
+ fix.capturedAtMs<=now+5000&&Number.isFinite(fix.latitude)&&
+ fix.latitude>=-90&&fix.latitude<=90&&Number.isFinite(fix.longitude)&&
+ fix.longitude>=-180&&fix.longitude<=180&&
+ Number.isFinite(fix.accuracyMeters)&&fix.accuracyMeters>=0&&
+ fix.accuracyMeters<=100;
 export const M4_WATCH_MAX_MS=60_000;
 export const M4_WATCH_MIN_FIX_INTERVAL_MS=10_000;
 export type M4WatchPhase='off'|'starting'|'watching';
@@ -75,7 +82,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  }
  async function observe(fix:ShareFix,epoch:number){
    if(!active(epoch)){if(epoch===generation)stop();return;}
-   if(phase!=='watching'||processing||!freshShareFix(fix,p.now()))return;
+   if(phase!=='watching'||processing||!freshFix(fix,p.now()))return;
    if(p.now()-lastFixAt<M4_WATCH_MIN_FIX_INTERVAL_MS)return;
    lastFixAt=p.now();
    processing=true;
