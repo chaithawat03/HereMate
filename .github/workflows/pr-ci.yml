@@ -169,6 +169,17 @@ jobs:
             --project demo-heremate-m053 \
             --config firebase.json \
             "node --test backend/location-runtime/emulator.test.mjs"
+      - name: M4 server-only geofence consent / M2 grant / state transitions in Firestore Emulator
+        env:
+          GCLOUD_PROJECT: demo-heremate-m053
+          FIREBASE_CONFIG: '{"projectId":"demo-heremate-m053"}'
+          GOOGLE_APPLICATION_CREDENTIALS: ''
+        run: |
+          npx --yes firebase-tools@15.34.0 emulators:exec \
+            --only firestore \
+            --project demo-heremate-m053 \
+            --config firebase.json \
+            "node --test backend/location-runtime/geofence-emulator.test.mjs"
       - name: Actual Firebase Admin Auth token verification + revocation (isolated Auth Emulator)
         env:
           GCLOUD_PROJECT: demo-heremate-m053
