@@ -54,6 +54,12 @@ function validGrant(grant,ownerUid,viewerUid,now,relation) {
      grant.enabled!==true||grant.relationRevision!==relationRevision(relation)||!num(grant.expiresAtMs)||
      grant.expiresAtMs<=now||grant.expiresAtMs>now+5*60_000)deny();
 }
+// Firestore pair IDs use ownerUid + "__" + viewerUid, but Firebase UIDs
+// themselves can contain "__". A colliding authenticated pair must never
+// revoke another pair's stored grant or latest GPS point.
+function verifiedStoredPair(record,ownerUid,viewerUid) {
+  if(record && (record.ownerUid!==ownerUid||record.viewerUid!==viewerUid))deny();
+}
 function validPublisher(publisher,ownerUid,viewerUid,now,grant) {
   if(!publisher || publisher.ownerUid!==ownerUid ||
     publisher.viewerUid!==viewerUid || !num(publisher.expiresAtMs) ||
@@ -152,6 +158,10 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       return tx(ownerUid,viewerUid,async ({
         grant,point,publisher,deletePublisher,deleteGrant,deletePoint
       })=>{
+        // STOP must remain usable after unfriend, but never delete a
+        // different pair's documents if legacy UID pair IDs collide.
+        verifiedStoredPair(grant,ownerUid,viewerUid);
+        verifiedStoredPair(point,ownerUid,viewerUid);
         if(grant)deleteGrant();
         if(point)deletePoint();
         // Never delete another recipient's newer lease on a delayed Stop.
@@ -245,6 +255,8 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       return tx(ownerUid,viewerUid,async ({
         grant,point,publisher,deleteGrant,deletePoint,deletePublisher
       })=>{
+        verifiedStoredPair(grant,ownerUid,viewerUid);
+        verifiedStoredPair(point,ownerUid,viewerUid);
         if(!grant)return {enabled:false}; // idempotent expired session
         if(grant.sessionDigest!==sessionDigest)deny();
         // A delayed stop from another device cannot erase a newer
