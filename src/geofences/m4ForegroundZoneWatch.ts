@@ -105,7 +105,11 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      if(!(await p.hasPermission())||!active(epoch))throw Error('revoked');
      if(!destination)throw Error('no-owner');
      const event=await p.evaluate(destination,fix);
-     if(!active(epoch)||!(await p.hasPermission()))throw Error('revoked');
+     // The final OS permission read is asynchronous: STOP, backgrounding or
+     // Firebase account changes may happen while it is pending. Recheck the
+     // same watcher generation AFTER the await, before any subject-only alert.
+     const stillPermitted=await p.hasPermission();
+     if(!stillPermitted||!active(epoch))throw Error('revoked');
      if(event==='enter'||event==='exit')p.onEvent(event);
    }catch{
      if(!disposed&&epoch===generation){
