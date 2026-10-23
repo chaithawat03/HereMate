@@ -51,6 +51,8 @@ jobs:
         run: node --test tests/m2-staging-live-e2e-contract.test.mjs
       - name: Test M2.3 authorized real friend map and status privacy (offline)
         run: node --test tests/m2-3-friend-map-privacy.test.mjs
+      - name: Android explicit foreground live friend-map reader lifecycle
+        run: node --test tests/m3-android-friend-map-poller.test.mjs
       - name: Test M2.2 foreground-only sharing and remote stop lifecycle (offline)
         run: node --test tests/m2-2-foreground-share.test.mjs
       - name: Android owner-wide emergency location STOP and failure UX (offline)
