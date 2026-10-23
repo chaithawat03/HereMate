@@ -95,7 +95,10 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      }
      watcher=sub;
      notify('watching');
-     timer=p.schedule(()=>stop(),M4_WATCH_MAX_MS);
+     // Android/JS may run a timeout callback already queued before cancel().
+     // Only this exact opt-in watcher may expire itself: a retired timeout
+     // must not terminate a newer consented foreground watcher.
+     timer=p.schedule(()=>{if(epoch===generation)stop();},M4_WATCH_MAX_MS);
      return true;
    }catch{
      // Android can reject a permission prompt or native watch bind AFTER a
