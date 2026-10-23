@@ -1,6 +1,6 @@
 /**
  * M4 opt-in 60-second FOREGROUND-only zone monitoring.
- * No background TaskManager, persistent GPS, push subscription or auto-start.
+ * No background execution, persistent GPS, push subscription or auto-start.
  * A trusted Staging API revalidates zone/M1/M2 authorization for every fix.
  */
 import type {ShareFix} from '../location/m2ForegroundSession';
