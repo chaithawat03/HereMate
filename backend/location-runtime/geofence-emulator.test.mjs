@@ -141,7 +141,8 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  // exercises a legitimate next-window retry without touching live GCP.
  await assert.rejects(geofence.propose(args),GeofenceLimited);
  now+=60_001;
- await geofence.propose(args);
+ const replacementCircle={...circle,latitude:0.01};
+ await geofence.propose({...args,circle:replacementCircle});
  // An earlier reviewed proposal must NOT authorize a different replacement
  // after expiry/reproposal. Rejected stale decisions leave it pending.
  await assert.rejects(geofence.decide({idToken:bearer(B),ownerUid:A,
@@ -150,6 +151,7 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
    approve:false,proposalCreatedAtMs:firstReview.proposalCreatedAtMs}),GeofenceDenied);
  assert.equal((await zoneRef.get()).data().status,'pending');
  const secondReview=await geofence.review({idToken:bearer(B),ownerUid:A});
+ assert.deepEqual(secondReview.circle,replacementCircle);
  assert.notEqual(secondReview.proposalCreatedAtMs,firstReview.proposalCreatedAtMs);
  await assert.rejects(geofence.decide({idToken:bearer(B),ownerUid:A,
    approve:true,proposalCreatedAtMs:1.5}),GeofenceInvalid);
