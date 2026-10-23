@@ -7,10 +7,10 @@ import assert from 'node:assert/strict';
 import {initializeApp,deleteApp} from 'firebase-admin/app';
 import {getFirestore,Timestamp} from 'firebase-admin/firestore';
 import {
- createGeofenceService,GeofenceDenied,GeofenceInvalid,STAGING_PROJECT
+ createGeofenceService,GeofenceDenied,GeofenceInvalid
 } from '../geofences/geofence-service.mjs';
 import {createFirestoreGeofenceStore} from '../geofences/firestore-geofence-store.mjs';
-import {createLocationService} from '../location/location-service.mjs';
+import {createLocationService,STAGING_PROJECT} from '../location/location-service.mjs';
 import {createFirestoreLocationStore,createFirestoreLocationRateLimiter} from '../location/firestore-location-adapters.mjs';
 import {advanceState,EMPTY_STATE,distanceMeters} from '../geofences/geofence-policy.mjs';
 
