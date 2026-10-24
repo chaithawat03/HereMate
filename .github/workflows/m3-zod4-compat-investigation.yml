@@ -57,7 +57,12 @@ jobs:
         run: |
           npm run typecheck
           node --test tests/m3-device-session-transport.test.mjs tests/m3-device-session-http.test.mjs
-      - name: Validate real Android Expo prebuild and offline JS bundle with Zod 4\n        run: |\n          npx expo prebuild --platform android --non-interactive --clean\n          npx expo export --platform android --output-dir /tmp/heremate-m3-zod4-export\n          test -d /tmp/heremate-m3-zod4-export\n      - name: Retain candidate lockfile and raw audit evidence for human review
+      - name: Validate real Android Expo prebuild and offline JS bundle with Zod 4
+        run: |
+          npx expo prebuild --platform android --non-interactive --clean
+          npx expo export --platform android --output-dir /tmp/heremate-m3-zod4-export
+          test -d /tmp/heremate-m3-zod4-export
+      - name: Retain candidate lockfile and raw audit evidence for human review
         if: always()
         uses: actions/upload-artifact@v4
         with:
