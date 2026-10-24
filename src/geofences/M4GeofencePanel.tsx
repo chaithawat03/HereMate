@@ -41,7 +41,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
  const [error,setError]=useState(false);
  const [message,setMessage]=useState('');
  const [watchPhase,setWatchPhase]=useState<M4WatchPhase>('off');
- // Session-only Android alert preference: OFF on every launch/revoke/background.
+ // Session-only Android/iOS foreground alert preference: OFF on every launch/revoke/background.
  const [foregroundAlerts,setForegroundAlerts]=useState(false);
  const alertsRef=useRef(false);
  const zoneWatch=useRef<ReturnType<typeof createM4ForegroundZoneWatch>|null>(null);
@@ -140,7 +140,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
        // A notification is NEVER generated from a stale/ambiguous fix,
        // only a server-confirmed event returned to the tracked subject.
        // This is a local foreground alert, NOT an OS push subscription.
-       if(Platform.OS==='android'&&alertsRef.current){
+       if((Platform.OS==='android'||Platform.OS==='ios')&&alertsRef.current){
          Alert.alert(
            language==='th'?'แจ้งเตือนพื้นที่ (HereMate)':'HereMate zone update',
            event==='enter'?
@@ -365,7 +365,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
          'การเฝ้าดูพื้นที่เป็นตัวเลือก: ใช้ GPS เฉพาะตอนเปิดแอป สูงสุด 60 วินาที ต้องมี M2 sharing และพื้นที่ที่อีกฝ่ายอนุมัติแล้ว ไม่มี Push หรือการติดตามเบื้องหลัง',
          'Optional: watch the zone for up to 60 seconds while this app is open. Requires active M2 sharing and subject-approved zone. No push or background tracking'
        )}</Text>
-       {Platform.OS==='android'?<Pressable accessibilityRole="button"
+       {(Platform.OS==='android'||Platform.OS==='ios')?<Pressable accessibilityRole="button"
          accessibilityState={{checked:foregroundAlerts}}
          disabled={busy} style={s.secondary}
          onPress={()=>{
