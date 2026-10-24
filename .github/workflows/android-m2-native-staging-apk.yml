@@ -103,6 +103,21 @@ jobs:
           Path('android-m2-rc-manifest.json').write_text(json.dumps(record,indent=2)+'\n')
           print('ANDROID_M2_RC_APK_VERIFIED: sha256='+record['apkSha256'])
           PY
+      - name: Verify signed APK Google OAuth certificate before distribution
+        run: |
+          set -euo pipefail
+          if [ "$EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN" != 'true' ]; then
+            echo 'Google Sign-In disabled: no OAuth certificate claim'
+            exit 0
+          fi
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -d "$sdk_root/build-tools"
+          mapfile -t candidates < <(find "$sdk_root/build-tools" -mindepth 2 -maxdepth 2 -type f -name apksigner | sort -V)
+          test "${#candidates[@]}" -gt 0
+          apksigner="${candidates[${#candidates[@]}-1]}"
+          "$apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/heremate-android-signature.txt"
+          node scripts/verify-android-google-oauth-signer.mjs "$RUNNER_TEMP/heremate-android-signature.txt"
       - name: Retain ONE Android Staging APK + SHA-256 manifest
         uses: actions/upload-artifact@v4
         with:

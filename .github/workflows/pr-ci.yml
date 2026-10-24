@@ -99,6 +99,10 @@ jobs:
         run: node --test tests/m1-1-google-account-flow.test.mjs
       - name: Verify M1.1B native Google OAuth config and rollout
         run: node --test tests/m1-1b-native-google.test.mjs
+      - name: M3 Android Google OAuth signer mismatch fail-closed gate (offline)
+        run: |
+          node --check scripts/verify-android-google-oauth-signer.mjs
+          node --test tests/m3-android-google-oauth-apk-signer.test.mjs
       - name: Test M1.0 owner-only Firestore profiles and feature isolation
         run: node --test tests/m1-0-private-profile.test.mjs
       - name: Test M0.5.5.1 Android permission-dialog lifecycle
