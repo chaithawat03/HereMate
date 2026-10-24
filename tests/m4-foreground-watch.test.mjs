@@ -121,6 +121,84 @@ test('M4 UI phase adapter throwing at OFF cannot break STOP or allow stale GPS f
  assert.equal(removed,2);
 });
 
+test('M4 reentrant STARTING UI STOP prevents stale permission prompts and deadline timers',async()=>{
+ let controller,permissionCalls=0;
+ const x=rig({
+   requestPermission:async()=>{permissionCalls++;return true;},
+   onPhase:phase=>{if(phase==='starting')controller.stop();}
+ });
+ controller=x.controller;
+ assert.equal(await controller.start(OWNER,true),false);
+ assert.equal(controller.getPhase(),'off');
+ assert.equal(permissionCalls,0,'STOP in UI callback must prevent stale native permission prompt');
+ assert.equal(x.timers.length,0,'retired generation must not arm deadline');
+ assert.equal(x.stats().watchCount,0);
+ assert.deepEqual(x.failures,[]);
+});
+
+test('M4 reentrant STARTING STOP and fresh opt-in cannot be canceled by retired start',async()=>{
+ let controller,restart=null,once=false,permissionCalls=0;
+ const x=rig({
+   requestPermission:async()=>{permissionCalls++;return true;},
+   onPhase:phase=>{
+     if(phase==='starting'&&!once){
+       once=true;
+       controller.stop();
+       restart=controller.start(OWNER,true);
+     }
+   }
+ });
+ controller=x.controller;
+ assert.equal(await controller.start(OWNER,true),false,'old generation must not report success');
+ assert.equal(await restart,true,'new explicitly opted-in generation remains live');
+ assert.equal(controller.getPhase(),'watching');
+ assert.equal(permissionCalls,1,'only new generation may request OS permission');
+ assert.equal(x.timers.length,1,'only new generation may arm expiry');
+ assert.equal(x.stats().watchCount,1);
+ controller.stop();
+ assert.equal(x.stats().removed,1);
+});
+
+test('M4 reentrant WATCHING UI STOP reports retired start as unsuccessful',async()=>{
+ let controller,removed=0;
+ const x=rig({
+   onPhase:phase=>{if(phase==='watching')controller.stop();},
+   watch:async()=>({remove:()=>{removed++;}})
+ });
+ controller=x.controller;
+ assert.equal(await controller.start(OWNER,true),false);
+ assert.equal(controller.getPhase(),'off');
+ assert.equal(removed,1,'native watcher must be released exactly once');
+ assert.ok(x.timers.every(t=>t.cancelled));
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[]);
+});
+
+test('M4 reentrant WATCHING STOP then new opt-in keeps the new watcher',async()=>{
+ let controller,restart=null,once=false,removed=0;
+ const x=rig({
+   onPhase:phase=>{
+     if(phase==='watching'&&!once){
+       once=true;
+       controller.stop();
+       restart=controller.start(OWNER,true);
+     }
+   },
+   watch:async()=>({remove:()=>{removed++;}})
+ });
+ controller=x.controller;
+ assert.equal(await controller.start(OWNER,true),false);
+ assert.equal(await restart,true);
+ assert.equal(controller.getPhase(),'watching');
+ assert.equal(removed,1,'old watcher removed; new watcher must survive');
+ assert.equal(x.stats().watchCount,0,'custom native watch stub is counted separately');
+ assert.equal(x.timers.length,2);
+ assert.equal(x.timers[0].cancelled,true);
+ assert.equal(x.timers[1].cancelled,false);
+ controller.stop();
+ assert.equal(removed,2);
+});
+
 test('M4 throwing initial identity, foreground or clock adapter denies opt-in without native side effects',async()=>{
  for(const failingPort of ['identity','isForeground','now','monotonicNow']){
    let fail=true;
