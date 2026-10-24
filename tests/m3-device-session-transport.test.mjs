@@ -88,15 +88,17 @@ test('M3 transport drops delayed network results after Firebase account change',
  await assert.rejects(pending,/UNAVAILABLE/);
  await assert.rejects(x.transport.publish(PEER,fix()),/UNAVAILABLE/);
 });
-test('v1 Android remains unchanged while iOS M3 and opt-in Android use v2',()=>{
+test('Android and iOS foreground default to deployed v1 until independently approved v2 flag',()=>{
  const android=read('src/location/M2AndroidStagingScreens.tsx');
  const ios=read('src/location/M3IOSStagingScreens.tsx');
  const build=read('.github/workflows/android-m2-native-staging-apk.yml');
  const eas=read('eas.json');
  assert.match(android,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'/);
- assert.match(ios,/useDeviceSessions:true/);
+ assert.match(ios,/useDeviceSessions:process\.env\.EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'/);
  assert.doesNotMatch(build,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS/);
  assert.doesNotMatch(eas,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS/);
+ assert.match(ios,/EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND!=='true'/);
+ assert.match(ios,/!backendReviewedAndEnabled/);
  assert.match(read('src/location/m2StagingTransport.ts'),/deviceSession/);
 });
 
