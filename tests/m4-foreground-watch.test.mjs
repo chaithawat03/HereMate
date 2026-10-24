@@ -180,7 +180,7 @@ test('M4 permission revoked during async native watch bind removes watcher and f
  assert.equal(removed,1);
  assert.equal(x.controller.getPhase(),'off');
  assert.deepEqual(x.failures,['error']);
- assert.equal(x.timers.length,0);
+ assert.ok(x.timers.every(timer=>timer.cancelled),'starting deadline must be canceled');
 });
 test('M4 native permission recheck error after bind still removes watcher',async()=>{
  let checks=0,removed=0;
@@ -232,7 +232,7 @@ test('M4 rejected Android native start after silent identity/background loss can
    assert.equal(await first,false,stage);
    assert.equal(x.controller.getPhase(),'off',stage+' must release the GPS UI');
    assert.deepEqual(x.failures,[],stage+' is not a current-user GPS error');
-   assert.equal(x.timers.length,0);
+   assert.ok(x.timers.every(timer=>timer.cancelled),'starting deadline must be canceled');
    x.setActor(SUBJECT);x.setForeground(true);
    assert.equal(await x.controller.start(OWNER,true),true,
      stage+' must permit a new explicit opt-in');
@@ -287,7 +287,7 @@ test('M4 async native OS DENIED after silent account/background change releases 
    assert.equal(x.controller.getPhase(),'off',incident+' cannot strand starting');
    assert.deepEqual(x.failures,[],incident+' is not a current-account GPS error');
    assert.equal(x.stats().watchCount,0);
-   assert.equal(x.timers.length,0);
+   assert.ok(x.timers.every(timer=>timer.cancelled),'starting deadline must be canceled');
    x.setActor(SUBJECT);x.setForeground(true);
    assert.equal(await x.controller.start(OWNER,true),true,
      'new explicit opt-in must not be blocked by stale starting');
@@ -366,6 +366,76 @@ test('M4 canceled old expiry cannot abort replacement during asynchronous native
  assert.equal(await replacement,true);
  assert.equal(x.controller.getPhase(),'watching');
  assert.equal(x.timers.length,2);
+ x.controller.stop();
+ assert.equal(removed,2);
+});
+
+test('M4 privacy deadline starts at tap even when native permission prompt never resolves',async()=>{
+ let release;
+ const pending=new Promise(resolve=>{release=resolve;});
+ const x=rig({requestPermission:()=>pending});
+ const start=x.controller.start(OWNER,true);
+ assert.equal(x.controller.getPhase(),'starting');
+ assert.equal(x.timers.length,1);
+ assert.equal(x.timers[0].ms,M4_WATCH_MAX_MS);
+ x.timers[0].fn();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.timers[0].cancelled,true);
+ assert.deepEqual(x.failures,['error'],'active user gets bounded startup failure');
+ release(true);
+ assert.equal(await start,false);
+ assert.equal(x.stats().watchCount,0);
+ assert.deepEqual(x.events,[]);
+ assert.equal(await x.controller.start(OWNER,true),true,'new opt-in can retry');
+ x.controller.stop();
+});
+
+test('M4 late native bind after 60s deadline is removed before any additional OS await',async()=>{
+ let releaseWatch,checks=0,removed=0;
+ const pending=new Promise(resolve=>{releaseWatch=resolve;});
+ const x=rig({
+   watch:()=>pending,
+   hasPermission:async()=>{++checks;return true;}
+ });
+ const start=x.controller.start(OWNER,true);
+ await flush();
+ assert.equal(x.controller.getPhase(),'starting');
+ assert.equal(checks,1);
+ const deadline=x.timers[0];
+ deadline.fn();
+ assert.equal(x.controller.getPhase(),'off');
+ releaseWatch({remove:()=>{removed++;}});
+ assert.equal(await start,false);
+ assert.equal(removed,1,'late watcher released immediately');
+ assert.equal(checks,1,'no stale OS permission query after expired native bind');
+ assert.deepEqual(x.failures,['error']);
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.controller.stop();
+});
+
+test('M4 deadline immediately removes bound GPS while post-bind OS recheck is hung',async()=>{
+ let releaseCheck,checks=0,removed=0;
+ const pending=new Promise(resolve=>{releaseCheck=resolve;});
+ const x=rig({
+   hasPermission:()=>++checks===2?pending:Promise.resolve(true),
+   watch:async()=>({remove:()=>{removed++;}})
+ });
+ const start=x.controller.start(OWNER,true);
+ await flush();
+ assert.equal(x.controller.getPhase(),'starting');
+ assert.equal(checks,2);
+ const deadline=x.timers[0];
+ deadline.fn();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(removed,1,'GPS removed without waiting for native permission read');
+ assert.deepEqual(x.failures,['error']);
+ assert.equal(await x.controller.start(OWNER,true),true);
+ assert.equal(x.controller.getPhase(),'watching');
+ releaseCheck(true);
+ assert.equal(await start,false);
+ assert.equal(removed,1);
+ deadline.fn();
+ assert.equal(x.controller.getPhase(),'watching');
  x.controller.stop();
  assert.equal(removed,2);
 });
