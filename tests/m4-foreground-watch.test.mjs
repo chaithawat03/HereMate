@@ -369,3 +369,63 @@ test('M4 canceled old expiry cannot abort replacement during asynchronous native
  x.controller.stop();
  assert.equal(removed,2);
 });
+
+test('M4 startup watchdog releases a hung Android permission request without stopping a later opt-in',async()=>{
+ let release,requests=0;
+ const pending=new Promise(resolve=>{release=resolve;});
+ const x=rig({startDeadlineMs:12,
+   requestPermission:()=>++requests===1?pending:Promise.resolve(true)});
+ const first=x.controller.start(OWNER,true);
+ assert.equal(x.controller.getPhase(),'starting');
+ assert.equal(await first,false,'bounded startup must settle despite unresolved OS permission');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.deepEqual(x.failures,['error']);
+ assert.equal(x.stats().watchCount,0);
+ assert.equal(await x.controller.start(OWNER,true),true);
+ release(true);await flush();
+ assert.equal(x.controller.getPhase(),'watching',
+   'late first permission result cannot revoke the newer consent');
+ assert.equal(x.stats().watchCount,1);
+ x.controller.stop();
+});
+
+test('M4 startup watchdog cleans a late native GPS watcher and preserves a newer session',async()=>{
+ let releaseOld,binds=0,removed=0;
+ const old=new Promise(resolve=>{releaseOld=resolve;});
+ const x=rig({startDeadlineMs:12,watch:()=>{
+   if(++binds===1)return old;
+   return Promise.resolve({remove:()=>{removed++;}});
+ }});
+ const first=x.controller.start(OWNER,true);
+ await flush();
+ assert.equal(x.controller.getPhase(),'starting');
+ assert.equal(await first,false);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.deepEqual(x.failures,['error']);
+ assert.equal(await x.controller.start(OWNER,true),true);
+ releaseOld({remove:()=>{removed++;}});
+ await flush();
+ assert.equal(removed,1,'old native subscription must be removed exactly once');
+ assert.equal(x.controller.getPhase(),'watching');
+ x.controller.stop();
+ assert.equal(removed,2,'new watcher remains owned until explicit STOP');
+});
+
+test('M4 startup watchdog removes an established GPS watcher even if final OS check hangs',async()=>{
+ let releaseCheck,checks=0,removed=0;
+ const pending=new Promise(resolve=>{releaseCheck=resolve;});
+ const x=rig({startDeadlineMs:12,
+   hasPermission:()=>++checks===2?pending:Promise.resolve(true),
+   watch:async()=>({remove:()=>{removed++;}})
+ });
+ const first=x.controller.start(OWNER,true);
+ await flush();
+ assert.equal(checks,2,'native watcher was bound before stalled OS recheck');
+ assert.equal(x.controller.getPhase(),'starting');
+ assert.equal(await first,false);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(removed,1,'watchdog STOP must release native watcher immediately');
+ releaseCheck(true);await flush();
+ assert.equal(removed,1,'late OS resolution must not double-remove watcher');
+ assert.deepEqual(x.failures,['error']);
+});
