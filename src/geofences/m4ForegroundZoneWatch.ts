@@ -51,7 +51,11 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  let lastObservedMonotonicMs=-Infinity;
  const notify=(next:M4WatchPhase)=>{
    phase=next;
-   if(!disposed)p.onPhase(next);
+   if(disposed)return true;
+   // A React/UI adapter can throw during a native lifecycle transition.
+   // Treat it as failed consent establishment rather than leaving GPS live
+   // without a reliable foreground indicator. STOP itself never throws.
+   try{p.onPhase(next);return true;}catch{return false;}
  };
  function stop(){
    // Retire the consent generation and clear all JS state BEFORE invoking
@@ -117,7 +121,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    consentStartedMonotonicMs=monoNow;
    deadlineMonotonicMs=monoNow+M4_WATCH_MAX_MS;
    lastObservedMonotonicMs=monoNow;
-   notify('starting');
+   if(!notify('starting')){stop();return false;}
    try{
      // The 60-second privacy deadline begins at the user's tap, NOT after
      // native permission prompts or the async GPS watcher finally binds.
@@ -182,7 +186,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
        }
        return false;
      }
-     notify('watching');
+     if(!notify('watching')){stop();return false;}
      return true;
    }catch{
      // Android can reject a permission prompt or native watch bind AFTER a
