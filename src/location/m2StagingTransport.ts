@@ -76,12 +76,12 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   const validCapability=(value:unknown):value is string=>
     typeof value==='string'&&/^[0-9a-f]{64}$/.test(value);
   async function send(endpoint:string,payload:Readonly<Record<string,unknown>>,
-    requireForeground:boolean):Promise<unknown> {
+    requireForeground:boolean,requireGpsPermission=requireForeground):Promise<unknown> {
     const first=ports.currentIdentity();
     if(!first)throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');
     if(!CODE.test(first.uid))unavailable();
-    if(requireForeground&&(!ports.isForeground()||
-       await ports.foregroundPermissionGranted()!==true))unavailable();
+    if(requireForeground&&!ports.isForeground())unavailable();
+    if(requireGpsPermission&&await ports.foregroundPermissionGranted()!==true)unavailable();
     // The OS permission check is async. Identity/foreground may have changed
     // silently before the Firebase auth/AppState callbacks are delivered.
     if(ports.currentIdentity()?.uid!==first.uid||
@@ -91,8 +91,8 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     catch{return unavailable();}
     if(typeof jwt!=='string'||jwt.length<32||jwt.length>8192)unavailable();
     if(ports.currentIdentity()?.uid!==first.uid)unavailable();
-    if(requireForeground&&(!ports.isForeground()||
-       await ports.foregroundPermissionGranted()!==true))unavailable();
+    if(requireForeground&&!ports.isForeground())unavailable();
+    if(requireGpsPermission&&await ports.foregroundPermissionGranted()!==true)unavailable();
     // Never send the captured bearer/GPS under a different live account or
     // after backgrounding while the final permission promise was pending.
     if(ports.currentIdentity()?.uid!==first.uid||
@@ -123,8 +123,8 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       if(ports.currentIdentity()?.uid!==first.uid)unavailable();
       // A permission revocation DURING an HTTPS request must not deliver
       // any coordinate response to the UI after the original permission check.
-      if(requireForeground&&(!ports.isForeground()||
-         await ports.foregroundPermissionGranted()!==true))unavailable();
+      if(requireForeground&&!ports.isForeground())unavailable();
+      if(requireGpsPermission&&await ports.foregroundPermissionGranted()!==true)unavailable();
       // A late account/background transition during the final permission
       // await must not return another user's private response to the UI.
       if(ports.currentIdentity()?.uid!==first.uid||
@@ -248,7 +248,12 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       }
     },
     async read(ownerUid:string){
-      const result=await send('/v1/locations/points/read',{ownerUid:safePeer(ownerUid)},true);
+      // Viewing an authorized friend's position needs a live foreground
+      // viewer and server-side bilateral consent, NOT this viewer's GPS.
+      // Asking iOS/Android for local location permission merely to READ
+      // would coerce unnecessary OS access; only START/PUBLISH require it.
+      const result=await send('/v1/locations/points/read',
+        {ownerUid:safePeer(ownerUid)},true,false);
       if(!fields(result,['point','expiresAtMs']))unavailable();
       const row=result as {point:unknown;expiresAtMs:unknown};
       if(!validFix(row.point)||!validNumber(row.expiresAtMs)||
