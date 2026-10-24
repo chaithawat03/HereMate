@@ -6,8 +6,9 @@
  */
 export const ANDROID_FRIEND_MAP_POLL_MS=30_000;
 export const ANDROID_FRIEND_MAP_READ_LIMIT_PER_TICK=8;
-// At most 2 batches x 8 peer reads within any rolling 60s = 16,
-// below the M2 server's 30-read/minute per-account quota.
+// Per-device budget: at most 2 batches x 8 peer reads in 60s = 16.
+// Multiple signed-in devices may share the server's per-account quota;
+// server authorization/rate limits remain authoritative on every read.
 export const ANDROID_FRIEND_MAP_MAX_READS_PER_60S=16;
 const WINDOW_MS=60_000;
 const MAX_WINDOW_BATCHES=2;
