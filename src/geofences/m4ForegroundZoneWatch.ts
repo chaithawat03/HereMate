@@ -22,6 +22,8 @@ export type M4WatchPorts=Readonly<{
  watch:(onFix:(fix:ShareFix)=>void,onError:()=>void)=>Promise<{remove:()=>void}>;
  evaluate:(zoneOwnerUid:string,fix:ShareFix)=>Promise<'enter'|'exit'|null>;
  now:()=>number;
+ // Monotonic elapsed time: wall-clock changes must never extend consent.
+ monotonicNow:()=>number;
  schedule:(fn:()=>void,delayMs:number)=>unknown;
  cancel:(handle:unknown)=>void;
  onPhase:(phase:M4WatchPhase)=>void;
@@ -39,6 +41,9 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  let consentStartedAtMs=Infinity;
  // Absolute privacy deadline: a delayed JS timer cannot extend consent.
  let deadlineAtMs=-Infinity;
+ // Date.now() can move backwards on device clock/NTP adjustments.
+ // Independently enforce the tap-to-expiry duration with monotonic time.
+ let consentStartedMonotonicMs=Infinity,deadlineMonotonicMs=-Infinity;
  const notify=(next:M4WatchPhase)=>{
    phase=next;
    if(!disposed)p.onPhase(next);
@@ -53,6 +58,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    timer=null;watcher=null;
    owner=null;actor=null;processing=false;deadlineAtMs=-Infinity;
    consentStartedAtMs=Infinity;
+   consentStartedMonotonicMs=Infinity;deadlineMonotonicMs=-Infinity;
    lastFixAt=-Infinity;
    if(oldTimer!==null){try{p.cancel(oldTimer);}catch{/* retired regardless */}}
    try{oldWatcher?.remove();}catch{/* OS lifecycle must handle failed native removal */}
@@ -61,7 +67,9 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  function active(epoch:number){
    return !disposed&&epoch===generation&&phase!=='off'&&
      actor!==null&&p.identity()===actor&&p.isForeground()&&
-     p.now()<deadlineAtMs;
+     p.now()<deadlineAtMs&&
+     p.monotonicNow()>=consentStartedMonotonicMs&&
+     p.monotonicNow()<deadlineMonotonicMs;
  }
  async function start(zoneOwnerUid:string,relationshipApproved:boolean){
    if(disposed||phase!=='off'||!relationshipApproved||!UID.test(zoneOwnerUid))
@@ -69,12 +77,17 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    const uid=p.identity();
    if(!uid||!UID.test(uid)||uid===zoneOwnerUid||!p.isForeground())
      return false;
+   // A non-finite clock cannot establish a bounded private GPS consent.
+   const wallNow=p.now(),monoNow=p.monotonicNow();
+   if(!Number.isSafeInteger(wallNow)||!Number.isFinite(monoNow))return false;
    actor=uid;owner=zoneOwnerUid;
    const epoch=++generation;
    // Timer callbacks may be delayed by OS suspension or a busy JS thread.
    // All permission, native-bind and GPS callback gates also check this clock.
-   consentStartedAtMs=p.now();
+   consentStartedAtMs=wallNow;
    deadlineAtMs=consentStartedAtMs+M4_WATCH_MAX_MS;
+   consentStartedMonotonicMs=monoNow;
+   deadlineMonotonicMs=monoNow+M4_WATCH_MAX_MS;
    notify('starting');
    try{
      // The 60-second privacy deadline begins at the user's tap, NOT after
