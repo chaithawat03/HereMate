@@ -34,6 +34,9 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  let watcher:{remove:()=>void}|null=null,timer:unknown=null;
  let processing=false,lastFixAt=-Infinity;
  let owner:string|null=null,actor:string|null=null;
+ // Reject cached fixes captured before this explicit foreground opt-in.
+ // A fresh native watch can deliver an old location immediately on binding.
+ let consentStartedAtMs=Infinity;
  // Absolute privacy deadline: a delayed JS timer cannot extend consent.
  let deadlineAtMs=-Infinity;
  const notify=(next:M4WatchPhase)=>{
@@ -49,6 +52,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    const oldTimer=timer,oldWatcher=watcher;
    timer=null;watcher=null;
    owner=null;actor=null;processing=false;deadlineAtMs=-Infinity;
+   consentStartedAtMs=Infinity;
    lastFixAt=-Infinity;
    if(oldTimer!==null){try{p.cancel(oldTimer);}catch{/* retired regardless */}}
    try{oldWatcher?.remove();}catch{/* OS lifecycle must handle failed native removal */}
@@ -69,7 +73,8 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    const epoch=++generation;
    // Timer callbacks may be delayed by OS suspension or a busy JS thread.
    // All permission, native-bind and GPS callback gates also check this clock.
-   deadlineAtMs=p.now()+M4_WATCH_MAX_MS;
+   consentStartedAtMs=p.now();
+   deadlineAtMs=consentStartedAtMs+M4_WATCH_MAX_MS;
    notify('starting');
    try{
      // The 60-second privacy deadline begins at the user's tap, NOT after
@@ -150,7 +155,10 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  }
  async function observe(fix:ShareFix,epoch:number){
    if(!active(epoch)){if(epoch===generation)stop();return;}
-   if(phase!=='watching'||processing||!freshFix(fix,p.now()))return;
+   // A GPS fix may be fresh by age yet have been captured before consent.
+   // Never send that pre-opt-in location to the private Staging evaluator.
+   if(phase!=='watching'||processing||!freshFix(fix,p.now())||
+      fix.capturedAtMs<consentStartedAtMs)return;
    if(p.now()-lastFixAt<M4_WATCH_MIN_FIX_INTERVAL_MS)return;
    lastFixAt=p.now();
    processing=true;
