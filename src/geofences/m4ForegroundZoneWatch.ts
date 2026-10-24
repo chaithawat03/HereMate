@@ -49,6 +49,8 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  // Detect rollback even when a broken monotonic clock stays above tap time.
  // Otherwise a partial rollback could extend a 60-second consent window.
  let lastObservedMonotonicMs=-Infinity;
+ // Read mutable phase after synchronous UI callbacks without TS stale narrowing.
+ const phaseIs=(expected:M4WatchPhase)=>phase===expected;
  const notify=(next:M4WatchPhase)=>{
    phase=next;
    if(disposed)return true;
@@ -128,7 +130,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    // The UI adapter may synchronously call STOP/dispose or replace consent
    // while handling STARTING. Never prompt for permission or arm a timer
    // for a generation that no longer has the user's opt-in.
-   if(epoch!==generation||phase!=='starting'||disposed||!active(epoch)){
+   if(epoch!==generation||!phaseIs('starting')||disposed||!active(epoch)){
      if(epoch===generation)stop();
      return false;
    }
@@ -200,7 +202,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      // A UI adapter can synchronously STOP or establish a newer explicit
      // opt-in while processing WATCHING. Do not report the retired start as
      // successful or STOP the newer session on adapter failure.
-     if(!phaseAccepted||epoch!==generation||phase!=='watching'||disposed||!active(epoch)){
+     if(!phaseAccepted||epoch!==generation||!phaseIs('watching')||disposed||!active(epoch)){
        if(epoch===generation)stop();
        return false;
      }
