@@ -46,7 +46,9 @@ function M2Screen(){
           <View style={{gap:5}}>
             <Text style={{color:c.text,fontSize:25,fontWeight:'800'}}>HereMate</Text>
             <Text style={{color:c.accent,fontSize:12,fontWeight:'800'}}>
-              ANDROID · M2 STAGING
+              {process.env.EXPO_PUBLIC_ENABLE_M3_FOREGROUND_PREVIEW==='true'
+                ? 'ANDROID · M3 FOREGROUND PREVIEW'
+                : 'ANDROID · M2 STAGING'}
             </Text>
             <Text style={{color:c.muted,fontSize:12,lineHeight:19}}>
               {language==='th'
