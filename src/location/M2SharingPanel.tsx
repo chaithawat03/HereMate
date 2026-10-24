@@ -12,6 +12,7 @@ import {listOwnRequests} from '../friends/firestoreFriends';
 import {otherParticipant,type FriendRequest} from '../friends/friendModel';
 import {createAccountScopedFriendRefresh} from './accountScopedFriendRefresh';
 import {bindVerifiedForegroundWatch} from './androidForegroundWatchBind';
+import {canOfferOwnerEmergencyStop} from './m3OwnerEmergencyStopGate';
 import {usePreferences} from '../ui/PreferencesProvider';
 import type {Palette} from '../ui/preferencesModel';
 import {
@@ -190,8 +191,17 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
   useEffect(()=>{if(backendReviewedAndEnabled)void refresh();},
     [backendReviewedAndEnabled,refresh,authRevision,session.peerUid]);
   const owner=account.current;
-  const emergencyAvailable=Platform.OS==='android'&&
-    typeof transport.emergencyStop==='function';
+  // Android keeps its existing emergency STOP; M3 iOS exposes the same
+  // authenticated owner-only server revoke only in an independently opted-in
+  // foreground Staging build. This is NOT a background tracking feature.
+  const iosM3ForegroundStagingEnabled=
+    process.env.EXPO_PUBLIC_ENVIRONMENT==='staging'&&
+    process.env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST==='true'&&
+    process.env.EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND==='true';
+  const emergencyAvailable=canOfferOwnerEmergencyStop(
+    Platform.OS,iosM3ForegroundStagingEnabled,
+    typeof transport.emergencyStop==='function'
+  );
   const safeToEmergency=()=>{
     const phase=controller.current?.getState().phase;
     return phase==='off'||phase==='stop-unconfirmed';
