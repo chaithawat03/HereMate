@@ -67,6 +67,8 @@ jobs:
         run: node --test tests/m2-2-foreground-share.test.mjs
       - name: Android M3 delayed GPS native binding and permission-revoke safety (offline)
         run: node --test tests/m3-android-delayed-watch-bind.test.mjs
+      - name: Android M3 hung native GPS binding deadline and remote STOP (offline)
+        run: node --test tests/m3-android-native-watch-bind-timeout.test.mjs
       - name: Android M3 retired native GPS/error/timer generation safety (offline)
         run: node --test tests/m3-android-retired-watch-callbacks.test.mjs
       - name: Android owner-wide emergency location STOP and failure UX (offline)
