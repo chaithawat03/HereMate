@@ -34,6 +34,8 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  let watcher:{remove:()=>void}|null=null,timer:unknown=null;
  let processing=false,lastFixAt=-Infinity;
  let owner:string|null=null,actor:string|null=null;
+ // Absolute privacy deadline: a delayed JS timer cannot extend consent.
+ let deadlineAtMs=-Infinity;
  const notify=(next:M4WatchPhase)=>{
    phase=next;
    if(!disposed)p.onPhase(next);
@@ -42,13 +44,14 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    ++generation;
    if(timer!==null){p.cancel(timer);timer=null;}
    watcher?.remove();watcher=null;
-   owner=null;actor=null;processing=false;
+   owner=null;actor=null;processing=false;deadlineAtMs=-Infinity;
    lastFixAt=-Infinity;
    notify('off');
  }
  function active(epoch:number){
    return !disposed&&epoch===generation&&phase!=='off'&&
-     actor!==null&&p.identity()===actor&&p.isForeground();
+     actor!==null&&p.identity()===actor&&p.isForeground()&&
+     p.now()<deadlineAtMs;
  }
  async function start(zoneOwnerUid:string,relationshipApproved:boolean){
    if(disposed||phase!=='off'||!relationshipApproved||!UID.test(zoneOwnerUid))
@@ -58,6 +61,9 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      return false;
    actor=uid;owner=zoneOwnerUid;
    const epoch=++generation;
+   // Timer callbacks may be delayed by OS suspension or a busy JS thread.
+   // All permission, native-bind and GPS callback gates also check this clock.
+   deadlineAtMs=p.now()+M4_WATCH_MAX_MS;
    notify('starting');
    try{
      // The 60-second privacy deadline begins at the user's tap, NOT after
@@ -138,11 +144,20 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      if(!(await p.hasPermission())||!active(epoch))throw Error('revoked');
      if(!destination)throw Error('no-owner');
      const event=await p.evaluate(destination,fix);
-     // The final OS permission read is asynchronous: STOP, backgrounding or
-     // Firebase account changes may happen while it is pending. Recheck the
-     // same watcher generation AFTER the await, before any subject-only alert.
+     // A delayed server response may arrive after the wall-clock consent cap,
+     // even when the JS expiry timer has not fired. Do not query OS or alert.
+     if(!active(epoch)){
+       if(epoch===generation)stop();
+       return;
+     }
+     // Recheck OS permission after the async server response. A delayed OS
+     // read may race STOP, account changes, backgrounding or wall-clock expiry.
      const stillPermitted=await p.hasPermission();
-     if(!stillPermitted||!active(epoch))throw Error('revoked');
+     if(!active(epoch)){
+       if(epoch===generation)stop();
+       return;
+     }
+     if(!stillPermitted)throw Error('revoked');
      if(event==='enter'||event==='exit')p.onEvent(event);
    }catch{
      if(!disposed&&epoch===generation){
