@@ -81,18 +81,25 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    return sample;
  }
  function active(epoch:number){
-   return !disposed&&epoch===generation&&phase!=='off'&&
-     actor!==null&&p.identity()===actor&&p.isForeground()&&
-     p.now()<deadlineAtMs&&
-     monotonicSample()>=consentStartedMonotonicMs&&
-     monotonicSample()<deadlineMonotonicMs;
+   if(disposed||epoch!==generation||phase==='off'||actor===null)return false;
+   // Runtime/OS adapter failures cannot authorize an existing GPS consent.
+   // Callers retire the current watcher on a false result.
+   try{
+     return p.identity()===actor&&p.isForeground()&&
+       p.now()<deadlineAtMs&&
+       monotonicSample()>=consentStartedMonotonicMs&&
+       monotonicSample()<deadlineMonotonicMs;
+   }catch{return false;}
  }
  async function start(zoneOwnerUid:string,relationshipApproved:boolean){
    if(disposed||phase!=='off'||!relationshipApproved||!UID.test(zoneOwnerUid))
      return false;
-   const uid=p.identity();
-   if(!uid||!UID.test(uid)||uid===zoneOwnerUid||!p.isForeground())
-     return false;
+   let uid:string|null;
+   try{
+     uid=p.identity();
+     if(!uid||!UID.test(uid)||uid===zoneOwnerUid||!p.isForeground())
+       return false;
+   }catch{return false;}
    // A non-finite clock cannot establish a bounded private GPS consent.
    // Native/JS clock adapters can throw during runtime suspension or
    // instrumentation. No opt-in has been established yet, so reject without
@@ -194,8 +201,12 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    // Never send that pre-opt-in location to the private Staging evaluator.
    // A native fix timestamp may lead JS wall-clock by up to 5 seconds.
    // Even such a fresh fix cannot be captured beyond this tap's consent cap.
-   if(phase!=='watching'||processing||!freshFix(fix,p.now())||
-      fix.capturedAtMs<consentStartedAtMs||
+   if(phase!=='watching'||processing)return;
+   // A throwing JS clock adapter after a native fix must retire consent,
+   // not reject an unobserved async GPS callback or leak the fix to Staging.
+   let fixNow:number;
+   try{fixNow=p.now();}catch{if(epoch===generation)stop();return;}
+   if(!freshFix(fix,fixNow)||fix.capturedAtMs<consentStartedAtMs||
       fix.capturedAtMs>=deadlineAtMs)return;
    const sampledMonotonicMs=monotonicSample();
    // A second clock sample can be invalid or expire after active(epoch).
