@@ -1,0 +1,109 @@
+name: HereMate M3 Android FOREGROUND PREVIEW APK (unreleased test branch)
+
+on:
+  push:
+    branches:
+      - release/m3-android-preview-20261024
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heremate-m3-foreground-preview-only
+  cancel-in-progress: false
+
+jobs:
+  build-android-m3-foreground-preview:
+    # This is NOT production, M3 final, background sharing, or a CI exception.
+    if: github.repository == 'chaithawat03/HereMate' && github.ref == 'refs/heads/release/m3-android-preview-20261024'
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      CI: '1'
+      EXPO_PUBLIC_ENVIRONMENT: staging
+      EXPO_PUBLIC_ENABLE_FIREBASE_GUEST: 'true'
+      EXPO_PUBLIC_ENABLE_LOCAL_GPS: 'true'
+      EXPO_PUBLIC_ENABLE_M1_PROFILE: 'true'
+      EXPO_PUBLIC_ENABLE_M1_FRIENDS: 'true'
+      EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN: 'true'
+      EXPO_PUBLIC_ENABLE_M2_SHARING: 'true'
+      # M3 v2 Cloud Run service is not approved/deployed. Never imply it works.
+      EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: package-lock.json
+      - name: Install exact staging dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Verify M3 preview scope, native watcher timeout and TypeScript
+        run: |
+          node --test tests/m2-integrated-android-native-rc.test.mjs
+          node --test tests/m3-android-native-watch-bind-timeout.test.mjs
+          node --test tests/m3-android-delayed-watch-bind.test.mjs
+          node --test tests/m3-android-owner-emergency-stop.test.mjs
+          npm run typecheck
+          node - <<'JS'
+          const c=require('./app.json');
+          const plugin=c.expo.plugins.find(x=>Array.isArray(x)&&x[0]==='expo-location');
+          if(plugin?.[1]?.isAndroidBackgroundLocationEnabled!==false ||
+             plugin?.[1]?.isAndroidForegroundServiceEnabled!==false)
+            throw Error('M3_PREVIEW_BACKGROUND_GPS_MUST_BE_OFF');
+          if(process.env.EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS!=='false')
+            throw Error('M3_PREVIEW_LIVE_V2_NOT_APPROVED');
+          JS
+      - name: Native Android prebuild without changing iOS/Production
+        run: npx expo prebuild --platform android --non-interactive --clean
+      - name: Compile self-contained signed Android Staging PREVIEW APK
+        run: |
+          set -euo pipefail
+          cd android
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+      - name: Verify APK bundle and write accurate source manifest
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,zipfile
+          from pathlib import Path
+          apk=Path('android/app/build/outputs/apk/release/app-release.apk')
+          if not apk.is_file() or apk.stat().st_size<1000000: raise SystemExit('APK_MISSING')
+          with zipfile.ZipFile(apk) as z:
+            names=z.namelist()
+            if not any(n.endswith('index.android.bundle') for n in names):
+              raise SystemExit('ANDROID_JS_BUNDLE_MISSING')
+            if not any(n.endswith('AndroidManifest.xml') for n in names):
+              raise SystemExit('ANDROID_MANIFEST_MISSING')
+          manifest={
+            'sourceSha':os.environ['GITHUB_SHA'],
+            'scope':'M3-foreground-preview-only-not-M3-final',
+            'm3Features':['Android-native-foreground-watch-timeout','late-watch-teardown','owner-emergency-stop','foreground-friend-map'],
+            'locationEndpoint':'approved-existing-staging-v1',
+            'm3V2LiveSessions':False,'backgroundLocation':False,
+            'androidOsPushNotifications':False,'iOSDeviceAcceptance':False,
+            'securityAuditGreen':False,
+            'securityAuditNote':'CI remains blocked by unapproved Expo CLI transitive zod high advisory GHSA-mrhx-c7xc-m3w5; testing only, no production or milestone sign-off',
+            'apkSha256':hashlib.sha256(apk.read_bytes()).hexdigest(),
+            'apkBytes':apk.stat().st_size
+          }
+          Path('m3-foreground-preview-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          print('M3_PREVIEW_APK_VERIFIED SHA256='+manifest['apkSha256'])
+          PY
+      - name: Retain M3 foreground preview APK and manifest privately for owner
+        uses: actions/upload-artifact@v4
+        with:
+          name: HereMate-M3-Android-Foreground-Preview-APK
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            m3-foreground-preview-manifest.json
+          if-no-files-found: error
+          retention-days: 7
