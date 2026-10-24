@@ -109,9 +109,28 @@ test('real Firestore transactions reject foreign M2/M3 and M4 pair-key writes wi
     const started=await startDevice();
     assert.match(started.sessionToken,/^[0-9a-f]{64}$/);
     assert.equal((await grant.get()).data().ownerUid,owner);
+    // Real Admin/Firestore M3 viewer READ: a corrupted publisher digest must
+    // never expose an otherwise fresh GPS point, even if UID/expiry match.
+    const publisherRef=db.collection('private_location_publishers').doc(owner);
+    const originalPublisher=(await publisherRef.get()).data();
+    const syntheticFix={latitude:0,longitude:0,accuracyMeters:10,capturedAtMs:now-500};
+    await location.publishDevice({idToken:bearer(owner),viewerUid:viewer,
+      sessionToken:started.sessionToken,point:syntheticFix,
+      appInForeground:true,foregroundPermissionGranted:true});
+    assert.deepEqual((await location.read({idToken:bearer(viewer),ownerUid:owner})).point,
+      syntheticFix);
+    await publisherRef.update({sessionDigest:'b'.repeat(64)});
+    await assert.rejects(location.read({idToken:bearer(viewer),ownerUid:owner}),
+      LocationDenied);
+    assert.equal((await point.get()).exists,true,
+      'denied READ must not mutate private point');
+    await publisherRef.update({sessionDigest:originalPublisher.sessionDigest});
+    assert.deepEqual((await location.read({idToken:bearer(viewer),ownerUid:owner})).point,
+      syntheticFix);
     await location.stopDevice({idToken:bearer(owner),viewerUid:viewer,
       sessionToken:started.sessionToken});
     assert.equal((await grant.get()).exists,false);
+    assert.equal((await point.get()).exists,false);
     const proposed=await propose();
     assert.equal(proposed.proposed,true);
     assert.equal((await zone.get()).data().ownerUid,owner);
