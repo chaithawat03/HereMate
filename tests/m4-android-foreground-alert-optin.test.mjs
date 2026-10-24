@@ -8,8 +8,8 @@ test('M4 Android alerts require explicit in-memory opt-in and confirm server eve
  assert.match(s,/const alertsRef=useRef\(false\)/);
  assert.match(s,/alertsRef\.current=next;setForegroundAlerts\(next\)/);
  assert.match(s,/onEvent:event=>/);
- assert.match(s,/if\(!alive\.current\|\|AppState\.currentState!=='active'\)return/);
- assert.match(s,/\(Platform\.OS==='android'\|\|Platform\.OS==='ios'\)&&alertsRef\.current/);
+ assert.match(s,/currentUid!==panelUid\)return/);
+ assert.match(s,/shouldPresentM4ForegroundAlert\(/);
  assert.match(s,/Alert\.alert\(/);
  assert.match(s,/alertsRef\.current=false;setForegroundAlerts\(false\)/);
  assert.match(s,/zoneWatch\.current\?\.stop\(\)/);
