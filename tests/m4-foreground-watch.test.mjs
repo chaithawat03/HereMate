@@ -32,6 +32,7 @@ function rig(override={}){
  return {controller,events,phases,failures,timers,fix,
    tick:n=>{now+=n;monotonic+=n;},
    rewindWall:n=>{now-=n;},
+   jumpWall:n=>{now+=n;},
    rewindMonotonic:n=>{monotonic-=n;},
    send:()=>{if(!onFix)throw Error('watch not established');onFix(fix());},
    sendFix:point=>{if(!onFix)throw Error('watch not established');onFix(point);},
@@ -67,6 +68,43 @@ test('M4 requires an explicit foreground 2-party-approved start and 60s expiry',
  assert.equal(x.timers[0].cancelled,true);
  assert.equal(x.failures.length,0);
 });
+test('M4 forward device clock jump cannot bypass 10s private geofence rate limit',async()=>{
+ const x=rig();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,1);
+ // A manual/NTP forward clock jump makes Date.now appear 20s later,
+ // but no real monotonic time has elapsed since the last private request.
+ x.jumpWall(20_000);
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,1,
+   'wall-clock jump alone must not trigger a second private evaluate');
+ x.tick(M4_WATCH_MIN_FIX_INTERVAL_MS-1);
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,1,
+   'a real monotonic interval shorter than 10s is still throttled');
+ x.tick(1);
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,2,
+   'a real 10s monotonic interval permits the next private evaluate');
+ x.controller.stop();
+});
+
+test('M4 invalid second monotonic sample fails closed before private evaluate',async()=>{
+ let calls=0,failAt=Infinity;
+ const x=rig({monotonicNow:()=>++calls===failAt?NaN:10_000});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ // observe() calls active() (two monotonic reads), then samples the
+ // throttle clock independently. Fail precisely at that second gate.
+ failAt=calls+3;
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,0);
+ assert.deepEqual(x.events,[]);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.ok(x.timers.every(t=>t.cancelled));
+});
+
 test('M4 rejects a recent but pre-consent cached GPS fix before private evaluate',async()=>{
  const x=rig();
  assert.equal(await x.controller.start(OWNER,true),true);
