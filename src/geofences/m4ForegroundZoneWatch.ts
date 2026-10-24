@@ -12,6 +12,9 @@ const freshFix=(fix:ShareFix,now:number)=>
  Number.isFinite(fix.accuracyMeters)&&fix.accuracyMeters>=0&&
  fix.accuracyMeters<=100;
 export const M4_WATCH_MAX_MS=60_000;
+// Bound a stalled Android OS permission prompt/native watch bind before
+// a foreground opt-in can remain in 'starting' indefinitely.
+export const M4_START_DEADLINE_MS=15_000;
 export const M4_WATCH_MIN_FIX_INTERVAL_MS=10_000;
 export type M4WatchPhase='off'|'starting'|'watching';
 export type M4WatchPorts=Readonly<{
@@ -27,6 +30,8 @@ export type M4WatchPorts=Readonly<{
  onPhase:(phase:M4WatchPhase)=>void;
  onEvent:(event:'enter'|'exit')=>void;
  onFailure:()=>void;
+ /** Tests may shorten the watchdog; Production defaults to 15 seconds. */
+ startDeadlineMs?:number;
 }>;
 const UID=/^[A-Za-z0-9_-]{12,128}$/;
 export function createM4ForegroundZoneWatch(p:M4WatchPorts){
@@ -50,7 +55,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    return !disposed&&epoch===generation&&phase!=='off'&&
      actor!==null&&p.identity()===actor&&p.isForeground();
  }
- async function start(zoneOwnerUid:string,relationshipApproved:boolean){
+ async function startInternal(zoneOwnerUid:string,relationshipApproved:boolean){
    if(disposed||phase!=='off'||!relationshipApproved||!UID.test(zoneOwnerUid))
      return false;
    const uid=p.identity();
@@ -78,14 +83,17 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      const sub=await p.watch(fix=>{void observe(fix,epoch);},()=>{
        if(active(epoch)){stop();p.onFailure();}
      });
-     // Permission or Firebase identity can change while the native watcher
-     // subscription is being established. Recheck AFTER the async bind and
-     // release its native handle before returning; otherwise a late bind can
-     // strand this controller in 'starting' with an unowned GPS subscription.
+     // Own the handle IMMEDIATELY: an OS permission recheck can itself hang.
+     // stop()/the startup watchdog must remove an already-created native
+     // watcher without waiting for that permission promise to settle.
+     let removed=false;
+     const guarded={remove:()=>{if(!removed){removed=true;sub.remove();}}};
+     if(epoch!==generation){guarded.remove();return false;}
+     watcher=guarded;
      let stillPermitted=false;
      try{stillPermitted=await p.hasPermission();}catch{/* fail closed */}
      if(!active(epoch)||!stillPermitted){
-       sub.remove();
+       guarded.remove();
        if(epoch===generation){
          const warn=active(epoch)&&!stillPermitted;
          stop();
@@ -93,7 +101,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
        }
        return false;
      }
-     watcher=sub;
+     watcher=guarded;
      notify('watching');
      // Android/JS may run a timeout callback already queued before cancel().
      // Only this exact opt-in watcher may expire itself: a retired timeout
@@ -140,6 +148,31 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    }finally{
      if(epoch===generation)processing=false;
    }
+ }
+ // The OS can leave requestPermission(), watchPositionAsync() or a final
+ // permission read unresolved. A native promise cannot always be cancelled,
+ // so race it against a bounded watchdog and invalidate the generation.
+ // Late subscriptions are still removed by startInternal() when they arrive.
+ async function start(zoneOwnerUid:string,relationshipApproved:boolean){
+   const pending=startInternal(zoneOwnerUid,relationshipApproved);
+   if(phase!=='starting')return pending;
+   const epoch=generation;
+   const configured=p.startDeadlineMs??M4_START_DEADLINE_MS;
+   const deadlineMs=Number.isSafeInteger(configured)&&configured>=1&&
+     configured<=M4_START_DEADLINE_MS?configured:M4_START_DEADLINE_MS;
+   let deadline:ReturnType<typeof setTimeout>|null=null;
+   const timeout=new Promise<false>(resolve=>{
+     deadline=setTimeout(()=>{
+       if(epoch===generation&&phase==='starting'){
+         const warn=active(epoch);
+         stop();
+         if(warn)p.onFailure();
+       }
+       resolve(false);
+     },deadlineMs);
+   });
+   try{return await Promise.race([pending,timeout]);}
+   finally{if(deadline!==null)clearTimeout(deadline);}
  }
  function dispose(){stop();disposed=true;}
  return Object.freeze({
