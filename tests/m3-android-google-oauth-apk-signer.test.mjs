@@ -32,7 +32,7 @@ test('rejects ambiguous, missing, malformed and multiple signers even if one mat
   rejected(sample('a'.repeat(41)));
   rejected(sample(googleStagingAndroidSha1,'Signer #2 certificate SHA-1 digest: '+googleStagingAndroidSha1+'\n'));
   rejected(sample().replace('Number of signers: 1','Number of signers: 2'));
-  rejected(sample().replace('Signer #1','Signer #2'));
+  rejected(sample().replaceAll('Signer #1','Signer #2'));
   rejected(sample()+'DOES NOT VERIFY\n');
   rejected('a'.repeat(131073));
 });
