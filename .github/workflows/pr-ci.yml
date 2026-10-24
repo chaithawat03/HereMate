@@ -35,6 +35,8 @@ jobs:
         run: node --test tests/m4-revoke-pair-collision.test.mjs
       - name: M4 Android opt-in privacy-safe in-app alert contract (offline)
         run: node --test tests/m4-android-foreground-alert-optin.test.mjs
+      - name: M4 iOS/Android foreground alert identity and opt-in contract (offline)
+        run: node --test tests/m4-ios-foreground-alert-optin.test.mjs
       - name: M4 Android foreground account switch and stale approval UI privacy (offline)
         run: node --test tests/m4-android-foreground-lifecycle-privacy.test.mjs
       - name: M3 iOS foreground privacy/source contract
