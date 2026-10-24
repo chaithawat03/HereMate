@@ -128,7 +128,10 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    // The UI adapter may synchronously call STOP/dispose or replace consent
    // while handling STARTING. Never prompt for permission or arm a timer
    // for a generation that no longer has the user's opt-in.
-   if(epoch!==generation||phase!=='starting'||disposed)return false;
+   if(epoch!==generation||phase!=='starting'||disposed||!active(epoch)){
+     if(epoch===generation)stop();
+     return false;
+   }
    try{
      // The 60-second privacy deadline begins at the user's tap, NOT after
      // native permission prompts or the async GPS watcher finally binds.
@@ -197,7 +200,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      // A UI adapter can synchronously STOP or establish a newer explicit
      // opt-in while processing WATCHING. Do not report the retired start as
      // successful or STOP the newer session on adapter failure.
-     if(!phaseAccepted||epoch!==generation||phase!=='watching'||disposed){
+     if(!phaseAccepted||epoch!==generation||phase!=='watching'||disposed||!active(epoch)){
        if(epoch===generation)stop();
        return false;
      }
