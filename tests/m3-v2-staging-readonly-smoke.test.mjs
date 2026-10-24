@@ -1,13 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import {createServer} from 'node:http';
+import {once} from 'node:events';
+import {createNodeLocationHandler} from '../backend/location-runtime/edge.mjs';
 import {
   runM3V2StagingRouteSmoke,validateM3V2StagingOrigin
 } from '../scripts/m3-v2-staging-readonly-smoke.mjs';
 
 const APPROVED='https://heremate-m2-location-staging-976775896533.asia-southeast1.run.app';
 const ALT='https://heremate-m2-location-staging-2inhowyo2a-as.a.run.app';
-const response=(status=405,headers={})=>({status,headers:{
+const response=(status=405,headers={},error=status===404?'not_found':'method_not_allowed')=>({
+  status,json:async()=>({error}),headers:{
   get(name){return ({'cache-control':'no-store, private, max-age=0',
     'content-type':'application/json; charset=utf-8',...headers})[name]??null;}
 }});
@@ -34,7 +38,7 @@ test('operator approval required before any HTTPS call',async()=>{
   assert.equal(requests,0);
 });
 
-test('GET-only route presence verifies M2 compatibility and all 3 M3 v2 paths without tokens, GPS, or mutation',async()=>{
+test('GET-only route presence verifies M2 compatibility and all 3 M3 v2 paths without real credentials, GPS, or mutation',async()=>{
   const seen=[];
   const result=await runM3V2StagingRouteSmoke({origin:APPROVED,approved:true,
     fetchImpl:async(url,opts)=>{
@@ -54,7 +58,8 @@ test('GET-only route presence verifies M2 compatibility and all 3 M3 v2 paths wi
     assert.equal(opts.method,'GET');
     assert.equal(opts.redirect,'error');
     assert.equal(opts.body,undefined);
-    assert.equal(opts.headers.Authorization,undefined);
+    assert.equal(opts.headers.Authorization,'heremate-route-probe-not-a-bearer-token');
+    assert.doesNotMatch(opts.headers.Authorization,/^Bearer /i);
     assert.equal(opts.headers['Cache-Control'],'no-store');
   }
   assert.doesNotMatch(JSON.stringify(result.results),/sessionToken|latitude|longitude|bearer/i);
@@ -64,7 +69,9 @@ test('missing v2 route, generic gateway 405, wrong method behavior, cache, CORS,
   for(const bad of [response(404),response(200),response(401),
     response(405,{'cache-control':'public, max-age=60'}),
     response(405,{'access-control-allow-origin':'*'}),
-    response(405,{'content-type':'text/html'})]){
+    response(405,{'content-type':'text/html'}),
+    response(405,{},'unexpected_error'),
+    {...response(405),json:async()=>{throw Error('bad json');}}]){
     await denied({origin:APPROVED,approved:true,fetchImpl:async()=>bad});
   }
   await denied({origin:APPROVED,approved:true,fetchImpl:async()=>{throw Error('redirect blocked');}});
@@ -75,5 +82,37 @@ test('smoke is separate from app code and deploy scripts; approved origins match
   const script=readFileSync(new URL('../scripts/m3-v2-staging-readonly-smoke.mjs',import.meta.url),'utf8');
   assert.match(script,/HEREMATE_M3_V2_READONLY_APPROVED/);
   for(const origin of [APPROVED,ALT])assert.ok(script.includes(origin));
-  assert.doesNotMatch(script,/method:'POST'|Authorization:|firebase-admin|setDoc\(|addDoc\(|startLocationUpdatesAsync|gcloud run deploy/);
+  assert.doesNotMatch(script,/method:'POST'|Bearer\s+[A-Za-z0-9._-]{32,}|firebase-admin|setDoc\(|addDoc\(|startLocationUpdatesAsync|gcloud run deploy/);
+});
+
+// Regression: actual Staging edge checks Authorization HEADER COUNT before
+// routing GET. A header-free probe sees 401 even for real v2 endpoints.
+// Only an invalid non-Bearer marker can safely reveal 405 vs 404.
+test('real Node Staging edge: invalid non-Bearer marker enables GET-only route detection without authenticating',async t=>{
+  const service=Object.fromEntries(['start','stop','publish','read'].map(name=>[
+    name,()=>{throw Error('GET must never execute a location mutation or read');}
+  ]));
+  const server=createServer(createNodeLocationHandler(service));
+  server.listen(0,'127.0.0.1');
+  await once(server,'listening');
+  t.after(()=>new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve())));
+  const local='http://127.0.0.1:'+server.address().port;
+  const unauthenticated=await fetch(local+'/v2/locations/sessions/start',{method:'GET'});
+  assert.equal(unauthenticated.status,401);
+  const seen=[];
+  const result=await runM3V2StagingRouteSmoke({origin:APPROVED,approved:true,
+    fetchImpl:(url,options)=>{
+      seen.push({url,options});
+      return fetch(local+new URL(url).pathname,options);
+    }
+  });
+  assert.equal(result.verifiedRoutes,4);
+  assert.equal(result.negativeControls,1);
+  assert.deepEqual(result.results.map(x=>x.status),[405,405,405,405,404]);
+  assert.equal(seen.length,5);
+  for(const {options} of seen){
+    assert.equal(options.method,'GET');
+    assert.equal(options.body,undefined);
+    assert.equal(options.headers.Authorization,'heremate-route-probe-not-a-bearer-token');
+  }
 });
