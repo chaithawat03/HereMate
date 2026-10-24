@@ -524,3 +524,77 @@ test('M4 initial async OS permission read after wall-clock expiry never evaluate
  assert.equal(x.controller.getPhase(),'off');
  assert.equal(x.stats().removed,1);
 });
+
+test('M4 expired native GPS error callback releases watcher without false foreground warning',async()=>{
+ const x=rig();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.tick(M4_WATCH_MAX_MS+1); // setTimeout callback may still be queued
+ x.err();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1,'native GPS must be released on this JS callback');
+ assert.deepEqual(x.failures,[],'natural consent expiry is silent');
+ assert.ok(x.timers.every(timer=>timer.cancelled));
+ assert.equal(await x.controller.start(OWNER,true),true,'a new tap is fresh consent');
+ x.controller.stop();
+ assert.equal(x.stats().removed,2);
+});
+
+test('M4 native GPS error after silent account change retires only old watcher',async()=>{
+ let errors=[],removed=0;
+ const x=rig({watch:async(_fix,onError)=>{
+   errors.push(onError);
+   return {remove:()=>{removed++;}};
+ }});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.setActor('anotherSubjectUid00002'); // auth listener may still be queued
+ errors[0]();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(removed,1);
+ assert.deepEqual(x.failures,[],'not an error for the new account');
+ x.setActor(SUBJECT);
+ assert.equal(await x.controller.start(OWNER,true),true);
+ errors[0](); // stale native callback cannot stop a newer opt-in
+ assert.equal(x.controller.getPhase(),'watching');
+ assert.equal(removed,1);
+ assert.deepEqual(x.failures,[]);
+ x.controller.stop();
+ assert.equal(removed,2);
+});
+
+test('M4 rejected initial OS permission read after wall-clock expiry is silent',async()=>{
+ let rejectPermission,checks=0;
+ const pending=new Promise((_,reject)=>{rejectPermission=reject;});
+ const x=rig({hasPermission:()=>++checks===3?pending:Promise.resolve(true)});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.send();
+ await flush();
+ assert.equal(checks,3,'observe permission read is pending');
+ x.tick(M4_WATCH_MAX_MS+1);
+ rejectPermission(Error('OS permission query rejected after consent expired'));
+ await flush();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().evalCount,0,'no server evaluation after expired permission');
+ assert.equal(x.stats().removed,1);
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[],'late OS error is not a new foreground failure');
+ assert.ok(x.timers.every(timer=>timer.cancelled));
+});
+
+test('M4 rejected final OS permission read after wall-clock expiry cannot alert or warn',async()=>{
+ let rejectPermission,checks=0;
+ const pending=new Promise((_,reject)=>{rejectPermission=reject;});
+ const x=rig({hasPermission:()=>++checks===4?pending:Promise.resolve(true)});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.send();
+ await flush();
+ assert.equal(checks,4,'final OS permission read is pending');
+ assert.equal(x.stats().evalCount,1);
+ x.tick(M4_WATCH_MAX_MS+1);
+ rejectPermission(Error('final OS permission query rejected after expiry'));
+ await flush();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.deepEqual(x.events,[],'expired event cannot be delivered');
+ assert.deepEqual(x.failures,[],'expired consent must not surface a false failure');
+ assert.ok(x.timers.every(timer=>timer.cancelled));
+});
