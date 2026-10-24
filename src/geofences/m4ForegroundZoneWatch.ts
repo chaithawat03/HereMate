@@ -71,7 +71,10 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      // A hung native promise cannot leave the UI in 'starting' indefinitely.
      timer=p.schedule(()=>{
        if(epoch!==generation)return; // retired timer cannot stop a new opt-in
-       const shouldWarn=phase==='starting'&&active(epoch);
+       // Timer itself runs at/after the deadline, so active(epoch) is
+       // intentionally false. Warn only the same still-foreground account.
+       const shouldWarn=phase==='starting'&&!disposed&&actor!==null&&
+         p.identity()===actor&&p.isForeground();
        stop();
        if(shouldWarn)p.onFailure();
      },M4_WATCH_MAX_MS);
