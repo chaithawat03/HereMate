@@ -69,6 +69,8 @@ jobs:
         run: node --test tests/m3-android-delayed-watch-bind.test.mjs
       - name: Android M3 hung native GPS binding deadline and remote STOP (offline)
         run: node --test tests/m3-android-native-watch-bind-timeout.test.mjs
+      - name: Android M3 STOP bypasses stalled OS/native binding, still fences remote START (offline)
+        run: node --test tests/m3-android-stop-during-local-bind.test.mjs
       - name: Android M3 retired native GPS/error/timer generation safety (offline)
         run: node --test tests/m3-android-retired-watch-callbacks.test.mjs
       - name: Android owner-wide emergency location STOP and failure UX (offline)
