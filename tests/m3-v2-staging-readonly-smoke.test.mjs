@@ -39,12 +39,15 @@ test('GET-only route presence verifies M2 compatibility and all 3 M3 v2 paths wi
   const result=await runM3V2StagingRouteSmoke({origin:APPROVED,approved:true,
     fetchImpl:async(url,opts)=>{
       seen.push({url,opts});
-      return response();
+      return response(url.endsWith('/__not_a_route__')?404:405);
     }});
   assert.equal(result.verifiedRoutes,4);
+  assert.equal(result.negativeControls,1);
+  assert.equal(result.results.length,5);
   assert.deepEqual(seen.map(x=>new URL(x.url).pathname),[
     '/v1/locations/points/read','/v2/locations/sessions/start',
-    '/v2/locations/sessions/publish','/v2/locations/sessions/stop'
+    '/v2/locations/sessions/publish','/v2/locations/sessions/stop',
+    '/v2/locations/sessions/__not_a_route__'
   ]);
   for(const {url,opts} of seen){
     assert.equal(new URL(url).origin,APPROVED);
@@ -57,7 +60,7 @@ test('GET-only route presence verifies M2 compatibility and all 3 M3 v2 paths wi
   assert.doesNotMatch(JSON.stringify(result.results),/sessionToken|latitude|longitude|bearer/i);
 });
 
-test('missing v2 route, wrong method behavior, missing no-store, wildcard CORS, HTML, TLS or redirect all fail closed',async()=>{
+test('missing v2 route, generic gateway 405, wrong method behavior, cache, CORS, HTML, TLS or redirect fail closed',async()=>{
   for(const bad of [response(404),response(200),response(401),
     response(405,{'cache-control':'public, max-age=60'}),
     response(405,{'access-control-allow-origin':'*'}),
@@ -65,6 +68,7 @@ test('missing v2 route, wrong method behavior, missing no-store, wildcard CORS, 
     await denied({origin:APPROVED,approved:true,fetchImpl:async()=>bad});
   }
   await denied({origin:APPROVED,approved:true,fetchImpl:async()=>{throw Error('redirect blocked');}});
+  await denied({origin:APPROVED,approved:true,fetchImpl:async()=>response(405)}); // generic gateway 405 even for unknown path
 });
 
 test('smoke is separate from app code and deploy scripts; approved origins match mobile transport',()=>{
