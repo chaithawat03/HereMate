@@ -77,6 +77,16 @@ function verifyDeviceSession(grant,publisher,sessionDigest){
   if(!grant||!publisher||grant.sessionDigest!==sessionDigest||
      publisher.sessionDigest!==sessionDigest)deny();
 }
+// A viewer READ has no publisher capability to present. Nevertheless the
+// grant and owner-wide publisher must represent the SAME active M3 lease;
+// otherwise split/corrupt records could expose a point after a device handoff.
+// Legacy v1 leases have neither digest and remain compatible.
+function verifiedReadPublisherSession(grant,publisher){
+  const grantDigest=grant?.sessionDigest,publisherDigest=publisher?.sessionDigest;
+  if(grantDigest===undefined&&publisherDigest===undefined)return;
+  if(typeof grantDigest!=='string'||!CAPABILITY.test(grantDigest)||
+     grantDigest!==publisherDigest)deny();
+}
 function validPoint(point,now) {
   if(!exactKeys(point,pointFields)||
      !num(point.latitude)||point.latitude< -90||point.latitude>90||
@@ -287,6 +297,7 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         verifiedPair(relation,ownerUid,viewerUid);
         validGrant(grant,ownerUid,viewerUid,now,relation);
         validPublisher(publisher,ownerUid,viewerUid,now,grant);
+        verifiedReadPublisherSession(grant,publisher);
         if(!point||point.ownerUid!==ownerUid||point.viewerUid!==viewerUid||
            !num(point.expiresAtMs)||point.expiresAtMs<=now||
            point.expiresAtMs>grant.expiresAtMs||!exactKeys(point.point,pointFields))deny();
