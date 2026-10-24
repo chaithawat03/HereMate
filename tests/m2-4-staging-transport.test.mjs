@@ -147,7 +147,7 @@ test('mobile M2 remains strictly unmounted; no Cloud Run URL in app, no M2 EAS f
  assert.doesNotMatch(code,/AsyncStorage|setDoc\(|onSnapshot|requestBackgroundPermissionsAsync|startLocationUpdatesAsync|console\.log/);
 });
 
-test('permission revoked while an HTTPS response is pending never returns a location',async()=>{
+test('foreground loss while an HTTPS READ response is pending never returns a private location',async()=>{
  const r=rig();
  r.setIdentity({uid:B,getIdToken:async()=>token});
  let unlock,arrival;
@@ -155,6 +155,19 @@ test('permission revoked while an HTTPS response is pending never returns a loca
  const requested=new Promise(resolve=>{arrival=resolve;});
  r.setOnRespond(async()=>{arrival();await waiting;});
  const pending=r.transport.read(A);
+ await requested;
+ r.setForeground(false);
+ unlock();
+ await assert.rejects(pending,/UNAVAILABLE/);
+ assert.equal(r.requests.length,1);
+});
+test('GPS permission revoked during an HTTPS PUBLISH response still denies the publisher',async()=>{
+ const r=rig();
+ let unlock,arrival;
+ const waiting=new Promise(resolve=>{unlock=resolve;});
+ const requested=new Promise(resolve=>{arrival=resolve;});
+ r.setOnRespond(async()=>{arrival();await waiting;});
+ const pending=r.transport.publish(B,point);
  await requested;
  r.setPermission(false);
  unlock();
