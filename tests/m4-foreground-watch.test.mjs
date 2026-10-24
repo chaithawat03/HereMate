@@ -176,6 +176,47 @@ test('M4 backwards monotonic reading fails closed even if wall-clock remains val
  assert.equal(x.stats().removed,1);
 });
 
+test('M4 partial monotonic rollback above tap time retires foreground GPS consent',async()=>{
+ const x=rig();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.tick(40_000);
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,1);
+ assert.deepEqual(x.events,['enter']);
+ // Clock goes from tap+40s to tap+20s (still ABOVE consent start).
+ // Checking only against the original tap would incorrectly accept it.
+ x.rewindMonotonic(20_000);
+ x.send();await flush();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().evalCount,1,
+   'a partial rollback must not authorize a second private evaluation');
+ assert.deepEqual(x.events,['enter']);
+ assert.deepEqual(x.failures,[]);
+ assert.equal(x.stats().removed,1);
+ assert.ok(x.timers.every(t=>t.cancelled));
+ // Neither a late callback nor an apparently recovered clock revives consent.
+ x.tick(40_000);
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,1);
+});
+
+test('M4 partial monotonic rollback during server await cannot emit stale zone alert',async()=>{
+ let completeEvaluation;
+ const x=rig({evaluate:()=>new Promise(resolve=>{completeEvaluation=resolve;})});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.tick(40_000);
+ x.send();await flush();
+ assert.equal(typeof completeEvaluation,'function');
+ x.rewindMonotonic(20_000);
+ completeEvaluation('enter');
+ await flush();
+ assert.deepEqual(x.events,[],
+   'an in-flight server response cannot alert after clock rollback');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.deepEqual(x.failures,[]);
+});
+
 test('M4 fresh opt-in cannot replay a recent GPS fix from an earlier consent generation',async()=>{
  const x=rig();
  assert.equal(await x.controller.start(OWNER,true),true);
