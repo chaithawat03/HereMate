@@ -85,5 +85,5 @@ test('native bind timeout triggers authenticated remote STOP, never leaves shari
 
 test('deadline patch does not enable background location, GPS persistence or release profiles',()=>{
   const source=readFileSync(new URL('../src/location/androidForegroundWatchBind.ts',import.meta.url),'utf8');
-  assert.doesNotMatch(source,/startLocationUpdatesAsync|TaskManager|AsyncStorage|fetch\\(|setDoc\\(/);
+  assert.doesNotMatch(source,/startLocationUpdatesAsync|TaskManager|AsyncStorage|fetch\(|setDoc\(/);
 });
