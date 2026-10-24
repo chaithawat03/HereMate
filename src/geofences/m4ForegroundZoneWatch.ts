@@ -41,11 +41,17 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    if(!disposed)p.onPhase(next);
  };
  function stop(){
+   // Retire the consent generation and clear all JS state BEFORE invoking
+   // native cleanup. Expo's native subscription can throw during OS teardown
+   // or permission revocation; that must never strand the UI in 'watching'
+   // or permit an old GPS callback to send a private fix.
    ++generation;
-   if(timer!==null){p.cancel(timer);timer=null;}
-   watcher?.remove();watcher=null;
+   const oldTimer=timer,oldWatcher=watcher;
+   timer=null;watcher=null;
    owner=null;actor=null;processing=false;deadlineAtMs=-Infinity;
    lastFixAt=-Infinity;
+   if(oldTimer!==null){try{p.cancel(oldTimer);}catch{/* retired regardless */}}
+   try{oldWatcher?.remove();}catch{/* OS lifecycle must handle failed native removal */}
    notify('off');
  }
  function active(epoch:number){
