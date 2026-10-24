@@ -94,7 +94,12 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    if(!uid||!UID.test(uid)||uid===zoneOwnerUid||!p.isForeground())
      return false;
    // A non-finite clock cannot establish a bounded private GPS consent.
-   const wallNow=p.now(),monoNow=p.monotonicNow();
+   // Native/JS clock adapters can throw during runtime suspension or
+   // instrumentation. No opt-in has been established yet, so reject without
+   // creating a timer, requesting OS permission, or rejecting the UI promise.
+   let wallNow:number,monoNow:number;
+   try{wallNow=p.now();monoNow=p.monotonicNow();}
+   catch{return false;}
    if(!Number.isSafeInteger(wallNow)||!Number.isFinite(monoNow))return false;
    actor=uid;owner=zoneOwnerUid;
    const epoch=++generation;
