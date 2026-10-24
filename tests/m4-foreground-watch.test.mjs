@@ -82,6 +82,23 @@ test('M4 rejects a recent but pre-consent cached GPS fix before private evaluate
  x.controller.stop();
 });
 
+test('M4 rejects a future-dated native GPS fix captured outside this 60s opt-in',async()=>{
+ const x=rig();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.tick(M4_WATCH_MAX_MS-1000); // still within consent by JS wall-clock
+ const futureFix={...x.fix(),capturedAtMs:x.fix().capturedAtMs+1500};
+ x.sendFix(futureFix);await flush();
+ assert.equal(x.stats().evalCount,0,
+   'native clock skew cannot authorize a fix captured beyond the consent deadline');
+ assert.deepEqual(x.events,[]);
+ assert.equal(x.controller.getPhase(),'watching',
+   'discarded out-of-window fix does not revoke otherwise valid consent');
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,1,'in-window fix is still allowed');
+ assert.deepEqual(x.events,['enter']);
+ x.controller.stop();
+});
+
 test('M4 fresh opt-in cannot replay a recent GPS fix from an earlier consent generation',async()=>{
  const x=rig();
  assert.equal(await x.controller.start(OWNER,true),true);
