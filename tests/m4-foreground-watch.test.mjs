@@ -598,3 +598,56 @@ test('M4 rejected final OS permission read after wall-clock expiry cannot alert 
  assert.deepEqual(x.failures,[],'expired consent must not surface a false failure');
  assert.ok(x.timers.every(timer=>timer.cancelled));
 });
+
+test('M4 STOP invalidates consent and stale GPS callbacks even if native remove throws',async()=>{
+ let callback=null,removals=0,throwFirst=true;
+ const x=rig({watch:async onFix=>{
+   callback=onFix;
+   return {remove:()=>{
+     removals++;
+     if(throwFirst){throwFirst=false;throw Error('Android native subscription invalidated');}
+   }};
+ }});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const oldFix=callback;
+ assert.doesNotThrow(()=>x.controller.stop(),
+   'native removal failure must not strand the consent state');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(removals,1);
+ oldFix(x.fix());await flush();
+ assert.equal(x.stats().evalCount,0,'old native callbacks must not reach backend');
+ assert.deepEqual(x.events,[]);
+ assert.equal(await x.controller.start(OWNER,true),true,
+   'a new opt-in is allowed after failed native cleanup');
+ oldFix(x.fix());await flush();
+ assert.equal(x.stats().evalCount,0,'old generation cannot affect new consent');
+ callback(x.fix());await flush();
+ assert.deepEqual(x.events,['enter'],'fresh consent remains usable');
+ x.controller.stop();
+ assert.equal(removals,2);
+});
+
+test('M4 STOP still removes GPS and retires old expiry if timer cancellation throws',async()=>{
+ let removed=0,fixCallback;
+ const x=rig({
+   cancel:()=>{throw Error('JS timer invalidated by runtime');},
+   watch:async onFix=>{
+     fixCallback=onFix;
+     return {remove:()=>{removed++;}};
+   }
+ });
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const expired=x.timers[0],oldFix=fixCallback;
+ assert.doesNotThrow(()=>x.controller.stop());
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(removed,1,'native GPS must be released even when timer cleanup fails');
+ expired.fn();oldFix(x.fix());await flush();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().evalCount,0);
+ assert.deepEqual(x.events,[]);
+ assert.equal(await x.controller.start(OWNER,true),true);
+ expired.fn();
+ assert.equal(x.controller.getPhase(),'watching','old expiry cannot cancel new opt-in');
+ x.controller.stop();
+ assert.equal(removed,2);
+});
