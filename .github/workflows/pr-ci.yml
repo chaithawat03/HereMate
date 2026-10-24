@@ -81,6 +81,8 @@ jobs:
         run: node --test tests/m3-m4-transport-permission-race.test.mjs
       - name: M3 publisher session V2 HTTP strict schema and identity (offline)
         run: node --test tests/m3-device-session-http.test.mjs
+      - name: M3 viewer READ denies mismatched v2 publisher session lease (offline)
+        run: node --test tests/m3-read-session-integrity.test.mjs
       - name: M3/M2 authenticated STOP cross-pair key collision guard (offline)
         run: node --test tests/m3-pair-stop-collision.test.mjs
       - name: M3/M4 all-write cross-pair key collision guard (offline)
