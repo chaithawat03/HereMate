@@ -439,3 +439,70 @@ test('M4 deadline immediately removes bound GPS while post-bind OS recheck is hu
  x.controller.stop();
  assert.equal(removed,2);
 });
+
+test('M4 absolute 60s deadline denies late native GPS fix even when JS timeout callback is delayed',async()=>{
+ const x=rig();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.tick(M4_WATCH_MAX_MS+1); // OS resumed before queued setTimeout callback
+ x.send();
+ await flush();
+ assert.equal(x.stats().evalCount,0,'expired GPS must not reach Staging evaluate');
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[],'normal expiry is not a native GPS error');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.equal(x.timers[0].cancelled,true);
+ assert.equal(await x.controller.start(OWNER,true),true,'new tap is fresh consent');
+ x.controller.stop();
+});
+
+test('M4 absolute deadline denies native bind that returns after wall-clock expiry before timer fires',async()=>{
+ let resolveWatch,removed=0;
+ const pending=new Promise(resolve=>{resolveWatch=resolve;});
+ const x=rig({watch:()=>pending});
+ const first=x.controller.start(OWNER,true);
+ await flush();
+ x.tick(M4_WATCH_MAX_MS+1);
+ resolveWatch({remove:()=>{removed++;}});
+ assert.equal(await first,false);
+ assert.equal(removed,1,'late native watcher must be removed');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[]);
+ assert.ok(x.timers.every(timer=>timer.cancelled));
+});
+
+test('M4 server event response after wall-clock consent expiry cannot trigger a stale alert',async()=>{
+ let finish,evalCount=0;
+ const pending=new Promise(resolve=>{finish=resolve;});
+ const x=rig({evaluate:()=>{evalCount++;return pending;}});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.send();
+ await flush();
+ assert.equal(evalCount,1);
+ x.tick(M4_WATCH_MAX_MS+1);
+ finish('enter');
+ await flush();
+ assert.deepEqual(x.events,[],'server event after expiry is suppressed');
+ assert.deepEqual(x.failures,[],'natural consent expiry is not a GPS error');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.equal(x.timers[0].cancelled,true);
+});
+
+test('M4 final async OS permission recheck after wall-clock expiry suppresses event',async()=>{
+ let release,checks=0;
+ const pending=new Promise(resolve=>{release=resolve;});
+ const x=rig({hasPermission:()=>++checks===4?pending:Promise.resolve(true)});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.send();
+ await flush();
+ assert.equal(checks,4,'final OS permission recheck is pending');
+ x.tick(M4_WATCH_MAX_MS+1);
+ release(true);
+ await flush();
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[]);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+});
