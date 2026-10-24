@@ -21,6 +21,7 @@ import type {Palette} from '../ui/preferencesModel';
 import type {GeofenceCircle,M4Transport} from './m4StagingTransport';
 import {createM4ForegroundZoneWatch,type M4WatchPhase} from './m4ForegroundZoneWatch';
 import {evaluateM4OneShotForegroundFix} from './m4OneShotForegroundFix';
+import {shouldPresentM4ForegroundAlert} from './m4ForegroundAlertPolicy';
 import {createAccountScopedFriendRefresh} from '../location/accountScopedFriendRefresh';
 
 type Props=Readonly<{transport:M4Transport;backendReviewedAndEnabled:boolean}>;
@@ -133,14 +134,22 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      cancel:handle=>clearTimeout(handle as ReturnType<typeof setTimeout>),
      onPhase:phase=>{if(alive.current)setWatchPhase(phase);},
      onEvent:event=>{
-       if(!alive.current||AppState.currentState!=='active')return;
+       const panelUid=identity.current;
+       const currentUid=getStagingGuestAuth().currentUser?.uid??null;
+       // A late native callback must not show a previous account's event.
+       if(!alive.current||!panelUid||AppState.currentState!=='active'||
+          currentUid!==panelUid)return;
        setMessage(event==='enter'?
          (language==='th'?'ยืนยันว่าเข้าสู่พื้นที่':'Confirmed zone entry'):
          (language==='th'?'ยืนยันว่าออกจากพื้นที่':'Confirmed zone exit'));
        // A notification is NEVER generated from a stale/ambiguous fix,
        // only a server-confirmed event returned to the tracked subject.
        // This is a local foreground alert, NOT an OS push subscription.
-       if((Platform.OS==='android'||Platform.OS==='ios')&&alertsRef.current){
+       if(shouldPresentM4ForegroundAlert({
+         platform:Platform.OS,currentUid,panelUid,
+         appActive:AppState.currentState==='active',
+         optedIn:alertsRef.current,event
+       })){
          Alert.alert(
            language==='th'?'แจ้งเตือนพื้นที่ (HereMate)':'HereMate zone update',
            event==='enter'?
