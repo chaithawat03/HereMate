@@ -16,6 +16,7 @@ const ROUTES=Object.freeze([
   '/v2/locations/sessions/publish',
   '/v2/locations/sessions/stop'
 ]);
+const NEGATIVE_CONTROL='/v2/locations/sessions/__not_a_route__';
 const fail=reason=>{throw Error('M3_V2_ROUTE_SMOKE_BLOCKED: '+reason);};
 
 export function validateM3V2StagingOrigin(input){
@@ -35,7 +36,10 @@ export async function runM3V2StagingRouteSmoke({origin,approved=false,fetchImpl=
   const base=validateM3V2StagingOrigin(origin);
   if(typeof fetchImpl!=='function')fail('invalid HTTPS client');
   const results=[];
-  for(const path of ROUTES){
+  // A generic gateway 405 for *every* path is not evidence of v2 routes.
+  const probes=[...ROUTES.map(path=>({path,expected:405})),
+    {path:NEGATIVE_CONTROL,expected:404}];
+  for(const {path,expected} of probes){
     let response;
     try{
       response=await fetchImpl(base+path,{
@@ -47,17 +51,17 @@ export async function runM3V2StagingRouteSmoke({origin,approved=false,fetchImpl=
     }catch{fail('TLS/network/redirect failure at '+path);}
     // Recognized POST-only route must reject GET with 405. An absent v2
     // route returns 404, which must NOT be mistaken for successful rollout.
-    if(response?.status!==405)fail('v2 route not verified at '+path);
+    if(response?.status!==expected)fail('route presence/absence not verified at '+path);
     const cache=response.headers?.get('cache-control')||'';
     const mime=response.headers?.get('content-type')||'';
     if(!/(?:^|,)\s*no-store\b/i.test(cache))fail('missing no-store at '+path);
     if(!/^application\/json\b/i.test(mime))fail('non-JSON response at '+path);
     if(response.headers.get('access-control-allow-origin')==='*')
       fail('wildcard CORS at '+path);
-    results.push(Object.freeze({route:path,status:405,result:'PASS'}));
+    results.push(Object.freeze({route:path,status:expected,result:'PASS'}));
   }
   return Object.freeze({scope:'M3 v2 Staging route presence only — GET, no bearer or GPS',
-    origin:base,verifiedRoutes:results.length,results});
+    origin:base,verifiedRoutes:ROUTES.length,negativeControls:1,results});
 }
 
 if(process.argv[1]===fileURLToPath(import.meta.url)){
