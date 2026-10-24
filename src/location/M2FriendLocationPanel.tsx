@@ -11,7 +11,7 @@ import {listOwnRequests} from '../friends/firestoreFriends';
 import type {FriendRequest} from '../friends/friendModel';
 import {usePreferences} from '../ui/PreferencesProvider';
 import type {Palette} from '../ui/preferencesModel';
-import {createAndroidFriendMapPoller} from './androidFriendMapPoller';
+import {createForegroundFriendMapPoller} from './androidFriendMapPoller';
 import {loadAuthorizedFriendMap} from './accountScopedFriendMapRead';
 import {androidGeoUri} from './androidGeoHandoff';
 import {
@@ -37,7 +37,7 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
   const [now,setNow]=useState(Date.now());
   const session=useRef<string|null>(null);
   const epoch=useRef(0),alive=useRef(true),busy=useRef(false);
-  const poller=useRef<ReturnType<typeof createAndroidFriendMapPoller>|null>(null);
+  const poller=useRef<ReturnType<typeof createForegroundFriendMapPoller>|null>(null);
 
   const clear=useCallback(()=>{
     poller.current?.stop();
@@ -100,13 +100,14 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
     }
   },[backendReviewedAndEnabled,transport]);
 
-  // Android map updates are explicitly started by the viewer. This is
-  // read-only, at most eight server-authorized friend reads every 30 seconds,
-  // and stops on account switch, background, unmount or user Stop.
+  // Android/iOS friend-map updates require an explicit viewer opt-in.
+  // Each read is server-authorized; stop on account switch, background,
+  // unmount or user Stop. Never publish this viewer's GPS.
   useEffect(()=>{
-    if(!backendReviewedAndEnabled||Platform.OS!=='android')return;
-    const controller=createAndroidFriendMapPoller({
-      isAndroid:()=>Platform.OS==='android',
+    if(!backendReviewedAndEnabled||
+       !['android','ios'].includes(Platform.OS))return;
+    const controller=createForegroundFriendMapPoller({
+      isSupportedPlatform:()=>Platform.OS==='android'||Platform.OS==='ios',
       isForeground:()=>AppState.currentState==='active',
       currentUid:()=>getStagingGuestAuth().currentUser?.uid??null,
       now:Date.now,
@@ -216,7 +217,7 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
       onPress={()=>void refresh()}>
       <Text style={s.refreshText}>{loading?t('m2MapLoading'):t('m2MapRefresh')}</Text>
     </Pressable>
-    {Platform.OS==='android'?<View style={s.pollArea}>
+    {(Platform.OS==='android'||Platform.OS==='ios')?<View style={s.pollArea}>
       <Text style={s.note}>{language==='th'
         ?'อัปเดตตำแหน่งเพื่อนเฉพาะตอนเปิดแอป เมื่อคุณกดเริ่มเท่านั้น ตรวจซ้ำทุก 30 วินาที ไม่ส่ง GPS ของคุณ'
         :'Optional foreground-only friend map updates every 30 seconds. Reads authorized friends only; does not share your GPS.'}</Text>
