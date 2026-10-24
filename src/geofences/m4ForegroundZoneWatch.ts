@@ -121,7 +121,14 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    consentStartedMonotonicMs=monoNow;
    deadlineMonotonicMs=monoNow+M4_WATCH_MAX_MS;
    lastObservedMonotonicMs=monoNow;
-   if(!notify('starting')){stop();return false;}
+   if(!notify('starting')){
+     if(epoch===generation)stop();
+     return false;
+   }
+   // The UI adapter may synchronously call STOP/dispose or replace consent
+   // while handling STARTING. Never prompt for permission or arm a timer
+   // for a generation that no longer has the user's opt-in.
+   if(epoch!==generation||phase!=='starting'||disposed)return false;
    try{
      // The 60-second privacy deadline begins at the user's tap, NOT after
      // native permission prompts or the async GPS watcher finally binds.
@@ -186,7 +193,14 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
        }
        return false;
      }
-     if(!notify('watching')){stop();return false;}
+     const phaseAccepted=notify('watching');
+     // A UI adapter can synchronously STOP or establish a newer explicit
+     // opt-in while processing WATCHING. Do not report the retired start as
+     // successful or STOP the newer session on adapter failure.
+     if(!phaseAccepted||epoch!==generation||phase!=='watching'||disposed){
+       if(epoch===generation)stop();
+       return false;
+     }
      return true;
    }catch{
      // Android can reject a permission prompt or native watch bind AFTER a
