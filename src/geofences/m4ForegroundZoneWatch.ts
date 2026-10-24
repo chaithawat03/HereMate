@@ -34,7 +34,9 @@ const UID=/^[A-Za-z0-9_-]{12,128}$/;
 export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  let phase:M4WatchPhase='off',generation=0,disposed=false;
  let watcher:{remove:()=>void}|null=null,timer:unknown=null;
- let processing=false,lastFixAt=-Infinity;
+ // Throttle private evaluations by elapsed monotonic time, not Date.now().
+ // Wall-clock forward jumps must not bypass the 10-second rate boundary.
+ let processing=false,lastFixMonotonicMs=-Infinity;
  let owner:string|null=null,actor:string|null=null;
  // Reject cached fixes captured before this explicit foreground opt-in.
  // A fresh native watch can deliver an old location immediately on binding.
@@ -59,7 +61,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    owner=null;actor=null;processing=false;deadlineAtMs=-Infinity;
    consentStartedAtMs=Infinity;
    consentStartedMonotonicMs=Infinity;deadlineMonotonicMs=-Infinity;
-   lastFixAt=-Infinity;
+   lastFixMonotonicMs=-Infinity;
    if(oldTimer!==null){try{p.cancel(oldTimer);}catch{/* retired regardless */}}
    try{oldWatcher?.remove();}catch{/* OS lifecycle must handle failed native removal */}
    notify('off');
@@ -175,8 +177,18 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    if(phase!=='watching'||processing||!freshFix(fix,p.now())||
       fix.capturedAtMs<consentStartedAtMs||
       fix.capturedAtMs>=deadlineAtMs)return;
-   if(p.now()-lastFixAt<M4_WATCH_MIN_FIX_INTERVAL_MS)return;
-   lastFixAt=p.now();
+   const sampledMonotonicMs=p.monotonicNow();
+   // A second clock sample can be invalid or expire after active(epoch).
+   // In that case retire consent before any OS query or private evaluate.
+   if(!Number.isFinite(sampledMonotonicMs)||
+      sampledMonotonicMs<consentStartedMonotonicMs||
+      sampledMonotonicMs>=deadlineMonotonicMs){
+     if(epoch===generation)stop();
+     return;
+   }
+   if(sampledMonotonicMs-lastFixMonotonicMs<
+      M4_WATCH_MIN_FIX_INTERVAL_MS)return;
+   lastFixMonotonicMs=sampledMonotonicMs;
    processing=true;
    const destination=owner;
    try{
