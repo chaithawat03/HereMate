@@ -2,7 +2,7 @@
  * M4 foreground-only in-app alert presentation policy.
  * This is NOT push delivery, a notification permission, or a GPS subscription.
  * All events originate from the already-authorized server geofence evaluator.
- * No UID, coordinates, movement history or token enters an alert payload.
+ * No UID, private position, movement history or token enters an alert payload.
  */
 export type M4ZoneEvent='enter'|'exit';
 export type ForegroundAlertContext=Readonly<{
