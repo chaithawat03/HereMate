@@ -144,7 +144,14 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    processing=true;
    const destination=owner;
    try{
-     if(!(await p.hasPermission())||!active(epoch))throw Error('revoked');
+     const permittedBeforeEvaluate=await p.hasPermission();
+     // A suspended JS thread can resume after the 60s cap while the initial
+     // OS permission read is pending. Do not evaluate or report a false error.
+     if(!active(epoch)){
+       if(epoch===generation)stop();
+       return;
+     }
+     if(!permittedBeforeEvaluate)throw Error('revoked');
      if(!destination)throw Error('no-owner');
      const event=await p.evaluate(destination,fix);
      // A delayed server response may arrive after the wall-clock consent cap,
