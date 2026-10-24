@@ -77,7 +77,15 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
  }
  function tx(ownerUid,subjectUid,work){
    if(!goodUid(ownerUid)||!goodUid(subjectUid)||ownerUid===subjectUid)invalid();
-   return store.transactZone({ownerUid,subjectUid},work);
+   // Legacy ownerUid+"__"+subjectUid keys are ambiguous for valid UIDs.
+   // Protect PROPOSE/DECIDE/EVALUATE as well as REVOKE: expired foreign
+   // zones or orphaned foreign dedupe state must never be overwritten.
+   return store.transactZone({ownerUid,subjectUid},async context=>{
+     for(const record of [context.zone,context.state]){
+       if(record&&(record.ownerUid!==ownerUid||record.subjectUid!==subjectUid))deny();
+     }
+     return work(context);
+   });
  }
  return Object.freeze({
    async propose({idToken,subjectUid,circle}){
