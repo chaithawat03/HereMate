@@ -1,0 +1,69 @@
+name: M3 security investigation - Zod v4 vs Expo CLI (no merge/no deploy)
+
+on:
+  push:
+    branches:
+      - investigation/m3-zod4-expo-cli-20261024
+
+permissions:
+  contents: read
+
+jobs:
+  zod4-compatibility:
+    if: github.repository == 'chaithawat03/HereMate' && github.ref == 'refs/heads/investigation/m3-zod4-expo-cli-20261024'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Generate candidate lockfile only on ephemeral runner
+        run: |
+          npm pkg set overrides.zod=4.6.7
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+          node - <<'JS'
+          const z=require('zod/package.json');
+          const cli=require('./node_modules/expo/node_modules/@expo/cli/package.json');
+          console.log('ZOD_CANDIDATE_VERSION='+z.version);
+          console.log('EXPO_CLI_VERSION='+cli.version);
+          if(z.version!=='4.6.7')throw Error('ZOD_CANDIDATE_NOT_INSTALLED');
+          JS
+      - name: Re-run real registry audit; never bypass or approve any finding
+        run: |
+          set +e
+          npm audit --omit=dev --audit-level=high --json > zod4-candidate-audit.json
+          rc=$?
+          set -e
+          node - <<'JS'
+          const fs=require('fs');
+          const a=JSON.parse(fs.readFileSync('zod4-candidate-audit.json','utf8'));
+          if(a.error||a.auditReportVersion!==2||!a.metadata?.vulnerabilities)throw Error('AUDIT_UNAVAILABLE');
+          const high=Object.entries(a.vulnerabilities).filter(([,v])=>v.severity==='high'||v.severity==='critical').map(([n])=>n);
+          console.log('AUDIT_HIGH_OR_CRITICAL='+JSON.stringify(high));
+          console.log('AUDIT_ZOD_ADVISORY_REMAINS='+JSON.stringify(a.vulnerabilities.zod??null));
+          console.log('AUDIT_EXIT_CODE='+process.env.AUDIT_EXIT_CODE);
+          JS
+        env:
+          CI: 'true'
+      - name: Expo config CLI compatibility (must work without secrets)
+        run: |
+          npx expo config --json > /tmp/heremate-expo-config.json
+          node -e "const c=require('/tmp/heremate-expo-config.json'); if(c.slug!=='heremate') throw Error('EXPO_CONFIG_INVALID'); console.log('EXPO_CONFIG_COMPATIBLE')"
+      - name: Typecheck and device session contracts
+        run: |
+          npm run typecheck
+          node --test tests/m3-device-session-transport.test.mjs tests/m3-device-session-http.test.mjs
+      - name: Retain candidate lockfile and raw audit evidence for human review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: M3-Zod4-Expo-Compatibility-Evidence-Not-Approved
+          path: |
+            package-lock.json
+            package.json
+            zod4-candidate-audit.json
+          retention-days: 3
