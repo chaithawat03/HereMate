@@ -28,10 +28,11 @@ function rig(override={}){
    ...override
  };
  const controller=createM4ForegroundZoneWatch(ports);
- const fix=()=>({latitude:13.75,longitude:100.5,accuracyMeters:12,capturedAtMs:now-100});
+ const fix=()=>({latitude:13.75,longitude:100.5,accuracyMeters:12,capturedAtMs:now});
  return {controller,events,phases,failures,timers,fix,
    tick:n=>{now+=n;},
    send:()=>{if(!onFix)throw Error('watch not established');onFix(fix());},
+   sendFix:point=>{if(!onFix)throw Error('watch not established');onFix(point);},
    err:()=>onError?.(),
    setActor:x=>{actor=x;},setForeground:x=>{foreground=x;},
    setPermission:x=>{permission=x;},
@@ -64,6 +65,40 @@ test('M4 requires an explicit foreground 2-party-approved start and 60s expiry',
  assert.equal(x.timers[0].cancelled,true);
  assert.equal(x.failures.length,0);
 });
+test('M4 rejects a recent but pre-consent cached GPS fix before private evaluate',async()=>{
+ const x=rig();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const beforeConsent={...x.fix(),capturedAtMs:x.fix().capturedAtMs-500};
+ x.sendFix(beforeConsent);
+ await flush();
+ assert.equal(x.stats().evalCount,0,
+   'a 500ms-old cached fix was captured before explicit consent');
+ assert.deepEqual(x.events,[]);
+ assert.equal(x.controller.getPhase(),'watching',
+   'discarding a cached fix must not invalidate valid ongoing consent');
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,1,'a post-consent GPS fix can be evaluated');
+ assert.deepEqual(x.events,['enter']);
+ x.controller.stop();
+});
+
+test('M4 fresh opt-in cannot replay a recent GPS fix from an earlier consent generation',async()=>{
+ const x=rig();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const priorSessionFix=x.fix();
+ x.controller.stop();
+ x.tick(10_000); // cached prior fix remains within normal 30s freshness
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.sendFix(priorSessionFix);await flush();
+ assert.equal(x.stats().evalCount,0,
+   'new explicit consent must not authorize a prior session coordinate');
+ assert.deepEqual(x.events,[]);
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,1);
+ assert.deepEqual(x.events,['enter']);
+ x.controller.stop();
+});
+
 test('M4 stops on permission revocation, account change and background',async()=>{
  const x=rig();
  assert.equal(await x.controller.start(OWNER,true),true);
