@@ -14,6 +14,7 @@ import type {Palette} from '../ui/preferencesModel';
 import {createForegroundFriendMapPoller} from './androidFriendMapPoller';
 import {loadAuthorizedFriendMap} from './accountScopedFriendMapRead';
 import {androidGeoUri} from './androidGeoHandoff';
+import {iosAppleMapsUri} from './iosAppleMapsHandoff';
 import {
   authorizedPeers,friendMapStates,plotLiveFriends,visibleFriendLocations,
   validatedRemoteFix,
@@ -158,7 +159,7 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
 
   function requestExternalMap(peerUid:string){
     const viewerUid=session.current;
-    if(Platform.OS!=='android'||!backendReviewedAndEnabled||
+    if((Platform.OS!=='android'&&Platform.OS!=='ios')||!backendReviewedAndEnabled||
        !viewerUid||getStagingGuestAuth().currentUser?.uid!==viewerUid||
        AppState.currentState!=='active'||
        !liveLocations.some(peer=>peer.peerUid===peerUid))return;
@@ -185,8 +186,9 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
                  getStagingGuestAuth().currentUser?.uid!==viewerUid||
                  AppState.currentState!=='active')return;
               const current=validatedRemoteFix(response,Date.now());
-              const uri=current?androidGeoUri(
-                current.point.latitude,current.point.longitude):null;
+              const uri=current?(Platform.OS==='android'?androidGeoUri(
+                current.point.latitude,current.point.longitude):iosAppleMapsUri(
+                current.point.latitude,current.point.longitude)):null;
               if(!uri)throw Error('location_unavailable');
               await Linking.openURL(uri);
             }catch{
@@ -252,7 +254,7 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
       <Text style={s.name}>{pin.displayName}</Text>
       <Text style={s.note}>{t('m2MapAccuracy')}: ±{Math.round(pin.accuracyMeters)} {t('meter')}</Text>
       <Text style={s.note}>{t('m2MapUpdated')}: {Math.max(0,Math.floor((now-pin.capturedAtMs)/1000))} {t('secondsUnit')}</Text>
-      {Platform.OS==='android'?<Pressable accessibilityRole="button"
+      {(Platform.OS==='android'||Platform.OS==='ios')?<Pressable accessibilityRole="button"
         style={s.refresh} onPress={()=>requestExternalMap(pin.peerUid)}>
         <Text style={s.refreshText}>{language==='th'
           ?'เปิดตำแหน่งในแอปแผนที่':'Open location in Maps'}</Text>
