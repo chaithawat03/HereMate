@@ -122,13 +122,13 @@ test('client sharing status becomes OFF only after explicit verified emergency a
  assert.equal(phases.at(-1),'off');
  controller.dispose();
 });
-test('Android has explicit per-known-friend revoke even after consent change; iOS remains deferred',()=>{
+test('Android owner revoke is preserved while M3 iOS uses a separate foreground opt-in gate',()=>{
  const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
  const screen=read('src/location/M2SharingPanel.tsx');
  const transport=read('src/location/m2StagingTransport.ts');
  const coordinator=read('src/location/m2ForegroundSession.ts');
  const native=read('.github/workflows/android-m2-native-staging-apk.yml');
- assert.match(screen,/Platform\.OS==='android'/);
+ assert.match(screen,/canOfferOwnerEmergencyStop\(/);
  assert.match(screen,/transport\.emergencyStop!/);
  assert.match(screen,/account\.current!==actor/);
  assert.match(screen,/r\.senderUid===actor&&r\.recipientUid===peerUid/);
