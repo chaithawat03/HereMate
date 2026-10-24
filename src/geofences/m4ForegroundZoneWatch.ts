@@ -157,8 +157,11 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    if(!active(epoch)){if(epoch===generation)stop();return;}
    // A GPS fix may be fresh by age yet have been captured before consent.
    // Never send that pre-opt-in location to the private Staging evaluator.
+   // A native fix timestamp may lead JS wall-clock by up to 5 seconds.
+   // Even such a fresh fix cannot be captured beyond this tap's consent cap.
    if(phase!=='watching'||processing||!freshFix(fix,p.now())||
-      fix.capturedAtMs<consentStartedAtMs)return;
+      fix.capturedAtMs<consentStartedAtMs||
+      fix.capturedAtMs>=deadlineAtMs)return;
    if(p.now()-lastFixAt<M4_WATCH_MIN_FIX_INTERVAL_MS)return;
    lastFixAt=p.now();
    processing=true;
