@@ -60,6 +60,15 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    const epoch=++generation;
    notify('starting');
    try{
+     // The 60-second privacy deadline begins at the user's tap, NOT after
+     // native permission prompts or the async GPS watcher finally binds.
+     // A hung native promise cannot leave the UI in 'starting' indefinitely.
+     timer=p.schedule(()=>{
+       if(epoch!==generation)return; // retired timer cannot stop a new opt-in
+       const shouldWarn=phase==='starting'&&active(epoch);
+       stop();
+       if(shouldWarn)p.onFailure();
+     },M4_WATCH_MAX_MS);
      const granted=await p.requestPermission();
      if(!active(epoch)){if(epoch===generation)stop();return false;}
      if(!granted||!(await p.hasPermission())){
@@ -78,14 +87,17 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      const sub=await p.watch(fix=>{void observe(fix,epoch);},()=>{
        if(active(epoch)){stop();p.onFailure();}
      });
-     // Permission or Firebase identity can change while the native watcher
-     // subscription is being established. Recheck AFTER the async bind and
-     // release its native handle before returning; otherwise a late bind can
-     // strand this controller in 'starting' with an unowned GPS subscription.
+     // A late native bind after timeout, logout or backgrounding must be
+     // removed BEFORE another async OS permission read can itself hang.
+     if(!active(epoch)){sub.remove();return false;}
+     // Own the native handle before awaiting the final permission check:
+     // STOP or the 60-second deadline can now release GPS immediately.
+     watcher=sub;
      let stillPermitted=false;
      try{stillPermitted=await p.hasPermission();}catch{/* fail closed */}
      if(!active(epoch)||!stillPermitted){
-       sub.remove();
+       // stop() may already have removed this handle during the await.
+       if(watcher===sub){watcher=null;sub.remove();}
        if(epoch===generation){
          const warn=active(epoch)&&!stillPermitted;
          stop();
@@ -93,12 +105,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
        }
        return false;
      }
-     watcher=sub;
      notify('watching');
-     // Android/JS may run a timeout callback already queued before cancel().
-     // Only this exact opt-in watcher may expire itself: a retired timeout
-     // must not terminate a newer consented foreground watcher.
-     timer=p.schedule(()=>{if(epoch===generation)stop();},M4_WATCH_MAX_MS);
      return true;
    }catch{
      // Android can reject a permission prompt or native watch bind AFTER a
