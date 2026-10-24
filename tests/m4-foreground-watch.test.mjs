@@ -68,6 +68,59 @@ test('M4 requires an explicit foreground 2-party-approved start and 60s expiry',
  assert.equal(x.timers[0].cancelled,true);
  assert.equal(x.failures.length,0);
 });
+test('M4 UI phase adapter throwing during START cannot establish unbounded GPS consent',async()=>{
+ const x=rig({onPhase:phase=>{
+   if(phase==='starting')throw Error('React view unmounted before consent indicator');
+ }});
+ assert.equal(await x.controller.start(OWNER,true),false);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().watchCount,0,'native GPS must never bind');
+ assert.equal(x.timers.length,0,'no deadline needed for rejected consent');
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[]);
+});
+
+test('M4 UI phase adapter throwing at WATCHING retires the already-bound native GPS',async()=>{
+ let removeCount=0;
+ const x=rig({
+   onPhase:phase=>{
+     if(phase==='watching')throw Error('React UI rejected live watch state');
+   },
+   watch:async()=>({remove:()=>{removeCount++;}})
+ });
+ assert.equal(await x.controller.start(OWNER,true),false);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(removeCount,1,'already-bound native GPS must be removed');
+ assert.equal(x.timers.length,1);
+ assert.equal(x.timers[0].cancelled,true);
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[]);
+});
+
+test('M4 UI phase adapter throwing at OFF cannot break STOP or allow stale GPS fixes',async()=>{
+ let callback,removed=0;
+ const x=rig({
+   onPhase:phase=>{
+     if(phase==='off')throw Error('React view unmounted during STOP');
+   },
+   watch:async onFix=>{
+     callback=onFix;
+     return {remove:()=>{removed++;}};
+   }
+ });
+ assert.equal(await x.controller.start(OWNER,true),true);
+ assert.doesNotThrow(()=>x.controller.stop());
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(removed,1);
+ callback(x.fix());await flush();
+ assert.equal(x.stats().evalCount,0);
+ assert.deepEqual(x.events,[]);
+ assert.equal(await x.controller.start(OWNER,true),true,
+   'fresh explicit opt-in can recover after stale UI callback');
+ x.controller.stop();
+ assert.equal(removed,2);
+});
+
 test('M4 throwing initial identity, foreground or clock adapter denies opt-in without native side effects',async()=>{
  for(const failingPort of ['identity','isForeground','now','monotonicNow']){
    let fail=true;
