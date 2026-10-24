@@ -94,7 +94,13 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      }
      if(!active(epoch)){if(epoch===generation)stop();return false;}
      const sub=await p.watch(fix=>{void observe(fix,epoch);},()=>{
-       if(active(epoch)){stop();p.onFailure();}
+       // Even when the wall-clock cap expired before JS setTimeout fires,
+       // a native error callback must release the watcher immediately.
+       // Only an active, still-consenting foreground account gets an error.
+       if(epoch!==generation||disposed)return;
+       const shouldWarn=active(epoch);
+       stop();
+       if(shouldWarn)p.onFailure();
      });
      // A late native bind after timeout, logout or backgrounding must be
      // removed BEFORE another async OS permission read can itself hang.
@@ -171,7 +177,10 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      if(event==='enter'||event==='exit')p.onEvent(event);
    }catch{
      if(!disposed&&epoch===generation){
-       const shouldWarn=p.isForeground()&&p.identity()===actor;
+       // A native permission rejection or server failure can settle after
+       // consent expiry while the JS timer is suspended. Retire the watcher,
+       // but never show a false current-user error for an expired session.
+       const shouldWarn=active(epoch);
        stop();
        if(shouldWarn)p.onFailure();
      }
