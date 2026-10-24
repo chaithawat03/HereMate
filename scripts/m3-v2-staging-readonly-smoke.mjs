@@ -1,5 +1,5 @@
 /**
- * M3 v2 Staging route-discovery smoke (GET-only, no authentication, no GPS).
+ * M3 v2 Staging route-discovery smoke (GET-only, no real credentials/GPS).
  * Does not deploy or mutate Cloud Run, Firestore, IAM, or location sessions.
  * Operator approval is required before making any external HTTPS request.
  * This is route availability evidence, NOT authorization/device acceptance.
@@ -17,6 +17,12 @@ const ROUTES=Object.freeze([
   '/v2/locations/sessions/stop'
 ]);
 const NEGATIVE_CONTROL='/v2/locations/sessions/__not_a_route__';
+// The existing Cloud Run Node edge rejects a request with ZERO Authorization
+// header at framing time (401) before it can distinguish 405 from 404.
+// Supply a fixed, intentionally invalid NON-BEARER marker: it satisfies the
+// edge's header-count check but can never be accepted as a Firebase ID token.
+// No real user credentials, bearer token, GPS or POST is sent.
+const NON_CREDENTIAL_MARKER='heremate-route-probe-not-a-bearer-token';
 const fail=reason=>{throw Error('M3_V2_ROUTE_SMOKE_BLOCKED: '+reason);};
 
 export function validateM3V2StagingOrigin(input){
@@ -37,15 +43,16 @@ export async function runM3V2StagingRouteSmoke({origin,approved=false,fetchImpl=
   if(typeof fetchImpl!=='function')fail('invalid HTTPS client');
   const results=[];
   // A generic gateway 405 for *every* path is not evidence of v2 routes.
-  const probes=[...ROUTES.map(path=>({path,expected:405})),
-    {path:NEGATIVE_CONTROL,expected:404}];
-  for(const {path,expected} of probes){
+  const probes=[...ROUTES.map(path=>({path,expected:405,error:'method_not_allowed'})),
+    {path:NEGATIVE_CONTROL,expected:404,error:'not_found'}];
+  for(const {path,expected,error} of probes){
     let response;
     try{
       response=await fetchImpl(base+path,{
         method:'GET',
         redirect:'error',
-        headers:{Accept:'application/json','Cache-Control':'no-store'},
+        headers:{Accept:'application/json','Cache-Control':'no-store',
+          Authorization:NON_CREDENTIAL_MARKER},
         signal:AbortSignal.timeout(8000)
       });
     }catch{fail('TLS/network/redirect failure at '+path);}
@@ -56,11 +63,16 @@ export async function runM3V2StagingRouteSmoke({origin,approved=false,fetchImpl=
     const mime=response.headers?.get('content-type')||'';
     if(!/(?:^|,)\s*no-store\b/i.test(cache))fail('missing no-store at '+path);
     if(!/^application\/json\b/i.test(mime))fail('non-JSON response at '+path);
-    if(response.headers.get('access-control-allow-origin')==='*')
+    if(response.headers.get('access-control-allow-origin')?.trim()==='*')
       fail('wildcard CORS at '+path);
+    let body;
+    try{body=await response.json();}catch{fail('invalid JSON error response at '+path);}
+    if(!body||typeof body!=='object'||Array.isArray(body)||
+       Object.keys(body).length!==1||body.error!==error)
+      fail('unexpected route error contract at '+path);
     results.push(Object.freeze({route:path,status:expected,result:'PASS'}));
   }
-  return Object.freeze({scope:'M3 v2 Staging route presence only — GET, no bearer or GPS',
+  return Object.freeze({scope:'M3 v2 Staging route presence only — GET, invalid non-bearer marker, no real credentials/GPS',
     origin:base,verifiedRoutes:ROUTES.length,negativeControls:1,results});
 }
 
