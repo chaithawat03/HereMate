@@ -29,6 +29,7 @@ jobs:
       EXPO_PUBLIC_ENABLE_M2_SHARING: 'true'
       # M3 v2 Cloud Run service is not approved/deployed. Never imply it works.
       EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS: 'false'
+      EXPO_PUBLIC_ENABLE_M3_FOREGROUND_PREVIEW: 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,6 +52,7 @@ jobs:
           node --test tests/m3-android-native-watch-bind-timeout.test.mjs
           node --test tests/m3-android-delayed-watch-bind.test.mjs
           node --test tests/m3-android-owner-emergency-stop.test.mjs
+          node --test tests/m3-android-preview-badge.test.mjs
           npm run typecheck
           node - <<'JS'
           const c=require('./app.json');
@@ -86,6 +88,7 @@ jobs:
           manifest={
             'sourceSha':os.environ['GITHUB_SHA'],
             'scope':'M3-foreground-preview-only-not-M3-final',
+            'userVisibleBadge':'ANDROID · M3 FOREGROUND PREVIEW',
             'm3Features':['Android-native-foreground-watch-timeout','late-watch-teardown','owner-emergency-stop','foreground-friend-map'],
             'locationEndpoint':'approved-existing-staging-v1',
             'm3V2LiveSessions':False,'backgroundLocation':False,
