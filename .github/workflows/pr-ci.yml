@@ -41,6 +41,8 @@ jobs:
         run: node --test tests/m3-ios-foreground-staging.test.mjs
       - name: M3 iOS explicit foreground friend-map polling, quota and account isolation (offline)
         run: node --test tests/m3-ios-foreground-friend-map-poller.test.mjs
+      - name: M3 iOS owner-wide emergency revoke opt-in and cross-device session safety (offline)
+        run: node --test tests/m3-ios-owner-emergency-stop.test.mjs
       - name: Verify manually gated integrated Android M2 native test APK (offline)
         run: node --test tests/m2-integrated-android-native-rc.test.mjs
       - name: Test M2.4 dormant HTTPS transport against server HTTP handler (offline)
