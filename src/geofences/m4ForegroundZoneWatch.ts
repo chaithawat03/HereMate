@@ -46,6 +46,9 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  // Date.now() can move backwards on device clock/NTP adjustments.
  // Independently enforce the tap-to-expiry duration with monotonic time.
  let consentStartedMonotonicMs=Infinity,deadlineMonotonicMs=-Infinity;
+ // Detect rollback even when a broken monotonic clock stays above tap time.
+ // Otherwise a partial rollback could extend a 60-second consent window.
+ let lastObservedMonotonicMs=-Infinity;
  const notify=(next:M4WatchPhase)=>{
    phase=next;
    if(!disposed)p.onPhase(next);
@@ -61,17 +64,28 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    owner=null;actor=null;processing=false;deadlineAtMs=-Infinity;
    consentStartedAtMs=Infinity;
    consentStartedMonotonicMs=Infinity;deadlineMonotonicMs=-Infinity;
+   lastObservedMonotonicMs=-Infinity;
    lastFixMonotonicMs=-Infinity;
    if(oldTimer!==null){try{p.cancel(oldTimer);}catch{/* retired regardless */}}
    try{oldWatcher?.remove();}catch{/* OS lifecycle must handle failed native removal */}
    notify('off');
  }
+ // Every monotonic reading is checked against the preceding reading, not
+ // merely against the tap. A 50s -> 20s clock rollback is still > tap time,
+ // but must not grant another 30s of location access.
+ function monotonicSample(){
+   let sample:number;
+   try{sample=p.monotonicNow();}catch{return NaN;}
+   if(!Number.isFinite(sample)||sample<lastObservedMonotonicMs)return NaN;
+   lastObservedMonotonicMs=sample;
+   return sample;
+ }
  function active(epoch:number){
    return !disposed&&epoch===generation&&phase!=='off'&&
      actor!==null&&p.identity()===actor&&p.isForeground()&&
      p.now()<deadlineAtMs&&
-     p.monotonicNow()>=consentStartedMonotonicMs&&
-     p.monotonicNow()<deadlineMonotonicMs;
+     monotonicSample()>=consentStartedMonotonicMs&&
+     monotonicSample()<deadlineMonotonicMs;
  }
  async function start(zoneOwnerUid:string,relationshipApproved:boolean){
    if(disposed||phase!=='off'||!relationshipApproved||!UID.test(zoneOwnerUid))
@@ -90,6 +104,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    deadlineAtMs=consentStartedAtMs+M4_WATCH_MAX_MS;
    consentStartedMonotonicMs=monoNow;
    deadlineMonotonicMs=monoNow+M4_WATCH_MAX_MS;
+   lastObservedMonotonicMs=monoNow;
    notify('starting');
    try{
      // The 60-second privacy deadline begins at the user's tap, NOT after
@@ -177,7 +192,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    if(phase!=='watching'||processing||!freshFix(fix,p.now())||
       fix.capturedAtMs<consentStartedAtMs||
       fix.capturedAtMs>=deadlineAtMs)return;
-   const sampledMonotonicMs=p.monotonicNow();
+   const sampledMonotonicMs=monotonicSample();
    // A second clock sample can be invalid or expire after active(epoch).
    // In that case retire consent before any OS query or private evaluate.
    if(!Number.isFinite(sampledMonotonicMs)||
