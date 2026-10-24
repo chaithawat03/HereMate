@@ -79,6 +79,10 @@ jobs:
         run: node --test tests/m3-device-session-transport.test.mjs
       - name: M3/M4 async Android OS permission identity and foreground race tests (offline)
         run: node --test tests/m3-m4-transport-permission-race.test.mjs
+      - name: M3 v2 Staging route presence smoke safety contract (offline, no network)
+        run: |
+          node --check scripts/m3-v2-staging-readonly-smoke.mjs
+          node --test tests/m3-v2-staging-readonly-smoke.test.mjs
       - name: M3 publisher session V2 HTTP strict schema and identity (offline)
         run: node --test tests/m3-device-session-http.test.mjs
       - name: M3/M2 authenticated STOP cross-pair key collision guard (offline)
