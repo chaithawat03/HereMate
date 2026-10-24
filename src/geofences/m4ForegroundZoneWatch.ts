@@ -89,7 +89,13 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      });
      // A late native bind after timeout, logout or backgrounding must be
      // removed BEFORE another async OS permission read can itself hang.
-     if(!active(epoch)){sub.remove();return false;}
+     if(!active(epoch)){
+       sub.remove();
+       // A silent Firebase account/background change may precede its UI
+       // callback; retire this generation but never touch a newer session.
+       if(epoch===generation)stop();
+       return false;
+     }
      // Own the native handle before awaiting the final permission check:
      // STOP or the 60-second deadline can now release GPS immediately.
      watcher=sub;
