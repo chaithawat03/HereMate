@@ -80,8 +80,17 @@ test('missing v2 route, generic gateway 405, wrong method behavior, cache, CORS,
 
 test('smoke is separate from app code and deploy scripts; approved origins match mobile transport',()=>{
   const script=readFileSync(new URL('../scripts/m3-v2-staging-readonly-smoke.mjs',import.meta.url),'utf8');
+  const mobile=readFileSync(new URL('../src/location/m2StagingTransport.ts',import.meta.url),'utf8');
   assert.match(script,/HEREMATE_M3_V2_READONLY_APPROVED/);
   for(const origin of [APPROVED,ALT])assert.ok(script.includes(origin));
+  // If the reviewed mobile transport allowlist changes, CI must catch
+  // the drift instead of allowing a stale/unrelated Staging smoke probe.
+  const allowlist=/export const APPROVED_M2_STAGING_ORIGINS=Object\.freeze\(\[([\s\S]*?)\]\)/.exec(mobile);
+  assert.ok(allowlist,'mobile Staging allowlist must remain explicitly defined');
+  const mobileOrigins=[...allowlist[1].matchAll(/'([^']+)'/g)].map(m=>m[1]);
+  assert.deepEqual(mobileOrigins.slice().sort(),[APPROVED,ALT].sort());
+  assert.equal(new Set(mobileOrigins).size,2,'no duplicated or unreviewed Staging origins');
+  for(const origin of mobileOrigins)assert.equal(validateM3V2StagingOrigin(origin),origin);
   assert.doesNotMatch(script,/method:'POST'|Bearer\s+[A-Za-z0-9._-]{32,}|firebase-admin|setDoc\(|addDoc\(|startLocationUpdatesAsync|gcloud run deploy/);
 });
 
