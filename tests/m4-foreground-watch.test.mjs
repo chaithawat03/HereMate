@@ -506,3 +506,21 @@ test('M4 final async OS permission recheck after wall-clock expiry suppresses ev
  assert.equal(x.controller.getPhase(),'off');
  assert.equal(x.stats().removed,1);
 });
+
+test('M4 initial async OS permission read after wall-clock expiry never evaluates location',async()=>{
+ let release,checks=0;
+ const pending=new Promise(resolve=>{release=resolve;});
+ const x=rig({hasPermission:()=>++checks===3?pending:Promise.resolve(true)});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.send();
+ await flush();
+ assert.equal(checks,3,'initial OS permission check is pending');
+ x.tick(M4_WATCH_MAX_MS+1);
+ release(true);
+ await flush();
+ assert.equal(x.stats().evalCount,0,'no server request after expired consent');
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[],'natural expiry is not an OS failure');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+});
