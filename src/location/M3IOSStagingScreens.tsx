@@ -38,9 +38,12 @@ export function M3IOSStagingScreens({approvedCloudRunUrl,backendReviewedAndEnabl
              !await Location.hasServicesEnabledAsync())return false;
           return (await Location.getForegroundPermissionsAsync()).granted===true;
         },
-        // Current iOS EAS profiles never enable M3; once approved,
-        // use capability-bound sessions to prevent same-account device leaks.
-        useDeviceSessions:true,
+        // The currently deployed M2 Staging service is v1. A foreground iOS
+        // opt-in alone MUST NOT call unverified /v2 endpoints: that would
+        // break iPhone START/PUBLISH despite working Android v1 sharing.
+        // Only a separately operator-approved v2 Staging build can opt in.
+        // No committed EAS profile enables this independent v2 switch.
+        useDeviceSessions:process.env.EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true',
         fetchImpl:fetch
       });
     }catch{return null;}
