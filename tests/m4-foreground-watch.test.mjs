@@ -199,6 +199,49 @@ test('M4 reentrant WATCHING STOP then new opt-in keeps the new watcher',async()=
  assert.equal(removed,2);
 });
 
+test('M4 STARTING UI adapter silent identity/background switch cannot prompt for GPS',async()=>{
+ for(const transition of ['account','background']){
+   let permissionCalls=0,controller;
+   const x=rig({
+     requestPermission:async()=>{permissionCalls++;return true;},
+     onPhase:phase=>{
+       if(phase==='starting'){
+         if(transition==='account')x.setActor('anotherSubjectUid00002');
+         else x.setForeground(false);
+       }
+     }
+   });
+   controller=x.controller;
+   assert.equal(await controller.start(OWNER,true),false,transition);
+   assert.equal(controller.getPhase(),'off',transition);
+   assert.equal(permissionCalls,0,transition+' must not prompt for GPS');
+   assert.equal(x.timers.length,0,transition+' must not arm stale timer');
+   assert.equal(x.stats().watchCount,0);
+   assert.deepEqual(x.failures,[]);
+ }
+});
+
+test('M4 WATCHING UI adapter silent identity/background switch releases bound GPS immediately',async()=>{
+ for(const transition of ['account','background']){
+   let removed=0;
+   const x=rig({
+     onPhase:phase=>{
+       if(phase==='watching'){
+         if(transition==='account')x.setActor('anotherSubjectUid00002');
+         else x.setForeground(false);
+       }
+     },
+     watch:async()=>({remove:()=>{removed++;}})
+   });
+   assert.equal(await x.controller.start(OWNER,true),false,transition);
+   assert.equal(x.controller.getPhase(),'off',transition);
+   assert.equal(removed,1,'must remove native watcher on '+transition);
+   assert.ok(x.timers.every(t=>t.cancelled));
+   assert.deepEqual(x.events,[]);
+   assert.deepEqual(x.failures,[]);
+ }
+});
+
 test('M4 throwing initial identity, foreground or clock adapter denies opt-in without native side effects',async()=>{
  for(const failingPort of ['identity','isForeground','now','monotonicNow']){
    let fail=true;
