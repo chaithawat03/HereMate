@@ -8,7 +8,7 @@ import {
 const SUBJECT='geofencesubjectuid002',OWNER='geofenceowneruid00001';
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function rig(override={}){
- let now=1_800_000_000_000,actor=SUBJECT,foreground=true,permission=true;
+ let now=1_800_000_000_000,monotonic=10_000,actor=SUBJECT,foreground=true,permission=true;
  let onFix=null,onError=null,removed=0,evalCount=0,watchCount=0;
  const events=[],phases=[],failures=[],timers=[];
  const ports={
@@ -19,7 +19,7 @@ function rig(override={}){
      return {remove:()=>{++removed;}};
    },
    evaluate:async()=>{++evalCount;return 'enter';},
-   now:()=>now,
+   now:()=>now,monotonicNow:()=>monotonic,
    schedule:(fn,ms)=>{const timer={fn,ms,cancelled:false};timers.push(timer);return timer;},
    cancel:t=>{t.cancelled=true;},
    onPhase:x=>phases.push(x),
@@ -30,7 +30,9 @@ function rig(override={}){
  const controller=createM4ForegroundZoneWatch(ports);
  const fix=()=>({latitude:13.75,longitude:100.5,accuracyMeters:12,capturedAtMs:now});
  return {controller,events,phases,failures,timers,fix,
-   tick:n=>{now+=n;},
+   tick:n=>{now+=n;monotonic+=n;},
+   rewindWall:n=>{now-=n;},
+   rewindMonotonic:n=>{monotonic-=n;},
    send:()=>{if(!onFix)throw Error('watch not established');onFix(fix());},
    sendFix:point=>{if(!onFix)throw Error('watch not established');onFix(point);},
    err:()=>onError?.(),
@@ -97,6 +99,43 @@ test('M4 rejects a future-dated native GPS fix captured outside this 60s opt-in'
  assert.equal(x.stats().evalCount,1,'in-window fix is still allowed');
  assert.deepEqual(x.events,['enter']);
  x.controller.stop();
+});
+
+test('M4 monotonic 60s cap cannot be extended by Android/iOS device clock rollback',async()=>{
+ const x=rig();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.tick(M4_WATCH_MAX_MS-1000);
+ x.rewindWall(50_000); // NTP/manual device time change: Date.now is now only +9s
+ x.tick(2000); // real elapsed 61s; JS setTimeout callback still queued
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,0,
+   'wall-clock rollback must not authorize a location after real elapsed deadline');
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[]);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.ok(x.timers.every(t=>t.cancelled));
+ assert.equal(await x.controller.start(OWNER,true),true,
+   'a new explicit tap establishes a fresh bounded monotonic window');
+ x.controller.stop();
+});
+
+test('M4 invalid monotonic clock fails closed before any native permission or GPS',async()=>{
+ const x=rig({monotonicNow:()=>NaN});
+ assert.equal(await x.controller.start(OWNER,true),false);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().watchCount,0);
+ assert.equal(x.timers.length,0);
+});
+
+test('M4 backwards monotonic reading fails closed even if wall-clock remains valid',async()=>{
+ const x=rig();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.rewindMonotonic(1000);
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,0);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
 });
 
 test('M4 fresh opt-in cannot replay a recent GPS fix from an earlier consent generation',async()=>{
