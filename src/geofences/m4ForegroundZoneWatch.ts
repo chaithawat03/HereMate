@@ -126,8 +126,11 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
        if(epoch!==generation)return; // retired timer cannot stop a new opt-in
        // Timer itself runs at/after the deadline, so active(epoch) is
        // intentionally false. Warn only the same still-foreground account.
-       const shouldWarn=phase==='starting'&&!disposed&&actor!==null&&
-         p.identity()===actor&&p.isForeground();
+       let shouldWarn=false;
+       try{
+         shouldWarn=phase==='starting'&&!disposed&&actor!==null&&
+           p.identity()===actor&&p.isForeground();
+       }catch{/* a failed identity/OS adapter cannot postpone GPS STOP */}
        stop();
        if(shouldWarn)p.onFailure();
      },M4_WATCH_MAX_MS);
