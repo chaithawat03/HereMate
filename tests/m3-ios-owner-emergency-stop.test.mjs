@@ -100,7 +100,7 @@ test('M3 iOS revoke UI retains server confirmation, per-friend scope and no sile
  assert.match(screen,/acknowledgeEmergencyStop\(peerUid\)/);
  assert.match(screen,/status:'confirmed'/);
  assert.match(screen,/status:'failed'/);
- assert.match(ios,/useDeviceSessions:true/);
+ assert.match(ios,/useDeviceSessions:process\.env\.EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'/);
  assert.match(index,/m3IOSForegroundStaging \? M3IOSStagingApp : App/);
  assert.doesNotMatch(androidBuild,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS/);
  assert.equal(eas.build['ios-guest-simulator'].env.EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND,undefined);
