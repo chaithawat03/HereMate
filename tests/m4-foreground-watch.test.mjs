@@ -68,6 +68,78 @@ test('M4 requires an explicit foreground 2-party-approved start and 60s expiry',
  assert.equal(x.timers[0].cancelled,true);
  assert.equal(x.failures.length,0);
 });
+test('M4 throwing initial identity, foreground or clock adapter denies opt-in without native side effects',async()=>{
+ for(const failingPort of ['identity','isForeground','now','monotonicNow']){
+   let fail=true;
+   const normal={
+     identity:()=>SUBJECT,isForeground:()=>true,
+     now:()=>1_800_000_000_000,monotonicNow:()=>10_000
+   };
+   const x=rig({[failingPort]:()=>{
+     if(fail)throw Error('unavailable native/JS adapter');
+     return normal[failingPort]();
+   }});
+   assert.equal(await x.controller.start(OWNER,true),false,failingPort);
+   assert.equal(x.controller.getPhase(),'off',failingPort);
+   assert.equal(x.stats().watchCount,0,failingPort);
+   assert.equal(x.timers.length,0,failingPort);
+   assert.deepEqual(x.failures,[],failingPort);
+   fail=false;
+   assert.equal(await x.controller.start(OWNER,true),true,
+     failingPort+' recovery requires fresh explicit opt-in');
+   x.controller.stop();
+ }
+});
+
+test('M4 throwing identity adapter on native GPS fix immediately retires consent',async()=>{
+ let throwIdentity=false;
+ const x=rig({identity:()=>{
+   if(throwIdentity)throw Error('Firebase identity adapter unavailable');
+   return SUBJECT;
+ }});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ throwIdentity=true;
+ x.send();await flush();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.equal(x.stats().evalCount,0,'unverified identity cannot send GPS to Staging');
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[]);
+});
+
+test('M4 throwing second wall-clock read on native fix cannot leak GPS',async()=>{
+ let calls=0,failOn=Infinity;
+ const x=rig({now:()=>{
+   if(++calls===failOn)throw Error('JS clock adapter unavailable');
+   return 1_800_000_000_000;
+ }});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ // First GPS clock read occurs in active(), second in fresh-fix validation.
+ failOn=calls+2;
+ x.send();await flush();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.equal(x.stats().evalCount,0);
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[]);
+});
+
+test('M4 deadline timer still retires native GPS when identity adapter throws',async()=>{
+ let throwIdentity=false;
+ const x=rig({identity:()=>{
+   if(throwIdentity)throw Error('Firebase unavailable during expiry');
+   return SUBJECT;
+ }});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ throwIdentity=true;
+ assert.doesNotThrow(()=>x.timers[0].fn());
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.ok(x.timers[0].cancelled);
+ assert.equal(x.stats().evalCount,0);
+ assert.deepEqual(x.failures,[],'unavailable identity cannot receive warning');
+});
+
 test('M4 forward device clock jump cannot bypass 10s private geofence rate limit',async()=>{
  const x=rig();
  assert.equal(await x.controller.start(OWNER,true),true);
