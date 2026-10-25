@@ -10,7 +10,9 @@ import {
  createGeofenceService,GeofenceDenied,GeofenceInvalid,GeofenceLimited
 } from '../geofences/geofence-service.mjs';
 import {createFirestoreGeofenceStore} from '../geofences/firestore-geofence-store.mjs';
-import {createFirestoreGeofenceRateLimiter,GEOFENCE_ROUTE_LIMITS} from '../geofences/geofence-rate-limiter.mjs';
+import {createFirestoreGeofenceRateLimiter,GEOFENCE_ROUTE_LIMITS,
+ GEOFENCE_PROPOSE_DAY_LIMIT,GEOFENCE_PROPOSE_DAY_MS,GEOFENCE_WINDOW_MS
+} from '../geofences/geofence-rate-limiter.mjs';
 import {createLocationService,STAGING_PROJECT} from '../location/location-service.mjs';
 import {createFirestoreLocationStore,createFirestoreLocationRateLimiter} from '../location/firestore-location-adapters.mjs';
 import {advanceState,EMPTY_STATE,distanceMeters} from '../geofences/geofence-policy.mjs';
@@ -210,6 +212,21 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  for(let i=0;i<GEOFENCE_ROUTE_LIMITS.review;i++)
    await assert.rejects(geofence.review({idToken:bearer(C),ownerUid:A}),GeofenceDenied);
  await assert.rejects(geofence.review({idToken:bearer(C),ownerUid:A}),GeofenceLimited);
+ // Real Admin/Firestore emulator transactions must enforce the daily budget
+ // even after every one-minute counter has independently reset. Revoke above
+ // remains exempt; this budget stores no GPS or plaintext Firebase UID.
+ let budgetNow=now+GEOFENCE_PROPOSE_DAY_MS;
+ const daily=createFirestoreGeofenceRateLimiter(projection,()=>budgetNow);
+ for(let i=0;i<GEOFENCE_PROPOSE_DAY_LIMIT;i++){
+   budgetNow+=GEOFENCE_WINDOW_MS+1;
+   assert.equal(await daily.consume({actor:C,route:'propose'}),true);
+ }
+ budgetNow+=GEOFENCE_WINDOW_MS+1;
+ assert.equal(await daily.consume({actor:C,route:'propose'}),false,
+   'real Firestore transactions must enforce the rolling daily cap');
+ budgetNow+=GEOFENCE_PROPOSE_DAY_MS;
+ assert.equal(await daily.consume({actor:C,route:'propose'}),true,
+   'daily counter resets by verified clock, not by TTL deletion');
  const limits=await db.collection('private_geofence_rate_limits').get();
  assert.ok(limits.size>=3);
  assert.ok(limits.docs.every(d=>/^[0-9a-f]{64}$/.test(d.id)));
