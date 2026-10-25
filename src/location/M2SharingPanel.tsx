@@ -21,6 +21,8 @@ import {
 
 type Props={transport:SharePorts['transport']&Readonly<{
   emergencyStop?:(peerUid:string)=>Promise<{enabled:false}>;
+  /** Clear only the local M3 capability after an auth change; never claim STOP. */
+  invalidateDeviceSession?:()=>void;
 }>;backendReviewedAndEnabled:boolean};
 const initial:SharingState={phase:'off',peerUid:null,expiresAtMs:null,error:null};
 function toRelation(r:FriendRequest):ShareRelation {
@@ -141,7 +143,12 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
       if(account.current!==uid){
         gate.invalidate();
         account.current=uid;
-        ctrl.accountChanged();setEmergencyState(null);
+        ctrl.accountChanged();
+        // Firebase switched identities: immediately erase the previous
+        // handset's v2 publisher token, even if no further API call occurs.
+        // A remote lease still requires server STOP or natural expiry.
+        transport.invalidateDeviceSession?.();
+        setEmergencyState(null);
         if(live){
           setFriends([]);setSelectedUid(null);setLoadError(false);
         }
@@ -150,7 +157,9 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
     },()=>{
       gate.invalidate();
       account.current=null;
-      ctrl.accountChanged();setEmergencyState(null);
+      ctrl.accountChanged();
+      transport.invalidateDeviceSession?.();
+      setEmergencyState(null);
       if(live){
         setFriends([]);setSelectedUid(null);setLoadError(true);
       }
