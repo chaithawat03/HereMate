@@ -232,3 +232,31 @@ test('M4 one-shot UI passes a real monotonic clock, without background location'
   assert.match(source,/monotonicNow:\(\)=>globalThis\.performance\?\.now\?\.\(\)\?\?NaN/);
   assert.doesNotMatch(source,/startLocationUpdatesAsync|TaskManager|AsyncStorage/);
 });
+
+test('M4 one-shot monotonic deadline rejects a delayed fix even if wall time barely advances',async()=>{
+  const h=harness(),tap=1_800_000_000_000;
+  let wall=tap,mono=1000;
+  h.ports.now=()=>wall;h.ports.monotonicNow=()=>mono;
+  h.ports.getCurrentFix=async()=>{
+    wall=tap+2000;mono+=61_000;
+    return {latitude:13.7,longitude:100.5,accuracyMeters:12,
+      capturedAtMs:wall-1000};
+  };
+  await assert.rejects(evaluateM4OneShotForegroundFix(h.ports),
+    /M4_ONE_SHOT_UNAVAILABLE/);
+  assert.equal(h.counts().calls,0);
+});
+
+test('M4 one-shot rejects a future-dated GPS fix beyond the original 60s tap window',async()=>{
+  const h=harness(),tap=1_800_000_000_000;
+  let wall=tap,mono=1000;
+  h.ports.now=()=>wall;h.ports.monotonicNow=()=>mono;
+  h.ports.getCurrentFix=async()=>{
+    wall=tap+59_000;mono+=59_000;
+    return {latitude:13.7,longitude:100.5,accuracyMeters:12,
+      capturedAtMs:tap+62_000};
+  };
+  await assert.rejects(evaluateM4OneShotForegroundFix(h.ports),
+    /M4_ONE_SHOT_UNAVAILABLE/);
+  assert.equal(h.counts().calls,0);
+});
