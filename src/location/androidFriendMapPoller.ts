@@ -67,12 +67,45 @@ export function createAndroidFriendMapPoller(p:FriendMapPollPorts){
    if(!uid||!UID.test(uid))return false;
    const run=++generation;
    actor=uid;active=true;
-   p.onActive(true);
-   handle=p.scheduleInterval(()=>{void tick(run);},ANDROID_FRIEND_MAP_POLL_MS);
+   // The UI callback may synchronously stop/dispose this poller, change
+   // Firebase accounts, or explicitly start a replacement session.
+   // Do not resurrect an old interval or report a false active START.
+   try{p.onActive(true);}
+   catch{
+     if(run===generation){++generation;actor=null;active=false;}
+     return false;
+   }
+   if(!allowed(run)){
+     if(run===generation)stop();
+     return false;
+   }
+   let scheduled:unknown;
+   try{
+     scheduled=p.scheduleInterval(()=>{void tick(run);},ANDROID_FRIEND_MAP_POLL_MS);
+   }catch{
+     if(run===generation)stop();
+     return false;
+   }
+   // An injected/native timer adapter may invoke a callback synchronously.
+   // Its handle did not exist when a reentrant STOP ran: cancel it here.
+   if(scheduled==null){
+     if(run===generation)stop();
+     return false;
+   }
+   if(!allowed(run)){
+     try{p.cancelInterval(scheduled);}catch{/* Old callback is generation-fenced. */}
+     if(run===generation)stop();
+     return false;
+   }
+   handle=scheduled;
    void tick(run); // An explicit user tap starts first read immediately.
    return true;
  }
- function dispose(){stop();disposed=true;}
+ function dispose(){
+   // Mark disposed BEFORE STOP. Its onActive(false) UI callback must never
+   // restart an interval while this component is being unmounted.
+   disposed=true;stop();
+ }
  return Object.freeze({
    start,stop,dispose,isActive:()=>active
  });
