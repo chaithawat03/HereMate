@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {evaluateM4OneShotForegroundFix} from '../src/geofences/m4OneShotForegroundFix.ts';
 
 const sample=()=>({latitude:13.7,longitude:100.5,
-  accuracyMeters:12,capturedAtMs:Date.now()-1000});
+  accuracyMeters:12,capturedAtMs:Date.now()});
 const deferred=()=>{
   let resolve;
   const promise=new Promise(r=>{resolve=r;});
@@ -114,4 +114,38 @@ test('M4 one-shot UI uses generation-bound actor and does not retain stale revie
   assert.match(source,/evaluate:async fix=>\(await transport\.evaluate\(ownerUid,fix\)\)\.event/);
   assert.match(source,/if\(isCurrent\(\)\)setReviewed\(null\)/);
   assert.doesNotMatch(source,/startLocationUpdatesAsync|TaskManager|AsyncStorage|scheduleNotificationAsync/);
+});
+
+test('M4 one-shot never sends a fresh cached fix captured before explicit consent',async()=>{
+  const h=harness(),tap=1_800_000_000_000;
+  h.ports.now=()=>tap;
+  h.ports.getCurrentFix=async()=>({
+    latitude:13.7,longitude:100.5,accuracyMeters:12,
+    capturedAtMs:tap-500 // within 30s freshness, but before the opt-in
+  });
+  await assert.rejects(evaluateM4OneShotForegroundFix(h.ports),
+    /M4_ONE_SHOT_UNAVAILABLE/);
+  assert.equal(h.counts().calls,0,'pre-consent private coordinates must not reach HTTPS');
+});
+
+test('M4 one-shot accepts an accurate fix captured after the tap, not before',async()=>{
+  const h=harness(),tap=1_800_000_000_000;
+  h.ports.now=()=>tap+1500;
+  h.ports.getCurrentFix=async()=>({
+    latitude:13.7,longitude:100.5,accuracyMeters:12,
+    capturedAtMs:tap+1000
+  });
+  assert.equal(await evaluateM4OneShotForegroundFix(h.ports),'enter');
+  assert.equal(h.counts().calls,1);
+});
+
+test('M4 one-shot fails closed on invalid initial clock before prompting for GPS',async()=>{
+  const h=harness();
+  let prompts=0;
+  h.ports.now=()=>NaN;
+  h.ports.requestPermission=async()=>{prompts++;return true;};
+  await assert.rejects(evaluateM4OneShotForegroundFix(h.ports),
+    /M4_ONE_SHOT_UNAVAILABLE/);
+  assert.equal(prompts,0);
+  assert.equal(h.counts().calls,0);
 });
