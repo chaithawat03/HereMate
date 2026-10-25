@@ -135,6 +135,31 @@ test('logout or permissions revocation while HTTP response pending cannot delive
  finish2();
  await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
 });
+test('M4 client refuses a contradictory ambiguous-quality Enter/Exit before local alert',async()=>{
+ const point={latitude:13.75,longitude:100.5,accuracyMeters:10,
+   capturedAtMs:now()-100};
+ // A 200 OK response alone is not a confirmed transition. The server's
+ // geofence policy never emits Enter/Exit for ambiguous GPS observations.
+ for(const event of ['enter','exit']){
+   const x=make({fetchImpl:async()=>({
+     status:200,ok:true,
+     json:async()=>({evaluated:true,event,quality:'ambiguous'})
+   })});
+   await assert.rejects(x.transport.evaluate(PEER,point),
+     /M4_GEOFENCE_NOT_AVAILABLE/,
+     'ambiguous GPS must not surface a confirmed '+event+' alert');
+ }
+ // Preserve valid non-event ambiguity and genuinely confirmed transitions.
+ for(const [quality,event] of [['ambiguous',null],['ok',null],
+   ['ok','enter'],['ok','exit']]){
+   const x=make({fetchImpl:async()=>({
+     status:200,ok:true,
+     json:async()=>({evaluated:true,event,quality})
+   })});
+   const result=await x.transport.evaluate(PEER,point);
+   assert.deepEqual(result,{evaluated:true,event,quality});
+ }
+});
 test('M4 UI requires independent owner/subject consent, distinct revoke and explicit OS GPS tap',()=>{
  const app=read('M2StagingApp.tsx');
  const ios=read('M3IOSStagingApp.tsx');
