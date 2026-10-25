@@ -287,7 +287,14 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      if(epoch===generation)processing=false;
    }
  }
- function dispose(){stop();disposed=true;}
+ function dispose(){
+   // Disposal is terminal. Mark it BEFORE STOP's UI notification/cleanup:
+   // a synchronous onPhase('off') callback must not reenter start() while
+   // the component is unmounting and launch a new OS permission request.
+   // notify() intentionally suppresses UI updates after disposal.
+   disposed=true;
+   stop();
+ }
  return Object.freeze({
    start,stop,dispose,getPhase:()=>phase,
    interrupted:()=>stop()
