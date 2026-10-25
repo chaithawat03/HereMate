@@ -1067,3 +1067,78 @@ test('M4 STOP still removes GPS and retires old expiry if timer cancellation thr
  x.controller.stop();
  assert.equal(removed,2);
 });
+
+test('M4 dispose is terminal before OFF UI callback can reenter a fresh GPS opt-in',async()=>{
+ let controller,offCallbacks=0,permissionCalls=0,oldFix;
+ const x=rig({
+   requestPermission:async()=>{permissionCalls++;return true;},
+   watch:async onFix=>{oldFix=onFix;return {remove:()=>{}};},
+   onPhase:phase=>{
+     if(phase==='off'){
+       offCallbacks++;
+       void controller.start(OWNER,true);
+     }
+   }
+ });
+ controller=x.controller;
+ assert.equal(await controller.start(OWNER,true),true);
+ assert.equal(permissionCalls,1);
+ controller.dispose();
+ assert.equal(controller.getPhase(),'off');
+ assert.equal(offCallbacks,0,'disposed view must not receive an OFF callback');
+ assert.equal(permissionCalls,1,'dispose cannot trigger another native permission prompt');
+ assert.equal(await controller.start(OWNER,true),false,'disposed controller is terminal');
+ oldFix(x.fix());await flush();
+ assert.equal(x.stats().evalCount,0,'retired native GPS callback cannot evaluate');
+ assert.ok(x.timers.every(t=>t.cancelled),'disposal cancels expiry');
+});
+
+test('M4 synchronous dispose during STARTING UI callback cannot trigger OFF reentrancy or OS GPS',async()=>{
+ let controller,offCallbacks=0,permissionCalls=0;
+ const x=rig({
+   requestPermission:async()=>{permissionCalls++;return true;},
+   onPhase:phase=>{
+     if(phase==='starting')controller.dispose();
+     if(phase==='off'){
+       offCallbacks++;
+       void controller.start(OWNER,true);
+     }
+   }
+ });
+ controller=x.controller;
+ assert.equal(await controller.start(OWNER,true),false);
+ assert.equal(controller.getPhase(),'off');
+ assert.equal(offCallbacks,0,'unmounted UI must not be notified during disposal');
+ assert.equal(permissionCalls,0,'no stale OS permission prompt after disposal');
+ assert.equal(x.timers.length,0,'no stale deadline after disposal');
+ assert.equal(x.stats().watchCount,0);
+ assert.deepEqual(x.failures,[]);
+});
+
+test('M4 synchronous dispose during WATCHING UI callback releases already-bound native GPS',async()=>{
+ let controller,offCallbacks=0,removals=0,oldFix;
+ const x=rig({
+   watch:async onFix=>{
+     oldFix=onFix;
+     return {remove:()=>{removals++;}};
+   },
+   onPhase:phase=>{
+     if(phase==='watching')controller.dispose();
+     if(phase==='off'){
+       offCallbacks++;
+       void controller.start(OWNER,true);
+     }
+   }
+ });
+ controller=x.controller;
+ assert.equal(await controller.start(OWNER,true),false);
+ assert.equal(controller.getPhase(),'off');
+ assert.equal(offCallbacks,0);
+ assert.equal(removals,1,'native watcher must be removed exactly once');
+ assert.equal(x.timers.length,1);
+ assert.equal(x.timers[0].cancelled,true);
+ oldFix(x.fix());await flush();
+ assert.equal(x.stats().evalCount,0);
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[]);
+});
