@@ -129,6 +129,8 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      },
      evaluate:async(ownerUid,fix)=>(await transport.evaluate(ownerUid,fix)).event,
      now:Date.now,
+     // performance.now is monotonic; Date.now may jump on clock/NTP changes.
+     monotonicNow:()=>globalThis.performance?.now?.()??NaN,
      schedule:(fn,ms)=>setTimeout(fn,ms),
      cancel:handle=>clearTimeout(handle as ReturnType<typeof setTimeout>),
      onPhase:phase=>{if(alive.current)setWatchPhase(phase);},
