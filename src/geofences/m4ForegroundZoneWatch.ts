@@ -67,6 +67,11 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    try{p.onFailure();}catch{/* fail closed: consent already retired */}
  };
  function stop(){
+   // OFF is terminal for this consent generation. A synchronous UI adapter
+   // may call stop() again while handling onPhase('off'); without this guard
+   // STOP recursively emits OFF until the JS stack overflows. Repeated user
+   // STOP/interruption must also be idempotent and never prompt for GPS.
+   if(phase==='off')return;
    // Retire the consent generation and clear all JS state BEFORE invoking
    // native cleanup. Expo's native subscription can throw during OS teardown
    // or permission revocation; that must never strand the UI in 'watching'
