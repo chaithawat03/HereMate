@@ -226,7 +226,8 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
          accuracyMeters:gps.coords.accuracy??Infinity,capturedAtMs:gps.timestamp};
      },
      evaluate:async fix=>(await transport.evaluate(ownerUid,fix)).event,
-     now:Date.now
+     now:Date.now,
+     monotonicNow:()=>globalThis.performance?.now?.()??NaN
    });
    // No coordinate state, persistence or logging. Never show a stale result.
    return event==='enter'?label('เข้าสู่พื้นที่','Entered zone'):
