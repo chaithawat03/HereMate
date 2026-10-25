@@ -77,6 +77,21 @@ function verifyDeviceSession(grant,publisher,sessionDigest){
   if(!grant||!publisher||grant.sessionDigest!==sessionDigest||
      publisher.sessionDigest!==sessionDigest)deny();
 }
+// M3 viewer privacy: a recent point is not sufficient proof that it belongs
+// to the CURRENT owner-wide device lease. M3 writes only a purpose-hashed
+// session digest, never the bearer token, on its one short-lived latest point.
+// Legacy M2 v1 grants and points (all without a digest) remain readable.
+function verifyReadablePointLease(grant,publisher,storedPoint){
+  const grantDigest=grant.sessionDigest;
+  const publisherDigest=publisher.sessionDigest;
+  const pointDigest=storedPoint.sessionDigest;
+  if(grantDigest===undefined&&publisherDigest===undefined){
+    if(pointDigest!==undefined)deny(); // never expose a v2 point as v1
+    return;
+  }
+  if(typeof grantDigest!=='string'||!CAPABILITY.test(grantDigest)||
+     grantDigest!==publisherDigest||grantDigest!==pointDigest)deny();
+}
 function validPoint(point,now) {
   if(!exactKeys(point,pointFields)||
      !num(point.latitude)||point.latitude< -90||point.latitude>90||
@@ -240,7 +255,7 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         verifyDeviceSession(grant,publisher,sessionDigest);
         validPoint(point,now);
         const expiresAtMs=Math.min(grant.expiresAtMs,now+FIX_MAX_AGE_MS);
-        setPoint({ownerUid,viewerUid,point:{...point},expiresAtMs,
+        setPoint({ownerUid,viewerUid,point:{...point},sessionDigest,expiresAtMs,
           expireAt:new Date(expiresAtMs)});
         return {stored:true,expiresAtMs};
       });
@@ -283,6 +298,7 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         if(!point||point.ownerUid!==ownerUid||point.viewerUid!==viewerUid||
            !num(point.expiresAtMs)||point.expiresAtMs<=now||
            point.expiresAtMs>grant.expiresAtMs||!exactKeys(point.point,pointFields))deny();
+        verifyReadablePointLease(grant,publisher,point);
         validPoint(point.point,now);
         // No relationship, UID, grant, Firestore metadata, or GPS history in response.
         return {point:{...point.point},expiresAtMs:point.expiresAtMs};
