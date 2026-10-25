@@ -20,7 +20,8 @@ function harness(){
     hasPermission:async()=>{reads++;return permission;},
     getCurrentFix:async()=>sample(),
     evaluate:async()=>{calls++;return 'enter';},
-    now:Date.now
+    now:Date.now,
+    monotonicNow:()=>performance.now()
   };
   return {ports,counts:()=>({calls,reads}),
     switchAccount:()=>{uid='otheraccount00000002';},
@@ -152,4 +153,82 @@ test('M4 one-shot fails closed on invalid initial clock before prompting for GPS
     /M4_ONE_SHOT_UNAVAILABLE/);
   assert.equal(prompts,0);
   assert.equal(h.counts().calls,0);
+});
+
+test('M4 one-shot rejects late native GPS after 60s despite freshly captured coordinates',async()=>{
+  const h=harness(),started=deferred(),gps=deferred();
+  const tap=1_800_000_000_000;
+  let wall=tap,mono=2000;
+  h.ports.now=()=>wall;
+  h.ports.monotonicNow=()=>mono;
+  h.ports.getCurrentFix=()=>{started.resolve();return gps.promise;};
+  const work=evaluateM4OneShotForegroundFix(h.ports);
+  await started.promise;
+  wall+=61_000;mono+=61_000;
+  gps.resolve({latitude:13.7,longitude:100.5,accuracyMeters:12,capturedAtMs:wall});
+  await assert.rejects(work,/M4_ONE_SHOT_UNAVAILABLE/);
+  assert.equal(h.counts().calls,0,'a late fresh fix cannot extend expired consent');
+});
+
+test('M4 one-shot expires during delayed native permission prompt before GPS access',async()=>{
+  const h=harness(),started=deferred(),grant=deferred();
+  let gpsCalls=0;
+  let wall=1_800_000_000_000,mono=1000;
+  h.ports.now=()=>wall;h.ports.monotonicNow=()=>mono;
+  h.ports.requestPermission=()=>{started.resolve();return grant.promise;};
+  h.ports.getCurrentFix=async()=>{gpsCalls++;return sample();};
+  const work=evaluateM4OneShotForegroundFix(h.ports);
+  await started.promise;
+  wall+=60_000;mono+=60_000;
+  grant.resolve(true);
+  await assert.rejects(work,/M4_ONE_SHOT_UNAVAILABLE/);
+  assert.equal(gpsCalls,0,'expired consent must not invoke native GPS');
+  assert.equal(h.counts().calls,0);
+});
+
+test('M4 one-shot rejects wall-clock rollback while native GPS is pending',async()=>{
+  const h=harness(),tap=1_800_000_000_000;
+  let wall=tap,mono=1000;
+  h.ports.now=()=>wall;h.ports.monotonicNow=()=>mono;
+  h.ports.getCurrentFix=async()=>{
+    wall=tap-1000;mono+=1000;
+    return {latitude:13.7,longitude:100.5,accuracyMeters:12,capturedAtMs:tap};
+  };
+  await assert.rejects(evaluateM4OneShotForegroundFix(h.ports),
+    /M4_ONE_SHOT_UNAVAILABLE/);
+  assert.equal(h.counts().calls,0);
+});
+
+test('M4 one-shot rejects partial monotonic rollback before private HTTPS',async()=>{
+  const h=harness(),tap=1_800_000_000_000;
+  let wall=tap,mono=1000;
+  h.ports.now=()=>wall;h.ports.monotonicNow=()=>mono;
+  h.ports.getCurrentFix=async()=>{
+    wall=tap+30_000;mono+=30_000;
+    return {latitude:13.7,longitude:100.5,accuracyMeters:12,
+      capturedAtMs:wall-1000};
+  };
+  h.ports.hasPermission=async()=>{mono-=10_000;return true;};
+  await assert.rejects(evaluateM4OneShotForegroundFix(h.ports),
+    /M4_ONE_SHOT_UNAVAILABLE/);
+  assert.equal(h.counts().calls,0);
+});
+
+test('M4 one-shot rejects invalid monotonic clock before OS permission prompt',async()=>{
+  const h=harness();
+  let services=0,permission=0;
+  h.ports.monotonicNow=()=>NaN;
+  h.ports.servicesEnabled=async()=>{services++;return true;};
+  h.ports.requestPermission=async()=>{permission++;return true;};
+  await assert.rejects(evaluateM4OneShotForegroundFix(h.ports),
+    /M4_ONE_SHOT_UNAVAILABLE/);
+  assert.equal(services,0);
+  assert.equal(permission,0);
+  assert.equal(h.counts().calls,0);
+});
+
+test('M4 one-shot UI passes a real monotonic clock, without background location',()=>{
+  const source=readFileSync(new URL('../src/geofences/M4GeofencePanel.tsx',import.meta.url),'utf8');
+  assert.match(source,/monotonicNow:\(\)=>globalThis\.performance\?\.now\?\.\(\)\?\?NaN/);
+  assert.doesNotMatch(source,/startLocationUpdatesAsync|TaskManager|AsyncStorage/);
 });
