@@ -213,6 +213,10 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  assert.equal((await stateRef.get()).exists,false);
  assert.deepEqual(await geofence.revoke({idToken:bearer(B),ownerUid:A,subjectUid:B}),
    {revoked:true}); // always revocable, even after prior successful revoke
+ // The extra corrupt-state denial above consumed one real evaluate quota.
+ // Advance the isolated test clock to the next minute instead of weakening
+ // the production limiter or expecting a quota error in an auth-negative test.
+ now+=60_001;
  await assert.rejects(sample(),GeofenceDenied);
  await assert.rejects(geofence.revoke({
    idToken:bearer(C),ownerUid:A,subjectUid:B
