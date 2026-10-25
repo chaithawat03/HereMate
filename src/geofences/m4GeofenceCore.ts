@@ -114,7 +114,7 @@ export function stepGeofence(input:Readonly<{
   const last=validTime(prior.lastEventAtMs)?prior.lastEventAtMs:null;
   const previousSample=validTime(prior.lastSampleCapturedAtMs)&&
     prior.lastSampleCapturedAtMs>0?prior.lastSampleCapturedAtMs:null;
-  const sample=input.fix?.capturedAtMs;
+  const sample=input.fix.capturedAtMs;
   const isValidSample=validTime(sample)&&sample>0&&
     sample>=input.nowMs-GEOFENCE_SAMPLE_MAX_AGE_MS&&
     sample<=input.nowMs+5000;
