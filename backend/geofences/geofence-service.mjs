@@ -98,6 +98,24 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
          !Number.isSafeInteger(zone.expiresAtMs)||zone.expiresAtMs<=0||
          zone.expiresAtMs>now||!validCircle(zone.circle)
        ))deny();
+       // Expired does not mean structurally safe: a malformed persisted
+       // approval/creation timeline must not be silently overwritten by
+       // PROPOSE. This is separate from validating live zones on REVIEW
+       // and EVALUATE; independently authenticated REVOKE remains available.
+       if(zone){
+         const created=zone.createdAtMs;
+         if(!Number.isSafeInteger(created)||created<=0||created>now||
+            zone.expiresAtMs<=created)deny();
+         if(zone.status==='pending'){
+           if(zone.expiresAtMs>created+PENDING_LIFETIME_MS)deny();
+         }else{
+           const approved=zone.approvedAtMs;
+           if(!Number.isSafeInteger(approved)||approved<created||
+              approved>now||approved>=created+PENDING_LIFETIME_MS||
+              zone.expiresAtMs<=approved||
+              zone.expiresAtMs>approved+MAX_ZONE_LIFETIME_MS)deny();
+         }
+       }
        const expiresAtMs=now+PENDING_LIFETIME_MS;
        setZone({ownerUid,subjectUid,circle:{...circle},status:'pending',
          relationRevision:revision,createdAtMs:now,expiresAtMs,
