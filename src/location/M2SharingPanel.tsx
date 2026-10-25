@@ -190,7 +190,11 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
   useEffect(()=>{if(backendReviewedAndEnabled)void refresh();},
     [backendReviewedAndEnabled,refresh,authRevision,session.peerUid]);
   const owner=account.current;
-  const emergencyAvailable=Platform.OS==='android'&&
+  // Owner-wide authenticated STOP is transport-level, not Android-specific.
+  // The separately opted-in iOS M3 screen must also be able to revoke a
+  // publisher lease on a lost/other device without local GPS permission.
+  const emergencyAvailable=backendReviewedAndEnabled&&
+    (Platform.OS==='android'||Platform.OS==='ios')&&
     typeof transport.emergencyStop==='function';
   const safeToEmergency=()=>{
     const phase=controller.current?.getState().phase;
