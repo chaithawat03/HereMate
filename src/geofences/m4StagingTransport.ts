@@ -39,6 +39,17 @@ export const APPROVED_M4_STAGING_ORIGINS=Object.freeze([
 ]);
 const CODE=/^[A-Za-z0-9_-]{12,128}$/;
 const number=(x:unknown):x is number=>typeof x==='number'&&Number.isFinite(x);
+// Mirrors backend/geofences/geofence-policy.mjs. These are defensive client
+// response bounds, NOT a replacement for the server's consent/TTL checks.
+const PENDING_LIFETIME_MS=86_400_000;
+const ACTIVE_LIFETIME_MS=7*86_400_000;
+const MAX_CLOCK_SKEW_MS=5_000;
+function validExpiry(value:unknown,maxLifetimeMs:number):value is number{
+ const now=Date.now();
+ return Number.isSafeInteger(value)&&
+   (value as number)>now&&
+   (value as number)<=now+maxLifetimeMs+MAX_CLOCK_SKEW_MS;
+}
 const own=(x:unknown,fields:readonly string[])=>{
  if(!x||typeof x!=='object'||Array.isArray(x))return false;
  const keys=Object.keys(x);
@@ -128,16 +139,20 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
      const row=await send('/v1/geofences/propose',{subjectUid:peer(subjectUid),circle},false);
      if(!own(row,['proposed','expiresAtMs'])||
        (row as {proposed:unknown}).proposed!==true||
-       !number((row as {expiresAtMs:unknown}).expiresAtMs))return unavailable();
+       !validExpiry((row as {expiresAtMs:unknown}).expiresAtMs,
+         PENDING_LIFETIME_MS))return unavailable();
      return row as {proposed:true;expiresAtMs:number};
    },
    async review(ownerUid){
      const row=await send('/v1/geofences/review',{ownerUid:peer(ownerUid)},false);
      if(!own(row,['circle','expiresAtMs','proposalCreatedAtMs'])||
        !validCircle((row as {circle:unknown}).circle)||
-       !number((row as {expiresAtMs:unknown}).expiresAtMs)||
+       !validExpiry((row as {expiresAtMs:unknown}).expiresAtMs,
+         PENDING_LIFETIME_MS)||
        !Number.isSafeInteger((row as {proposalCreatedAtMs:unknown}).proposalCreatedAtMs)||
-       (row as {proposalCreatedAtMs:number}).proposalCreatedAtMs<=0)return unavailable();
+       (row as {proposalCreatedAtMs:number}).proposalCreatedAtMs<=0||
+       (row as {proposalCreatedAtMs:number}).proposalCreatedAtMs>=
+         (row as {expiresAtMs:number}).expiresAtMs)return unavailable();
      return row as {circle:GeofenceCircle;expiresAtMs:number;proposalCreatedAtMs:number};
    },
    async decide(ownerUid,approve,proposalCreatedAtMs){
@@ -149,7 +164,8 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
      if(approve){
        if(!own(row,['approved','expiresAtMs'])||
           (row as {approved:unknown}).approved!==true||
-          !number((row as {expiresAtMs:unknown}).expiresAtMs))return unavailable();
+          !validExpiry((row as {expiresAtMs:unknown}).expiresAtMs,
+            ACTIVE_LIFETIME_MS))return unavailable();
        return row as {approved:true;expiresAtMs:number};
      }
      if(!own(row,['approved'])||(row as {approved:unknown}).approved!==false)return unavailable();
