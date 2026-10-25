@@ -227,7 +227,18 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  for(const malformed of [
    {ownerUid:A,subjectUid:B,status:'active',circle},
    {ownerUid:A,subjectUid:B,status:'active',circle,expiresAtMs:String(now-1000)},
-   {ownerUid:A,subjectUid:B,status:'corrupt',circle,expiresAtMs:now-1000}
+   {ownerUid:A,subjectUid:B,status:'corrupt',circle,expiresAtMs:now-1000},
+   // Structurally complete, already-expired zone: the older PROPOSE guard
+   // would erase invalid consent chronology and the dedupe sentinel.
+   {ownerUid:A,subjectUid:B,status:'active',circle,
+    relationRevision:'0:0',createdAtMs:'corrupt',
+    approvedAtMs:now-90_000,expiresAtMs:now-1},
+   {ownerUid:A,subjectUid:B,status:'active',circle,
+    relationRevision:'0:0',createdAtMs:now-100_000,
+    approvedAtMs:'corrupt',expiresAtMs:now-1},
+   {ownerUid:A,subjectUid:B,status:'active',circle,
+    relationRevision:'0:0',createdAtMs:now-100_000,
+    approvedAtMs:now-100_001,expiresAtMs:now-1}
  ]){
    await zoneRef.set(malformed);
    const sentinel={ownerUid:A,subjectUid:B,zone:'outside',expiresAtMs:now+30_000};
