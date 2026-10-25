@@ -1191,3 +1191,60 @@ test('M4 failed async zone evaluation contains a throwing UI failure reporter',a
  assert.deepEqual(x.events,[],'no private zone event may be delivered');
  assert.ok(x.timers.every(t=>t.cancelled));
 });
+
+test('M4 OFF phase callback may synchronously STOP again without recursive UI notifications',async()=>{
+ let controller,offCallbacks=0,permissionCalls=0,removed=0;
+ const x=rig({
+   requestPermission:async()=>{permissionCalls++;return true;},
+   watch:async()=>({remove:()=>{removed++;}}),
+   onPhase:phase=>{
+     if(phase==='off'){
+       offCallbacks++;
+       controller.stop();
+       controller.interrupted();
+     }
+   }
+ });
+ controller=x.controller;
+ assert.equal(await controller.start(OWNER,true),true);
+ assert.doesNotThrow(()=>controller.stop(),
+   'a synchronous React OFF observer can safely request another STOP');
+ assert.equal(controller.getPhase(),'off');
+ assert.equal(offCallbacks,1,'exactly one OFF callback per consent generation');
+ assert.equal(removed,1,'native GPS released once');
+ assert.equal(permissionCalls,1,'no permission prompt during recursive STOP');
+ assert.equal(x.timers.length,1);
+ assert.equal(x.timers[0].cancelled,true);
+ controller.stop();controller.interrupted();
+ assert.equal(offCallbacks,1,'repeated STOP on OFF must not emit duplicate UI events');
+ assert.equal(removed,1);
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[]);
+});
+
+test('M4 a fresh explicit start from OFF callback survives an old STOP and stale timer',async()=>{
+ let controller,restarted=null,offCallbacks=0,removed=0;
+ const x=rig({
+   watch:async()=>({remove:()=>{removed++;}}),
+   onPhase:phase=>{
+     if(phase==='off'&&offCallbacks++===0){
+       controller.stop(); // reentrant duplicate must be a no-op
+       restarted=controller.start(OWNER,true);
+     }
+   }
+ });
+ controller=x.controller;
+ assert.equal(await controller.start(OWNER,true),true);
+ const retired=x.timers[0];
+ controller.stop();
+ assert.equal(await restarted,true,'explicit new opt-in can start after OFF');
+ assert.equal(controller.getPhase(),'watching');
+ assert.equal(offCallbacks,1,'retired OFF must not recursively notify');
+ assert.equal(removed,1);
+ retired.fn();
+ assert.equal(controller.getPhase(),'watching','old expiry cannot stop new consent');
+ assert.equal(x.timers[1].cancelled,false);
+ controller.dispose();
+ assert.equal(removed,2);
+ assert.deepEqual(x.events,[]);
+});
