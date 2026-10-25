@@ -86,9 +86,18 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
      await limit(ownerUid,'propose');
      return tx(ownerUid,subjectUid,async ({relation,zone,setZone,deleteState})=>{
        const now=clockNow(clock),revision=authorizeRelation(relation,ownerUid,subjectUid);
-       // Each pair can have only one pending/active geofence, never parallel
-       // duplicate records; a new proposal is never self-approved.
-       if(zone && zone.expiresAtMs>now)deny();
+       // A corrupt persisted zone must never be silently overwritten by
+       // PROPOSE. In particular, missing/string/unsafe expiresAtMs used to
+       // bypass the previous `zone.expiresAtMs > now` check. Only an expired,
+       // structurally valid zone for this exact pair can be replaced.
+       // Participants can always use the independent REVOKE route to recover
+       // from an invalid record, including after friendship removal.
+       if(zone && (
+         zone.ownerUid!==ownerUid||zone.subjectUid!==subjectUid||
+         !['pending','active'].includes(zone.status)||
+         !Number.isSafeInteger(zone.expiresAtMs)||zone.expiresAtMs<=0||
+         zone.expiresAtMs>now||!validCircle(zone.circle)
+       ))deny();
        const expiresAtMs=now+PENDING_LIFETIME_MS;
        setZone({ownerUid,subjectUid,circle:{...circle},status:'pending',
          relationRevision:revision,createdAtMs:now,expiresAtMs,
