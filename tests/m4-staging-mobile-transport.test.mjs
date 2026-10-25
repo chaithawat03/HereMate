@@ -179,3 +179,90 @@ test('M4 rejects 307/308 responses rather than exposing a consented zone to redi
    assert.ok(!String(seen[0].input).includes('foreign.run.app'));
  }
 });
+
+
+test('M4 GPS is revalidated after a delayed Firebase token: no stale coordinate POST',async()=>{
+ const originalNow=Date.now;
+ let clock=2_000_000_000_000,releaseToken,enteredToken;
+ const tokenGate=new Promise(resolve=>{releaseToken=resolve;});
+ const tokenEntered=new Promise(resolve=>{enteredToken=resolve;});
+ Date.now=()=>clock;
+ try{
+   const x=make({currentIdentity:()=>({uid:UID,getIdToken:async()=>{
+     enteredToken();await tokenGate;return SECRET;
+   }})});
+   const pending=x.transport.evaluate(PEER,{
+     latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:clock-500
+   });
+   await tokenEntered;
+   clock+=31_000; // auth token refresh hung beyond the 30s GPS freshness policy
+   releaseToken();
+   await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
+   assert.equal(x.calls.length,0,'expired fix must never reach private HTTPS');
+ }finally{Date.now=originalNow;}
+});
+
+test('M4 GPS recheck also rejects a late second native permission await',async()=>{
+ const originalNow=Date.now;
+ let clock=2_000_000_000_000,releasePermission,enteredPermission;
+ const permissionGate=new Promise(resolve=>{releasePermission=resolve;});
+ const permissionEntered=new Promise(resolve=>{enteredPermission=resolve;});
+ let checks=0;
+ Date.now=()=>clock;
+ try{
+   const x=make({foregroundPermissionGranted:async()=>{
+     if(++checks===2){enteredPermission();await permissionGate;}
+     return true;
+   }});
+   const pending=x.transport.evaluate(PEER,{
+     latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:clock-100
+   });
+   await permissionEntered;
+   clock+=30_100;
+   releasePermission();
+   await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
+   assert.equal(checks,2);
+   assert.equal(x.calls.length,0);
+ }finally{Date.now=originalNow;}
+});
+
+test('M4 recheck accepts still-fresh fix and rejects point mutation during auth',async()=>{
+ const originalNow=Date.now;
+ let clock=2_000_000_000_000,releaseToken,enteredToken;
+ const tokenGate=new Promise(resolve=>{releaseToken=resolve;});
+ const tokenEntered=new Promise(resolve=>{enteredToken=resolve;});
+ Date.now=()=>clock;
+ try{
+   const x=make({currentIdentity:()=>({uid:UID,getIdToken:async()=>{
+     enteredToken();await tokenGate;return SECRET;
+   }})});
+   const pending=x.transport.evaluate(PEER,{
+     latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:clock-500
+   });
+   await tokenEntered;
+   clock+=1_000; // still well inside the 30-second freshness window
+   releaseToken();
+   assert.equal((await pending).event,'enter');
+   assert.equal(x.calls.length,1);
+   const body=JSON.parse(x.calls[0].init.body);
+   assert.equal(body.point.capturedAtMs,2_000_000_000_000-500);
+   assert.equal(x.calls[0].init.redirect,'error');
+ }finally{Date.now=originalNow;}
+});
+
+
+test('M4 rejects a GPS point mutated while Firebase credentials are pending',async()=>{
+ let releaseToken,enteredToken;
+ const gate=new Promise(resolve=>{releaseToken=resolve;});
+ const entered=new Promise(resolve=>{enteredToken=resolve;});
+ const x=make({currentIdentity:()=>({uid:UID,getIdToken:async()=>{
+   enteredToken();await gate;return SECRET;
+ }})});
+ const point={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:Date.now()-100};
+ const pending=x.transport.evaluate(PEER,point);
+ await entered;
+ point.latitude=Infinity;
+ releaseToken();
+ await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(x.calls.length,0);
+});
