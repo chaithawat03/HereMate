@@ -93,6 +93,12 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    if(typeof jwt!=='string'||jwt.length<32||jwt.length>8192||jwt.includes('\n')||
       ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
    if(requireGps&&!(await ports.foregroundPermissionGranted()))return unavailable();
+   // The fix was fresh at evaluate() entry, but Firebase token refresh
+   // and native OS permission checks can take >30 seconds. Recheck at the
+   // actual network boundary so an expired or mutated GPS point is NEVER
+   // transmitted, even if the server would later reject it.
+   if(requireGps&&(endpoint!=='/v1/geofences/evaluate'||!validFix(body.point)))
+     return unavailable();
    // Do not transmit the original subject's GPS with a stale Firebase bearer.
    if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
    const json=JSON.stringify(body);
