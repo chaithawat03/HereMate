@@ -32,6 +32,12 @@ export async function evaluateM4OneShotForegroundFix(
     if(p.isCurrent()!==true)throw Error('M4_ONE_SHOT_CANCELLED');
   };
   current();
+  // A native one-shot GPS API may resolve with a cached location whose age
+  // is acceptable but whose capture predates the subject's explicit tap.
+  // Record consent time before ANY asynchronous OS permission or GPS work.
+  const consentStartedAtMs=p.now();
+  if(!Number.isSafeInteger(consentStartedAtMs))
+    throw Error('M4_ONE_SHOT_UNAVAILABLE');
   const services=await p.servicesEnabled();
   current();
   if(services!==true)throw Error('M4_ONE_SHOT_UNAVAILABLE');
@@ -43,7 +49,8 @@ export async function evaluateM4OneShotForegroundFix(
   current();
   const permitted=await p.hasPermission();
   current();
-  if(permitted!==true||!validFix(fix,p.now()))
+  if(permitted!==true||!validFix(fix,p.now())||
+     fix.capturedAtMs<consentStartedAtMs)
     throw Error('M4_ONE_SHOT_UNAVAILABLE');
   current(); // no stale-account coordinate may enter the HTTPS transport
   const event=await p.evaluate(fix);
