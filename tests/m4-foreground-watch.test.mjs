@@ -1248,3 +1248,70 @@ test('M4 a fresh explicit start from OFF callback survives an old STOP and stale
  assert.equal(removed,2);
  assert.deepEqual(x.events,[]);
 });
+
+test('M4 synchronous timer cancellation cannot recursively STOP or request a new GPS opt-in during teardown',async()=>{
+ let controller,permissionCalls=0,offCallbacks=0,attemptedDuringCleanup=null,removed=0;
+ const x=rig({
+   requestPermission:async()=>{permissionCalls++;return true;},
+   cancel:timer=>{
+     timer.cancelled=true;
+     assert.equal(controller.getPhase(),'off','internal consent must be retired before external cancellation');
+     controller.stop();
+     controller.interrupted();
+     attemptedDuringCleanup=controller.start(OWNER,true);
+   },
+   watch:async()=>({remove:()=>{removed++;}}),
+   onPhase:phase=>{if(phase==='off')offCallbacks++;}
+ });
+ controller=x.controller;
+ assert.equal(await controller.start(OWNER,true),true);
+ assert.doesNotThrow(()=>controller.stop());
+ assert.equal(await attemptedDuringCleanup,false,
+   'native teardown callback must not restart foreground GPS without a fresh tap');
+ assert.equal(controller.getPhase(),'off');
+ assert.equal(offCallbacks,1,'only one terminal OFF notification');
+ assert.equal(permissionCalls,1,'no reentrant OS permission prompt');
+ assert.equal(removed,1,'native GPS subscription removed exactly once');
+ assert.equal(x.timers[0].cancelled,true);
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,0,'retired GPS fix must not reach private evaluator');
+ assert.deepEqual(x.events,[]);
+});
+
+test('M4 native GPS removal reentrancy cannot overwrite a fresh opt-in from the final OFF UI callback',async()=>{
+ let controller,removed=0,offCallbacks=0,permissionCalls=0;
+ let attemptedDuringCleanup=null,restartAfterCleanup=null;
+ const x=rig({
+   requestPermission:async()=>{permissionCalls++;return true;},
+   watch:async()=>({remove:()=>{
+     removed++;
+     if(removed===1){
+       assert.equal(controller.getPhase(),'off');
+       controller.interrupted(); // synchronous OS teardown callback
+       attemptedDuringCleanup=controller.start(OWNER,true);
+     }
+   }}),
+   onPhase:phase=>{
+     if(phase==='off'&&offCallbacks++===0)
+       restartAfterCleanup=controller.start(OWNER,true);
+   }
+ });
+ controller=x.controller;
+ assert.equal(await controller.start(OWNER,true),true);
+ const oldTimer=x.timers[0];
+ assert.doesNotThrow(()=>controller.stop());
+ assert.equal(await attemptedDuringCleanup,false,
+   'remove() callback cannot start a new watcher while teardown is in progress');
+ assert.equal(await restartAfterCleanup,true,
+   'a fresh explicit start from the final OFF callback may proceed after teardown');
+ assert.equal(controller.getPhase(),'watching',
+   'retired outer STOP must never overwrite the newer foreground consent');
+ assert.equal(offCallbacks,1);
+ assert.equal(permissionCalls,2,'only the original and the fresh opt-in request GPS');
+ assert.equal(removed,1,'old native watcher removed exactly once');
+ oldTimer.fn();
+ assert.equal(controller.getPhase(),'watching','stale timer cannot stop newer consent');
+ controller.dispose();
+ assert.equal(removed,2);
+ assert.deepEqual(x.events,[]);
+});
