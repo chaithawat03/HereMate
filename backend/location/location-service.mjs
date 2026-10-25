@@ -257,7 +257,18 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       })=>{
         verifiedStoredPair(grant,ownerUid,viewerUid);
         verifiedStoredPair(point,ownerUid,viewerUid);
-        if(!grant)return {enabled:false}; // idempotent expired session
+        if(!grant){
+          // A missing grant does not prove the owner-wide publisher lease is
+          // gone. An inconsistent live publisher for this SAME pair could
+          // still block another device's START. We have no grant capability
+          // to authenticate against it, so never claim confirmed STOP or
+          // delete a possibly newer session. The owner can use authenticated
+          // v1 emergency STOP to clear this lease safely.
+          if(publisher?.ownerUid===ownerUid&&publisher?.viewerUid===viewerUid&&
+             (!num(publisher.expiresAtMs)||
+               publisher.expiresAtMs>time(clock)))deny();
+          return {enabled:false}; // idempotent only with no live same-pair lease
+        }
         if(grant.sessionDigest!==sessionDigest)deny();
         // A delayed stop from another device cannot erase a newer
         // same-viewer session nor a different viewer's active publisher.
