@@ -81,6 +81,8 @@ jobs:
         run: node --test tests/m3-m4-transport-permission-race.test.mjs
       - name: M3 publisher session V2 HTTP strict schema and identity (offline)
         run: node --test tests/m3-device-session-http.test.mjs
+      - name: M3 orphaned live publisher must not fake confirmed V2 STOP (offline)
+        run: node --test tests/m3-v2-orphan-publisher-stop.test.mjs
       - name: M3/M2 authenticated STOP cross-pair key collision guard (offline)
         run: node --test tests/m3-pair-stop-collision.test.mjs
       - name: Test M2.1 transactional backend privacy and bearer HTTP contract (offline)
