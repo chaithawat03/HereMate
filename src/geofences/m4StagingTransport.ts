@@ -174,7 +174,11 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
      const data=row as {evaluated:unknown;event:unknown;quality:unknown};
      if(data.evaluated!==true||
         ![null,'enter','exit'].includes(data.event as string|null)||
-        !['ok','ambiguous'].includes(data.quality as string))return unavailable();
+        !['ok','ambiguous'].includes(data.quality as string)||
+        // Server policy only confirms a transition from reliable samples.
+        // A contradictory "ambiguous + enter/exit" response must never
+        // trigger a local alert, even if HTTP status and JSON shape are valid.
+        (data.quality==='ambiguous'&&data.event!==null))return unavailable();
      return data as GeofenceOutcome;
    }
  });
