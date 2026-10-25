@@ -187,6 +187,20 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  p=await out();assert.equal(p.event,null);
  now+=1000;
  p=await out();assert.equal(p.event,null); // cooldown suppresses transition
+ // Real Admin transaction: a corrupt approval timestamp cannot authorize
+ // another GPS evaluation or silently refresh the persisted dedupe state.
+ const validApprovedAtMs=(await zoneRef.get()).data().approvedAtMs;
+ await zoneRef.update({approvedAtMs:now+1});
+ const beforeBadApproval=await stateRef.get();
+ await assert.rejects(sample(),GeofenceDenied);
+ const afterBadApproval=await stateRef.get();
+ assert.deepEqual(afterBadApproval.data(),beforeBadApproval.data());
+ assert.ok(afterBadApproval.updateTime.isEqual(beforeBadApproval.updateTime),
+   'invalid zone chronology must not write a Firestore transition');
+ await zoneRef.update({approvedAtMs:validApprovedAtMs});
+ // The negative evaluation also consumes quota. Start a new isolated
+ // limiter window rather than loosening the production abuse threshold.
+ now+=60_001;
  // Consent changes invalidate both zone and M2 grant on the very next request.
  await rel.update({recipientConsent:false,updatedAt:Timestamp.fromMillis(now+2)});
  await assert.rejects(sample(),GeofenceDenied);
