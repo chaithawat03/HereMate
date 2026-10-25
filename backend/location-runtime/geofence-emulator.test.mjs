@@ -187,6 +187,18 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
  p=await out();assert.equal(p.event,null);
  now+=1000;
  p=await out();assert.equal(p.event,null); // cooldown suppresses transition
+ // Corrupting a persisted dedupe cooldown must never produce a second
+ // Enter/Exit or overwrite the damaged state inside the Admin transaction.
+ // A human can still independently REVOKE the zone afterward.
+ const validDedupe=(await stateRef.get()).data();
+ await stateRef.update({lastEventAtMs:'corrupt'});
+ const corruptBefore=await stateRef.get();
+ await assert.rejects(sample(),GeofenceDenied);
+ const corruptAfter=await stateRef.get();
+ assert.deepEqual(corruptAfter.data(),corruptBefore.data());
+ assert.ok(corruptAfter.updateTime.isEqual(corruptBefore.updateTime),
+   'denied evaluation must not mutate Firestore state');
+ await stateRef.update({lastEventAtMs:validDedupe.lastEventAtMs});
  // Consent changes invalidate both zone and M2 grant on the very next request.
  await rel.update({recipientConsent:false,updatedAt:Timestamp.fromMillis(now+2)});
  await assert.rejects(sample(),GeofenceDenied);
