@@ -124,6 +124,24 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   assert.deepEqual(await send(device.sessionToken),
     {stored:true,expiresAtMs:now+30000});
   assert.deepEqual((await read()).point,fix);
+  // Actual Admin Firestore optimistic transaction: a late/same capturedAt
+  // callback must not overwrite a newer fix, including its TTL/updateTime.
+  const latestRef=raw.collection('private_latest_locations').doc(A+'__'+B);
+  const firstSnap=await latestRef.get();
+  await assert.rejects(send(device.sessionToken),LocationDenied);
+  const afterDuplicate=await latestRef.get();
+  assert.deepEqual(afterDuplicate.data(),firstSnap.data());
+  assert.equal(afterDuplicate.updateTime.toMillis(),firstSnap.updateTime.toMillis());
+  const newerFix={...fix,latitude:13.751,capturedAtMs:now-500};
+  await svc.publishDevice({idToken:bearer(A),viewerUid:B,
+    sessionToken:device.sessionToken,point:newerFix,
+    appInForeground:true,foregroundPermissionGranted:true});
+  const latestSnap=await latestRef.get();
+  assert.deepEqual(latestSnap.data().point,newerFix);
+  await assert.rejects(send(device.sessionToken),LocationDenied);
+  const afterReplay=await latestRef.get();
+  assert.deepEqual(afterReplay.data(),latestSnap.data());
+  assert.equal(afterReplay.updateTime.toMillis(),latestSnap.updateTime.toMillis());
   await assert.rejects(svc.stopDevice({idToken:bearer(A),viewerUid:B,
     sessionToken:'0'.repeat(64)}),LocationDenied);
   await svc.stopDevice({idToken:bearer(A),viewerUid:B,sessionToken:device.sessionToken});
