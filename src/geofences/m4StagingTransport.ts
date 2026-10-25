@@ -151,6 +151,8 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
          PENDING_LIFETIME_MS)||
        !Number.isSafeInteger((row as {proposalCreatedAtMs:unknown}).proposalCreatedAtMs)||
        (row as {proposalCreatedAtMs:number}).proposalCreatedAtMs<=0||
+       (row as {proposalCreatedAtMs:number}).proposalCreatedAtMs>
+         Date.now()+MAX_CLOCK_SKEW_MS||
        (row as {proposalCreatedAtMs:number}).proposalCreatedAtMs>=
          (row as {expiresAtMs:number}).expiresAtMs)return unavailable();
      return row as {circle:GeofenceCircle;expiresAtMs:number;proposalCreatedAtMs:number};
