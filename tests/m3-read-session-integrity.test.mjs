@@ -39,8 +39,12 @@ function rig(leaseGrant,leasePublisher){
       projectId:STAGING_PROJECT,
       async transactPair(pair,work){
         seen.push(pair);
+        // v2 points must carry the current grant's hashed device lease once
+        // PR #117 is integrated; legacy M2 v1 points intentionally omit it.
+        const storedPoint={...point,...(leaseGrant.sessionDigest!==undefined
+          ?{sessionDigest:leaseGrant.sessionDigest}:{})};
         return work({
-          relation,grant:leaseGrant,publisher:leasePublisher,point,
+          relation,grant:leaseGrant,publisher:leasePublisher,point:storedPoint,
           setPoint:()=>writes.push('setPoint'),
           deletePoint:()=>writes.push('deletePoint')
         });
