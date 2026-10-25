@@ -59,6 +59,13 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    // without a reliable foreground indicator. STOP itself never throws.
    try{p.onPhase(next);return true;}catch{return false;}
  };
+ // A UI error boundary may itself throw while displaying an expired or
+ // revoked consent. GPS must already be retired; never let a secondary
+ // React callback exception escape a native/timer/async GPS callback.
+ const reportFailure=()=>{
+   if(disposed)return;
+   try{p.onFailure();}catch{/* fail closed: consent already retired */}
+ };
  function stop(){
    // Retire the consent generation and clear all JS state BEFORE invoking
    // native cleanup. Expo's native subscription can throw during OS teardown
@@ -148,7 +155,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
            p.identity()===actor&&p.isForeground();
        }catch{/* a failed identity/OS adapter cannot postpone GPS STOP */}
        stop();
-       if(shouldWarn)p.onFailure();
+       if(shouldWarn)reportFailure();
      },M4_WATCH_MAX_MS);
      const granted=await p.requestPermission();
      if(!active(epoch)){if(epoch===generation)stop();return false;}
@@ -160,7 +167,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
        if(epoch===generation){
          const warn=active(epoch);
          stop();
-         if(warn)p.onFailure();
+         if(warn)reportFailure();
        }
        return false;
      }
@@ -172,7 +179,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
        if(epoch!==generation||disposed)return;
        const shouldWarn=active(epoch);
        stop();
-       if(shouldWarn)p.onFailure();
+       if(shouldWarn)reportFailure();
      });
      // A late native bind after timeout, logout or backgrounding must be
      // removed BEFORE another async OS permission read can itself hang.
@@ -194,7 +201,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
        if(epoch===generation){
          const warn=active(epoch)&&!stillPermitted;
          stop();
-         if(warn)p.onFailure();
+         if(warn)reportFailure();
        }
        return false;
      }
@@ -216,7 +223,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      if(epoch===generation){
        const warn=active(epoch);
        stop();
-       if(warn)p.onFailure();
+       if(warn)reportFailure();
      }
      return false;
    }
@@ -281,7 +288,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
        // but never show a false current-user error for an expired session.
        const shouldWarn=active(epoch);
        stop();
-       if(shouldWarn)p.onFailure();
+       if(shouldWarn)reportFailure();
      }
    }finally{
      if(epoch===generation)processing=false;
