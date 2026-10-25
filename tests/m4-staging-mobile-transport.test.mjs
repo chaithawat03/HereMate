@@ -249,3 +249,20 @@ test('M4 recheck accepts still-fresh fix and rejects point mutation during auth'
    assert.equal(x.calls[0].init.redirect,'error');
  }finally{Date.now=originalNow;}
 });
+
+
+test('M4 rejects a GPS point mutated while Firebase credentials are pending',async()=>{
+ let releaseToken,enteredToken;
+ const gate=new Promise(resolve=>{releaseToken=resolve;});
+ const entered=new Promise(resolve=>{enteredToken=resolve;});
+ const x=make({currentIdentity:()=>({uid:UID,getIdToken:async()=>{
+   enteredToken();await gate;return SECRET;
+ }})});
+ const point={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:Date.now()-100};
+ const pending=x.transport.evaluate(PEER,point);
+ await entered;
+ point.latitude=Infinity;
+ releaseToken();
+ await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(x.calls.length,0);
+});
