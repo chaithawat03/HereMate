@@ -15,6 +15,8 @@ export type M4OneShotPorts=Readonly<{
   getCurrentFix:()=>Promise<ShareFix>;
   evaluate:(fix:ShareFix)=>Promise<'enter'|'exit'|null>;
   now:()=>number;
+  // Monotonic time independently bounds a delayed OS prompt/GPS response.
+  monotonicNow:()=>number;
 }>;
 
 const validFix=(fix:ShareFix,now:number):boolean=>
@@ -28,16 +30,28 @@ const validFix=(fix:ShareFix,now:number):boolean=>
 export async function evaluateM4OneShotForegroundFix(
   p:M4OneShotPorts
 ):Promise<'enter'|'exit'|null>{
+  if(p.isCurrent()!==true)throw Error('M4_ONE_SHOT_CANCELLED');
+  // One explicit tap authorizes one evaluation for at most 60 elapsed seconds.
+  // GPS permission prompts and getCurrentPositionAsync can remain unresolved
+  // after app suspension. A fresh fix alone must not renew old consent.
+  const consentStartedAtMs=p.now();
+  const consentStartedMonoMs=p.monotonicNow();
+  if(!Number.isSafeInteger(consentStartedAtMs)||
+     !Number.isFinite(consentStartedMonoMs))
+    throw Error('M4_ONE_SHOT_UNAVAILABLE');
+  let lastObservedMonoMs=consentStartedMonoMs;
   const current=()=>{
     if(p.isCurrent()!==true)throw Error('M4_ONE_SHOT_CANCELLED');
+    const wall=p.now(),mono=p.monotonicNow();
+    if(!Number.isSafeInteger(wall)||!Number.isFinite(mono)||
+       wall<consentStartedAtMs||wall-consentStartedAtMs>=60_000||
+       mono<lastObservedMonoMs||
+       mono-consentStartedMonoMs>=60_000)
+      throw Error('M4_ONE_SHOT_UNAVAILABLE');
+    lastObservedMonoMs=mono;
   };
-  current();
-  // A native one-shot GPS API may resolve with a cached location whose age
-  // is acceptable but whose capture predates the subject's explicit tap.
-  // Record consent time before ANY asynchronous OS permission or GPS work.
-  const consentStartedAtMs=p.now();
-  if(!Number.isSafeInteger(consentStartedAtMs))
-    throw Error('M4_ONE_SHOT_UNAVAILABLE');
+  // A native one-shot GPS API may return a cached location predating the tap.
+  // Consent is captured BEFORE any asynchronous permission or GPS work.
   const services=await p.servicesEnabled();
   current();
   if(services!==true)throw Error('M4_ONE_SHOT_UNAVAILABLE');
@@ -50,7 +64,8 @@ export async function evaluateM4OneShotForegroundFix(
   const permitted=await p.hasPermission();
   current();
   if(permitted!==true||!validFix(fix,p.now())||
-     fix.capturedAtMs<consentStartedAtMs)
+     fix.capturedAtMs<consentStartedAtMs||
+     fix.capturedAtMs>=consentStartedAtMs+60_000)
     throw Error('M4_ONE_SHOT_UNAVAILABLE');
   current(); // no stale-account coordinate may enter the HTTPS transport
   const event=await p.evaluate(fix);
