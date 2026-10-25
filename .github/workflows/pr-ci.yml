@@ -31,6 +31,8 @@ jobs:
         run: node --test tests/m4-owner-readonly-live-ttl-workflow.test.mjs
       - name: M4 zero-history, double-consent geofence event core (offline)
         run: node --test tests/m4-geofence-core.test.mjs
+      - name: M4 server zone approval chronology and fail-closed consent (offline)
+        run: node --test tests/m4-zone-timeline-integrity.test.mjs
       - name: M4 authenticated revoke pair-ID collision isolation (offline)
         run: node --test tests/m4-revoke-pair-collision.test.mjs
       - name: M4 Android opt-in privacy-safe in-app alert contract (offline)
