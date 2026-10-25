@@ -179,3 +179,101 @@ test('A-B-A rapid account switch cannot reset account A rolling minute quota',as
  x.tick();await flush();
  assert.equal(reads,4,'A can read after the original minute window expires');
 });
+
+
+test('synchronous onActive(true) STOP cannot leave a timer or a false successful START',async()=>{
+ let controller;
+ let reads=0;
+ const intervals=[],events=[];
+ controller=createAndroidFriendMapPoller({
+   isAndroid:()=>true,isForeground:()=>true,currentUid:()=>USER,
+   now:()=>1_800_000_000_000,
+   scheduleInterval:fn=>{const h={fn,cancelled:false};intervals.push(h);return h;},
+   cancelInterval:h=>{h.cancelled=true;},
+   refresh:async()=>{reads++;},
+   onActive:active=>{events.push(active);if(active)controller.stop();}
+ });
+ assert.equal(controller.start(),false);
+ await flush();
+ assert.equal(controller.isActive(),false);
+ assert.deepEqual(events,[true,false]);
+ assert.equal(intervals.length,0,'STOP inside activation must prevent interval creation');
+ assert.equal(reads,0,'no account data fetched after synchronous STOP');
+});
+
+test('reentrant dispose during activation prevents any friend-map reads',async()=>{
+ let controller,reads=0,timers=0;
+ controller=createAndroidFriendMapPoller({
+   isAndroid:()=>true,isForeground:()=>true,currentUid:()=>USER,
+   now:()=>1_800_000_000_000,
+   scheduleInterval:()=>{timers++;return 1;},
+   cancelInterval:()=>{},refresh:async()=>{reads++;},
+   onActive:active=>{if(active)controller.dispose();}
+ });
+ assert.equal(controller.start(),false);
+ assert.equal(controller.isActive(),false);
+ assert.equal(controller.start(),false);
+ await flush();
+ assert.equal(timers,0);
+ assert.equal(reads,0);
+});
+
+test('old activation cannot cancel replacement account started inside callback',async()=>{
+ let controller,uid=USER,reads=0;
+ const SECOND='anotherdeviceuid0003',timers=[];
+ controller=createAndroidFriendMapPoller({
+   isAndroid:()=>true,isForeground:()=>true,currentUid:()=>uid,
+   now:()=>1_800_000_000_000,
+   scheduleInterval:fn=>{const h={fn,cancelled:false};timers.push(h);return h;},
+   cancelInterval:h=>{h.cancelled=true;},
+   refresh:async()=>{reads++;},
+   onActive:active=>{
+     if(active&&uid===USER){
+       controller.stop();
+       uid=SECOND;
+       assert.equal(controller.start(),true);
+     }
+   }
+ });
+ assert.equal(controller.start(),false,'outer generation was revoked');
+ await flush();
+ assert.equal(controller.isActive(),true,'new account remains explicitly opted in');
+ assert.equal(timers.length,1);
+ assert.equal(timers[0].cancelled,false);
+ assert.equal(reads,1,'only replacement account may refresh');
+ controller.stop();
+ assert.equal(timers[0].cancelled,true);
+});
+
+test('synchronous interval-adapter STOP cancels handle returned after teardown',async()=>{
+ let controller,reads=0,cancelled=0,returned;
+ controller=createAndroidFriendMapPoller({
+   isAndroid:()=>true,isForeground:()=>true,currentUid:()=>USER,
+   now:()=>1_800_000_000_000,
+   scheduleInterval:fn=>{returned={fn};controller.stop();return returned;},
+   cancelInterval:h=>{assert.equal(h,returned);cancelled++;},
+   refresh:async()=>{reads++;},onActive:()=>{}
+ });
+ assert.equal(controller.start(),false);
+ assert.equal(controller.isActive(),false);
+ assert.equal(cancelled,1,'late handle must be explicitly canceled');
+ returned.fn();await flush();
+ assert.equal(reads,0);
+});
+
+test('timer adapter failure never leaves a false active friend-map session',async()=>{
+ let controller,reads=0;
+ const events=[];
+ controller=createAndroidFriendMapPoller({
+   isAndroid:()=>true,isForeground:()=>true,currentUid:()=>USER,
+   now:()=>1_800_000_000_000,
+   scheduleInterval:()=>{throw Error('native timer adapter unavailable');},
+   cancelInterval:()=>{},refresh:async()=>{reads++;},
+   onActive:active=>events.push(active)
+ });
+ assert.equal(controller.start(),false);
+ assert.equal(controller.isActive(),false);
+ assert.deepEqual(events,[true,false]);
+ await flush();
+ assert.equal(reads,0);
+});
