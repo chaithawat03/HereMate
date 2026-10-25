@@ -16,7 +16,8 @@ const relation={senderUid:OWNER,recipientUid:SUBJECT,status:'accepted',
   senderConsent:true,recipientConsent:true,
   updatedAt:{seconds:1800000000,nanoseconds:0}};
 const zone={ownerUid:OWNER,subjectUid:SUBJECT,status:'active',
-  relationRevision:RELATION_REVISION,approvedAtMs:NOW-1000,
+  // Valid server-created approval chronology is required by pending PR #116.
+  relationRevision:RELATION_REVISION,createdAtMs:NOW-2000,approvedAtMs:NOW-1000,
   expiresAtMs:NOW+60_000,
   circle:{latitude:0,longitude:0,radiusMeters:350}};
 const baseGrant={ownerUid:SUBJECT,viewerUid:OWNER,enabled:true,
