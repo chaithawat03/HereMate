@@ -32,7 +32,7 @@ export type M4WatchPorts=Readonly<{
 }>;
 const UID=/^[A-Za-z0-9_-]{12,128}$/;
 export function createM4ForegroundZoneWatch(p:M4WatchPorts){
- let phase:M4WatchPhase='off',generation=0,disposed=false;
+ let phase:M4WatchPhase='off',generation=0,disposed=false,stopping=false;
  let watcher:{remove:()=>void}|null=null,timer:unknown=null;
  // Throttle private evaluations by elapsed monotonic time, not Date.now().
  // Wall-clock forward jumps must not bypass the 10-second rate boundary.
@@ -71,7 +71,11 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    // may call stop() again while handling onPhase('off'); without this guard
    // STOP recursively emits OFF until the JS stack overflows. Repeated user
    // STOP/interruption must also be idempotent and never prompt for GPS.
-   if(phase==='off')return;
+   if(phase==='off'||stopping)return;
+   // A native timer cancellation or GPS subscription.remove() can invoke
+   // synchronous callbacks that reenter STOP or START during teardown.
+   // Keep this generation terminal until both cleanup adapters return.
+   stopping=true;
    // Retire the consent generation and clear all JS state BEFORE invoking
    // native cleanup. Expo's native subscription can throw during OS teardown
    // or permission revocation; that must never strand the UI in 'watching'
@@ -84,8 +88,12 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    consentStartedMonotonicMs=Infinity;deadlineMonotonicMs=-Infinity;
    lastObservedMonotonicMs=-Infinity;
    lastFixMonotonicMs=-Infinity;
+   // Publish the internal OFF phase before external cleanup adapters run;
+   // UI notification happens only after native teardown is complete.
+   phase='off';
    if(oldTimer!==null){try{p.cancel(oldTimer);}catch{/* retired regardless */}}
    try{oldWatcher?.remove();}catch{/* OS lifecycle must handle failed native removal */}
+   stopping=false;
    notify('off');
  }
  // Every monotonic reading is checked against the preceding reading, not
@@ -110,7 +118,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    }catch{return false;}
  }
  async function start(zoneOwnerUid:string,relationshipApproved:boolean){
-   if(disposed||phase!=='off'||!relationshipApproved||!UID.test(zoneOwnerUid))
+   if(disposed||stopping||phase!=='off'||!relationshipApproved||!UID.test(zoneOwnerUid))
      return false;
    let uid:string|null;
    try{
