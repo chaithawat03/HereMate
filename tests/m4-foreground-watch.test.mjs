@@ -1250,7 +1250,7 @@ test('M4 a fresh explicit start from OFF callback survives an old STOP and stale
 });
 
 test('M4 synchronous timer cancellation cannot recursively STOP or request a new GPS opt-in during teardown',async()=>{
- let controller,permissionCalls=0,offCallbacks=0,attemptedDuringCleanup=null,removed=0;
+ let controller,permissionCalls=0,offCallbacks=0,attemptedDuringCleanup=null,removed=0,oldFix;
  const x=rig({
    requestPermission:async()=>{permissionCalls++;return true;},
    cancel:timer=>{
@@ -1260,7 +1260,7 @@ test('M4 synchronous timer cancellation cannot recursively STOP or request a new
      controller.interrupted();
      attemptedDuringCleanup=controller.start(OWNER,true);
    },
-   watch:async()=>({remove:()=>{removed++;}}),
+   watch:async onFix=>{oldFix=onFix;return {remove:()=>{removed++;}};},
    onPhase:phase=>{if(phase==='off')offCallbacks++;}
  });
  controller=x.controller;
@@ -1273,7 +1273,7 @@ test('M4 synchronous timer cancellation cannot recursively STOP or request a new
  assert.equal(permissionCalls,1,'no reentrant OS permission prompt');
  assert.equal(removed,1,'native GPS subscription removed exactly once');
  assert.equal(x.timers[0].cancelled,true);
- x.send();await flush();
+ oldFix(x.fix());await flush();
  assert.equal(x.stats().evalCount,0,'retired GPS fix must not reach private evaluator');
  assert.deepEqual(x.events,[]);
 });
