@@ -94,13 +94,15 @@ test('permission revoked while HTTPS pending suppresses the returned zone event'
   await assert.rejects(work,/M4_ONE_SHOT_UNAVAILABLE/);
 });
 test('stale or low-quality GPS fix is rejected before sending private coordinates',async()=>{
-  for(const fix of [
-    {...sample(),capturedAtMs:Date.now()-90_000},
-    {...sample(),accuracyMeters:150},
-    {...sample(),latitude:Infinity}
+  // Construct each invalid fix AFTER the explicit tap so these cases
+  // exercise quality/freshness checks independently of pre-consent rejection.
+  for(const makeFix of [
+    ()=>({...sample(),capturedAtMs:Date.now()-90_000}),
+    ()=>({...sample(),accuracyMeters:150}),
+    ()=>({...sample(),latitude:Infinity})
   ]){
     const h=harness();
-    h.ports.getCurrentFix=async()=>fix;
+    h.ports.getCurrentFix=async()=>makeFix();
     await assert.rejects(evaluateM4OneShotForegroundFix(h.ports),
       /M4_ONE_SHOT_UNAVAILABLE/);
     assert.equal(h.counts().calls,0);
