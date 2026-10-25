@@ -1142,3 +1142,52 @@ test('M4 synchronous dispose during WATCHING UI callback releases already-bound 
  assert.deepEqual(x.events,[]);
  assert.deepEqual(x.failures,[]);
 });
+
+test('M4 expired STARTING deadline contains a throwing UI failure reporter without late GPS',async()=>{
+ let settlePermission,permissionCalls=0;
+ const pending=new Promise(resolve=>{settlePermission=resolve;});
+ const x=rig({
+   requestPermission:()=>{permissionCalls++;return pending;},
+   onFailure:()=>{throw Error('React error boundary unmounted while reporting expiry');}
+ });
+ const started=x.controller.start(OWNER,true);
+ assert.equal(permissionCalls,1);
+ assert.equal(x.controller.getPhase(),'starting');
+ assert.equal(x.timers.length,1);
+ assert.doesNotThrow(()=>x.timers[0].fn(),
+   'expiry timer must not leak UI callback exception into the JS event loop');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.timers[0].cancelled,true);
+ settlePermission(true);
+ assert.equal(await started,false,'late native permission resolution cannot revive consent');
+ assert.equal(x.stats().watchCount,0,'expired watch must not bind native GPS');
+ assert.deepEqual(x.events,[]);
+});
+
+test('M4 native watcher error contains a throwing UI failure reporter after GPS STOP',async()=>{
+ const x=rig({onFailure:()=>{throw Error('React error boundary failed during GPS error');}});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ assert.doesNotThrow(()=>x.err(),
+   'native OS error callback must not throw into Expo location subscription');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ x.send();await flush();
+ assert.equal(x.stats().evalCount,0,'stale fix must not reach evaluator');
+ assert.deepEqual(x.events,[]);
+ assert.ok(x.timers.every(t=>t.cancelled));
+});
+
+test('M4 failed async zone evaluation contains a throwing UI failure reporter',async()=>{
+ const x=rig({
+   evaluate:async()=>{throw Error('Staging evaluator rejected expired zone grant');},
+   onFailure:()=>{throw Error('React view unmounted before displaying error');}
+ });
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.send();
+ await flush();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1,'failed server evaluation releases native GPS');
+ assert.equal(x.stats().evalCount,0);
+ assert.deepEqual(x.events,[],'no private zone event may be delivered');
+ assert.ok(x.timers.every(t=>t.cancelled));
+});
