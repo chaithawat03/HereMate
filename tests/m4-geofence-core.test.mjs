@@ -70,7 +70,7 @@ test('uncertain boundary, stale, inaccurate and future points produce no events'
  assert.equal(geofenceObservation(definition,
    {...inside(),capturedAtMs:t+10_000},t),'ambiguous');
  const a=tick(EMPTY_GEOFENCE_STATE,outside());
- assert.equal(tick(a.state,{...inside(),accuracyMeters:500}).state.streak,0);
+ assert.equal(tick(a.state,{...inside(t+1000),accuracyMeters:500},t+1000).state.streak,0);
 });
 test('longitude antimeridian is geographically near, not 360 degrees away',()=>{
  assert.ok(circleDistanceMeters(0,179.99,0,-179.99)<2300);
@@ -88,7 +88,10 @@ test('cooldown allows event only after 5 minutes and new reliable samples',()=>{
  assert.equal(x.event,'enter');
  const later=t+GEOFENCE_EVENT_COOLDOWN_MS+5000;
  const freshAccess={...access,grantExpiresAtMs:later+50_000};
- const y=tick(x.state,outside(later),later,long,freshAccess);
+ // Represent a continuously sampled foreground watcher using only its
+ // latest timestamp; no coordinate history is kept by the state machine.
+ const continuous={...x.state,lastSampleCapturedAtMs:later-1500};
+ const y=tick(continuous,outside(later),later,long,freshAccess);
  const z=tick(y.state,outside(later+1000),later+1000,long,freshAccess);
  assert.equal(z.event,'exit');
 });
