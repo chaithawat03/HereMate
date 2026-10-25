@@ -85,7 +85,7 @@ test('expired same-pair publisher without a grant cannot keep sharing active',as
 
 test('missing grant with invalid same-pair publisher expiry fails closed',async()=>{
   for(const expiresAtMs of [undefined,NaN,Infinity,'later']){
-    const x=rig(publisher(VIEWER,expiresAtMs));
+    const x=rig({...publisher(),expiresAtMs});
     await assert.rejects(stopV2(x.service),LocationDenied);
     assert.deepEqual(x.deleted,[]);
   }
