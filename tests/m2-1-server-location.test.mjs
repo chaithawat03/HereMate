@@ -172,6 +172,61 @@ test('M3 capability-fenced device sessions prevent same Firebase account cross-d
  assert.deepEqual(await x.stop(),{enabled:false});
  await fails(x.view());
 });
+test('M3 viewer never exposes a latest point detached from its exact device lease',async()=>{
+ const x=setup();
+ const device=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
+ await x.svc.publishDevice({idToken:bearer(A),viewerUid:B,
+   sessionToken:device.sessionToken,point:point(),
+   appInForeground:true,foregroundPermissionGranted:true});
+ const gk='private_location_grants/'+pair;
+ const pk='private_location_publishers/'+A;
+ const lk='private_latest_locations/'+pair;
+ const grant=structuredClone(x.db.rows.get(gk));
+ const publisher=structuredClone(x.db.rows.get(pk));
+ const latest=structuredClone(x.db.rows.get(lk));
+ assert.match(grant.sessionDigest,/^[0-9a-f]{64}$/);
+ assert.equal(latest.sessionDigest,grant.sessionDigest);
+ assert.equal(publisher.sessionDigest,grant.sessionDigest);
+ assert.notEqual(latest.sessionDigest,device.sessionToken);
+ assert.equal(JSON.stringify(latest).includes(device.sessionToken),false);
+ assert.deepEqual((await x.view()).point,point());
+ // Each corruption is applied to otherwise-valid, still-unexpired records.
+ // No forged same-pair grant/publisher combination may disclose a GPS point
+ // from an older or unknown device session. Reads never mutate persisted data.
+ const cases=[
+   [grant,publisher,{...latest,sessionDigest:undefined}],
+   [grant,publisher,{...latest,sessionDigest:'a'.repeat(64)}],
+   [grant,publisher,{...latest,sessionDigest:null}],
+   [{...grant,sessionDigest:undefined},publisher,latest],
+   [grant,{...publisher,sessionDigest:undefined},latest],
+   [{...grant,sessionDigest:'b'.repeat(64)},publisher,latest],
+   [grant,{...publisher,sessionDigest:'b'.repeat(64)},latest],
+   [{...grant,sessionDigest:undefined},
+    {...publisher,sessionDigest:undefined},latest]
+ ];
+ for(const [g,p,l] of cases){
+   x.db.rows.set(gk,structuredClone(g));
+   x.db.rows.set(pk,structuredClone(p));
+   x.db.rows.set(lk,structuredClone(l));
+   const before=structuredClone(x.db.rows.get(lk));
+   await fails(x.view());
+   assert.deepEqual(x.db.rows.get(lk),before);
+ }
+ x.db.rows.set(gk,grant);x.db.rows.set(pk,publisher);x.db.rows.set(lk,latest);
+ assert.deepEqual((await x.view()).point,point(),
+   'restored valid current device lease remains readable');
+ // The original M2 v1 path has NO digest in grant, publisher or latest point.
+ const legacy=setup();
+ await legacy.start();await legacy.publish();
+ assert.equal(Object.hasOwn(legacy.db.rows.get('private_latest_locations/'+pair),
+   'sessionDigest'),false);
+ assert.deepEqual((await legacy.view()).point,point());
+ const legacyPoint=legacy.db.rows.get('private_latest_locations/'+pair);
+ legacy.db.rows.set('private_latest_locations/'+pair,
+   {...legacyPoint,sessionDigest:grant.sessionDigest});
+ await fails(legacy.view()); // v2-tagged point must not downgrade to v1.
+});
+
 test('M3 sequential second START is denied while first device lease is active',async()=>{
  const x=setup();
  const first=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
