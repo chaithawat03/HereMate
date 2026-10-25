@@ -82,6 +82,31 @@ test('M4 PROPOSE denies malformed or live persisted zones without ANY mutation',
   ['negative expiry',{...original,expiresAtMs:-1}],
   ['unknown status',{...original,status:'revoked'}],
   ['malformed circle',{...original,circle:{...circle,radiusMeters:5}}],
+  // Expired but corrupt approval provenance must not be erased by PROPOSE.
+  // Live-zone REVIEW/EVALUATE checks alone do not cover this write path.
+  ['missing creation',{...original,createdAtMs:undefined}],
+  ['fractional creation',{...original,createdAtMs:now-100_000.5}],
+  ['future creation',{...original,createdAtMs:now+1}],
+  ['creation after expiry',{...original,createdAtMs:now}],
+  ['missing approval',{...original,approvedAtMs:undefined}],
+  ['fractional approval',{...original,approvedAtMs:now-90_000.5}],
+  ['approval before creation',{...original,approvedAtMs:now-100_001}],
+  ['future approval',{...original,approvedAtMs:now+1}],
+  ['approval beyond pending lifetime',{
+    ...original,createdAtMs:now-90_000_000,approvedAtMs:now-90_000
+  }],
+  ['expired before approval',{...original,approvedAtMs:now}],
+  ['active expiry exceeds seven-day lifetime',{
+    ...original,createdAtMs:now-8*86_400_000-1000,
+    approvedAtMs:now-8*86_400_000
+  }],
+  ['expired pending beyond 24-hour lifetime',{
+    ...original,status:'pending',createdAtMs:now-2*86_400_000,
+    approvedAtMs:undefined
+  }],
+  ['expired pending missing creation',{
+    ...original,status:'pending',createdAtMs:undefined,approvedAtMs:undefined
+  }],
   ['unexpired active zone',{...original,expiresAtMs:now+1000}]
  ];
  for(const [label,record] of cases){
