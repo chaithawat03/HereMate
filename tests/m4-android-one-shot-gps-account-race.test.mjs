@@ -130,11 +130,13 @@ test('M4 one-shot never sends a fresh cached fix captured before explicit consen
 
 test('M4 one-shot accepts an accurate fix captured after the tap, not before',async()=>{
   const h=harness(),tap=1_800_000_000_000;
-  h.ports.now=()=>tap+1500;
-  h.ports.getCurrentFix=async()=>({
-    latitude:13.7,longitude:100.5,accuracyMeters:12,
-    capturedAtMs:tap+1000
-  });
+  let clock=tap;
+  h.ports.now=()=>clock;
+  h.ports.getCurrentFix=async()=>{
+    clock=tap+1500;
+    return {latitude:13.7,longitude:100.5,accuracyMeters:12,
+      capturedAtMs:tap+1000};
+  };
   assert.equal(await evaluateM4OneShotForegroundFix(h.ports),'enter');
   assert.equal(h.counts().calls,1);
 });
