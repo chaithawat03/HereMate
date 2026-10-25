@@ -82,25 +82,36 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    return uid;
  };
  async function send(endpoint:string,body:Record<string,unknown>,requireGps:boolean){
+   // The deadline starts BEFORE any asynchronous OS permission or Firebase
+   // token retrieval. A hung preflight must not hold the UI's revoke mutex
+   // indefinitely or issue a late private GPS/zone POST after expiry.
+   const controller=new AbortController();
+   let rejectDeadline!:(reason:Error)=>void;
+   const deadline=new Promise<never>((_,reject)=>{rejectDeadline=reject;});
+   const timer=setTimeout(()=>{
+     controller.abort();
+     rejectDeadline(Error('M4_GEOFENCE_REQUEST_EXPIRED'));
+   },timeout);
+   const within=<T>(pending:Promise<T>):Promise<T>=>
+     Promise.race([pending,deadline]);
+   try{
    const actor=ports.currentIdentity();
    if(!actor||!CODE.test(actor.uid)||!ports.isForeground())return unavailable();
-   if(requireGps&&!(await ports.foregroundPermissionGranted()))return unavailable();
+   if(requireGps&&!(await within(ports.foregroundPermissionGranted())))return unavailable();
    // An OS permission promise can settle after a silent auth/background
    // change, before Firebase/AppState listeners invalidate the UI.
    if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
    let jwt:string;
-   try{jwt=await actor.getIdToken();}catch{return unavailable();}
+   try{jwt=await within(actor.getIdToken());}catch{return unavailable();}
    if(typeof jwt!=='string'||jwt.length<32||jwt.length>8192||jwt.includes('\n')||
       ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
-   if(requireGps&&!(await ports.foregroundPermissionGranted()))return unavailable();
+   if(requireGps&&!(await within(ports.foregroundPermissionGranted())))return unavailable();
    // Do not transmit the original subject's GPS with a stale Firebase bearer.
    if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
    const json=JSON.stringify(body);
    if(json.length>2048)return unavailable();
-   const controller=new AbortController();
-   const timer=setTimeout(()=>controller.abort(),timeout);
    try{
-     const res=await ports.fetchImpl(origin+endpoint,{
+     const res=await within(ports.fetchImpl(origin+endpoint,{
        method:'POST',
        // Prevent 307/308 redirects forwarding private zone coordinates, GPS
        // and authenticated POST data outside this exact Staging origin.
@@ -108,19 +119,19 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
        headers:{Authorization:'Bearer '+jwt,'Content-Type':'application/json',
          Accept:'application/json','Cache-Control':'no-store'},
        body:json,signal:controller.signal
-     });
+     }));
      if(res.status!==200||!res.ok||ports.currentIdentity()?.uid!==actor.uid||
         !ports.isForeground())return unavailable();
      let value:unknown;
-     try{value=await res.json();}catch{return unavailable();}
+     try{value=await within(res.json());}catch{return unavailable();}
      if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
-     if(requireGps&&!(await ports.foregroundPermissionGranted()))return unavailable();
+     if(requireGps&&!(await within(ports.foregroundPermissionGranted())))return unavailable();
      // Do not expose the server-confirmed event if the final OS permission
      // await completed after logout, account switch or app background.
      if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
      return value;
    }catch{return unavailable();}
-   finally{clearTimeout(timer);}
+   }finally{clearTimeout(timer);}
  }
  return Object.freeze({
    async propose(subjectUid,circle){
