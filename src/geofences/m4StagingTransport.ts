@@ -131,6 +131,10 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
      if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
      return value;
    }catch{return unavailable();}
+   }catch{
+     // Never expose native/Firebase timeout details or partially confirmed
+     // private geofence state through the public transport error contract.
+     return unavailable();
    }finally{clearTimeout(timer);}
  }
  return Object.freeze({
