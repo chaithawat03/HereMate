@@ -40,6 +40,19 @@ function sameZone(zone,owner,subject,relation,now,status){
     zone.status!==status||zone.relationRevision!==relation||
     !Number.isSafeInteger(zone.expiresAtMs)||zone.expiresAtMs<=now||
     !validCircle(zone.circle))deny();
+ // Server-created approval chronology is part of the consent boundary.
+ // A malformed/migrated zone must never be treated as subject-approved
+ // solely because status was persisted as "active". REVOKE remains usable.
+ const created=zone.createdAtMs;
+ if(!Number.isSafeInteger(created)||created<=0||created>now)deny();
+ if(status==='pending'){
+   if(zone.expiresAtMs>created+PENDING_LIFETIME_MS)deny();
+ }else{
+   const approved=zone.approvedAtMs;
+   if(!Number.isSafeInteger(approved)||approved<created||approved>now||
+      approved>=created+PENDING_LIFETIME_MS||
+      zone.expiresAtMs>approved+MAX_ZONE_LIFETIME_MS)deny();
+ }
  return zone;
 }
 function activeM2Grant(grant,publisher,owner,subject,relation,now){
