@@ -80,9 +80,10 @@ test('M3 auth transition during delayed START cannot resurrect retired capabilit
        enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP_A
      })};
    }
-   return {ok:true,status:200,json:async()=>({
-     enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP_B
-   })};
+   const row=endpoint.endsWith('/publish')
+     ?{stored:true,expiresAtMs:Date.now()+20_000}
+     :{enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP_B};
+   return {ok:true,status:200,json:async()=>row};
  });
  const first=x.transport.start(PEER);
  await started;
@@ -91,10 +92,23 @@ test('M3 auth transition during delayed START cannot resurrect retired capabilit
  release();
  await assert.rejects(first,/UNAVAILABLE/);
  assert.equal((await x.transport.start(PEER)).enabled,true);
- await x.transport.publish(PEER,fix()).catch(()=>{});
+ assert.equal((await x.transport.publish(PEER,fix())).stored,true);
  // No retired A capability may ever be emitted in a second-account request.
  assert.ok(x.calls.filter(c=>c.who===SECOND)
    .every(c=>c.body.sessionToken!==CAP_A));
+});
+test('M3 logout and login to the same UID still requires a new device capability',async()=>{
+ const x=rig();
+ await x.transport.start(PEER);
+ x.setUser(null);
+ x.transport.invalidateDeviceSession();
+ x.setUser(FIRST);
+ await assert.rejects(x.transport.publish(PEER,fix()),/UNAVAILABLE/);
+ assert.equal(x.calls.length,1);
+ // A new START is subject to the real backend's publisher-lease policy.
+ await x.transport.start(PEER);
+ await x.transport.publish(PEER,fix());
+ assert.equal(x.calls.filter(c=>c.endpoint.endsWith('/start')).length,2);
 });
 test('M3 sharing UI erases v2 token on auth change and auth-state error',()=>{
  const ui=readFileSync(new URL('../src/location/M2SharingPanel.tsx',import.meta.url),'utf8');
