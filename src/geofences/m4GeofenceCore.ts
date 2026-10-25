@@ -30,6 +30,8 @@ export type GeofenceState=Readonly<{
   pending:'inside'|'outside'|null;
   streak:number;
   lastEventAtMs:number|null;
+  /** Last accepted fix timestamp only; never persist coordinates or movement history. */
+  lastSampleCapturedAtMs:number|null;
 }>;
 export type GeofenceSignal=Readonly<{
   state:GeofenceState;
@@ -37,10 +39,14 @@ export type GeofenceSignal=Readonly<{
   reason:'ok'|'blocked'|'ambiguous';
 }>;
 export const EMPTY_GEOFENCE_STATE:GeofenceState=Object.freeze({
-  zone:'unknown',pending:null,streak:0,lastEventAtMs:null
+  zone:'unknown',pending:null,streak:0,lastEventAtMs:null,
+  lastSampleCapturedAtMs:null
 });
 export const GEOFENCE_EVENT_COOLDOWN_MS=5*60_000;
 export const GEOFENCE_SAMPLE_MAX_AGE_MS=30_000;
+// Match the dormant Staging server's anti-replay and long-gap baseline policy.
+export const GEOFENCE_MIN_SAMPLE_SPACING_MS=1000;
+export const GEOFENCE_MAX_CONSECUTIVE_SAMPLE_GAP_MS=30_000;
 const UID=/^[A-Za-z0-9_-]{12,128}$/;
 const ID=/^[A-Za-z0-9_-]{12,64}$/;
 const valid=(n:unknown):n is number=>typeof n==='number'&&Number.isFinite(n);
@@ -104,33 +110,54 @@ export function stepGeofence(input:Readonly<{
 }>):GeofenceSignal{
   if(!eligibleGeofence(input.definition,input.access,input.nowMs))
     return {state:EMPTY_GEOFENCE_STATE,event:null,reason:'blocked'};
-  const obs=geofenceObservation(input.definition,input.fix,input.nowMs);
-  if(obs==='ambiguous')
-    return {state:{
-      zone:input.previous?.zone==='inside'||input.previous?.zone==='outside'
-        ?input.previous.zone:'unknown',
-      pending:null,streak:0,lastEventAtMs:validTime(input.previous?.lastEventAtMs)
-        ?input.previous.lastEventAtMs:null
-    },event:null,reason:'ambiguous'};
   const prior=input.previous??EMPTY_GEOFENCE_STATE;
-  const zone=prior.zone==='inside'||prior.zone==='outside'?prior.zone:'unknown';
   const last=validTime(prior.lastEventAtMs)?prior.lastEventAtMs:null;
+  const previousSample=validTime(prior.lastSampleCapturedAtMs)&&
+    prior.lastSampleCapturedAtMs>0?prior.lastSampleCapturedAtMs:null;
+  const sample=input.fix.capturedAtMs;
+  const isValidSample=validTime(sample)&&sample>0&&
+    sample>=input.nowMs-GEOFENCE_SAMPLE_MAX_AGE_MS&&
+    sample<=input.nowMs+5000;
+  // A suspended app or restored stale classification is not a live baseline.
+  // The trusted Staging backend uses the same 30s continuity threshold.
+  const gap=isValidSample&&previousSample!==null?
+    sample-previousSample:Infinity;
+  const stale=previousSample===null||
+    gap>GEOFENCE_MAX_CONSECUTIVE_SAMPLE_GAP_MS;
+  const zone=!stale&&(prior.zone==='inside'||prior.zone==='outside')?
+    prior.zone:'unknown';
+  const pending=!stale&&(prior.pending==='inside'||prior.pending==='outside')?
+    prior.pending:null;
+  const streak=!stale&&prior.streak===1?1:0;
+  // Duplicate, older or too-close GPS callbacks must NOT satisfy the second
+  // observation of a transition, even if the UI invokes evaluation twice.
+  // Keep only one timestamp, never a GPS coordinate, route or event history.
+  if(previousSample!==null&&isValidSample&&
+     gap<GEOFENCE_MIN_SAMPLE_SPACING_MS)
+    return {state:{zone,pending,streak,lastEventAtMs:last,
+      lastSampleCapturedAtMs:previousSample},event:null,reason:'ambiguous'};
+  const obs=geofenceObservation(input.definition,input.fix,input.nowMs);
+  const nextSample=isValidSample?sample:previousSample;
+  if(obs==='ambiguous')
+    return {state:{zone,pending:null,streak:0,lastEventAtMs:last,
+      lastSampleCapturedAtMs:nextSample},event:null,reason:'ambiguous'};
   if(zone===obs)
-    return {state:{zone,pending:null,streak:0,lastEventAtMs:last},
-      event:null,reason:'ok'};
-  const consecutive=prior.pending===obs&&Number.isSafeInteger(prior.streak)
-    ?Math.min(2,prior.streak+1):1;
-  if(consecutive<2)
-    return {state:{zone,pending:obs,streak:consecutive,lastEventAtMs:last},
-      event:null,reason:'ok'};
-  // First sighting only establishes baseline; cannot fabricate an Enter/Exit.
+    return {state:{zone,pending:null,streak:0,lastEventAtMs:last,
+      lastSampleCapturedAtMs:sample},event:null,reason:'ok'};
+  const consecutive=previousSample!==null&&
+    gap<=GEOFENCE_MAX_CONSECUTIVE_SAMPLE_GAP_MS&&
+    pending===obs&&streak===1;
+  if(!consecutive)
+    return {state:{zone,pending:obs,streak:1,lastEventAtMs:last,
+      lastSampleCapturedAtMs:sample},event:null,reason:'ok'};
+  // Two distinct, recent fixes establish the initial baseline without alert.
   if(zone==='unknown')
-    return {state:{zone:obs,pending:null,streak:0,lastEventAtMs:last},
-      event:null,reason:'ok'};
-  // Changed zone after two reliable samples; dedupe by cooldown.
+    return {state:{zone:obs,pending:null,streak:0,lastEventAtMs:last,
+      lastSampleCapturedAtMs:sample},event:null,reason:'ok'};
   const ready=last===null||input.nowMs-last>=GEOFENCE_EVENT_COOLDOWN_MS;
   return {state:{zone:obs,pending:null,streak:0,
-    lastEventAtMs:ready?input.nowMs:last},
+    lastEventAtMs:ready?input.nowMs:last,
+    lastSampleCapturedAtMs:sample},
     event:ready?(obs==='inside'?'enter':'exit'):null,
     reason:'ok'};
 }
