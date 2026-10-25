@@ -86,6 +86,20 @@ function validPoint(point,now) {
      !num(point.accuracyMeters)||point.accuracyMeters<0||
      point.accuracyMeters>ACCURACY_MAX_M)deny();
 }
+// M3 v2: a late or retried device callback must never overwrite a newer
+// location in the SAME capability-bound lease. Firestore reads and the
+// replacement are committed in one optimistic transaction, so competing
+// same-timestamp publishes cannot both succeed. Only the latest fix remains.
+// The legacy v1 contract is deliberately unchanged.
+function newerDeviceFix(existing,candidate,ownerUid,viewerUid){
+  if(!Number.isSafeInteger(candidate.capturedAtMs)||candidate.capturedAtMs<=0)deny();
+  if(!existing)return;
+  verifiedStoredPair(existing,ownerUid,viewerUid);
+  const previous=existing.point;
+  if(!exactKeys(previous,pointFields)||
+     !Number.isSafeInteger(previous.capturedAtMs)||previous.capturedAtMs<=0||
+     candidate.capturedAtMs<=previous.capturedAtMs)deny();
+}
 function time(clock) {
   const value=clock();
   if(!Number.isSafeInteger(value)||value<=0)throw new LocationBusy();
@@ -231,7 +245,7 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       if(appInForeground!==true||foregroundPermissionGranted!==true)deny();
       if(!exactKeys(point,pointFields))invalid();
       return tx(ownerUid,viewerUid,async ({
-        relation,grant,publisher,setPoint
+        relation,grant,publisher,point:storedPoint,setPoint
       })=>{
         const now=time(clock);
         verifiedPair(relation,ownerUid,viewerUid);
@@ -239,6 +253,7 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         validPublisher(publisher,ownerUid,viewerUid,now,grant);
         verifyDeviceSession(grant,publisher,sessionDigest);
         validPoint(point,now);
+        newerDeviceFix(storedPoint,point,ownerUid,viewerUid);
         const expiresAtMs=Math.min(grant.expiresAtMs,now+FIX_MAX_AGE_MS);
         setPoint({ownerUid,viewerUid,point:{...point},expiresAtMs,
           expireAt:new Date(expiresAtMs)});
