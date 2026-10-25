@@ -22,6 +22,8 @@ type LocationTransportPorts=Readonly<{
 type LocationTransport=SharePorts['transport']&M2FriendLocationTransport&Readonly<{
   /** Explicit owner action, independent of this handset's session capability. */
   emergencyStop:(peerUid:string)=>Promise<{enabled:false}>;
+  /** Local-only capability erasure on Firebase account change; NOT a server STOP. */
+  invalidateDeviceSession:()=>void;
 }>;
 const CODE=/^[A-Za-z0-9_-]{12,128}$/;
 const fields=(obj:unknown,keys:readonly string[]):boolean=>{
@@ -69,6 +71,14 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   // A delayed first START must not allow another handset/session request to
   // race through this transport and overwrite its opaque publisher capability.
   let deviceSessionStartPending=false;
+  // A v2 capability belongs to one Firebase UID only. The transport is
+  // memoized across auth transitions; never let account B inherit account A's
+  // opaque session or remain locally blocked by A's stale token. This does
+  // NOT revoke the remote lease: server-side expiry/explicit STOP still rule.
+  const forgetForeignDeviceSession=()=>{
+    if(deviceSession&&deviceSession.uid!==ports.currentIdentity()?.uid)
+      deviceSession=null;
+  };
   // A user-initiated owner-wide STOP must wait for a pending START to settle:
   // otherwise a late START commit may recreate sharing after STOP was ACKed.
   let startSettled:Promise<void>|null=null;
@@ -138,7 +148,13 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     return peerUid;
   };
   return Object.freeze({
+    invalidateDeviceSession(){
+      // Called by the Firebase auth listener even if no network action follows.
+      // Do not fabricate an authenticated remote STOP acknowledgement.
+      deviceSession=null;
+    },
     async start(peerUid:string){
+      forgetForeignDeviceSession(); // defense if auth callbacks arrive late
       const viewerUid=safePeer(peerUid);
       if(startSettled||emergencyStopPending)unavailable();
       // Acquire before any network await, including legacy v1 START.
@@ -182,6 +198,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       }
     },
     async stop(peerUid:string){
+      forgetForeignDeviceSession();
       const viewerUid=safePeer(peerUid);
       if(ports.useDeviceSessions===true){
         const active=deviceSession;
@@ -200,6 +217,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       return {enabled:false};
     },
     async publish(peerUid:string,fix:ShareFix){
+      forgetForeignDeviceSession();
       if(!validFix(fix))unavailable();
       const viewerUid=safePeer(peerUid);
       const session=ports.useDeviceSessions===true?deviceSession:null;
