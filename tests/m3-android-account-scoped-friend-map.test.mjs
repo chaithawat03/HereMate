@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {loadAuthorizedFriendMap} from '../src/location/accountScopedFriendMapRead.ts';
+import {loadAuthorizedFriendMap,ANDROID_FRIEND_MAP_BATCH_DEADLINE_MS} from '../src/location/accountScopedFriendMapRead.ts';
 import {authorizedPeers} from '../src/location/m2FriendLocationView.ts';
 
 const A='androidvieweruid00001',B='anotherandroiduid00002';
@@ -99,4 +99,87 @@ test('Android mounted panel validates live Firebase identity before refresh, com
   assert.match(s,/session\.current===getStagingGuestAuth\(\)\.currentUser\?\.uid/);
   assert.match(s,/AppState\.currentState==='active'/);
   assert.doesNotMatch(s,/AsyncStorage|startLocationUpdatesAsync|requestBackgroundPermissionsAsync/);
+});
+
+function manualDeadline(){
+  let callback=null,delay=null,cancelled=false;
+  const ports={
+    scheduleDeadline:(fn,ms)=>{
+      assert.equal(callback,null,'one whole-batch timer only');
+      callback=fn;delay=ms;return 17;
+    },
+    cancelDeadline:handle=>{
+      assert.equal(handle,17);cancelled=true;
+    }
+  };
+  return {ports,fire:()=>{assert.ok(callback);callback();},
+    get delay(){return delay;},get cancelled(){return cancelled;}};
+}
+
+test('whole-batch deadline starts before hung Firebase relations and forbids late private peer reads',async()=>{
+  const x=rig(),timer=manualDeadline(),pending=deferred();
+  x.ports.loadRelations=()=>pending.promise;
+  Object.assign(x.ports,timer.ports);
+  const work=loadAuthorizedFriendMap(x.ports);
+  assert.equal(timer.delay,ANDROID_FRIEND_MAP_BATCH_DEADLINE_MS);
+  timer.fire();
+  const snapshot=await work;
+  assert.deepEqual(snapshot,{relations:[],reads:{},partialFailure:true});
+  assert.equal(timer.cancelled,true);
+  pending.resolve([relation(peer(1))]);
+  await Promise.resolve();await Promise.resolve();
+  assert.deepEqual(x.reads,[],'late relations must never start private HTTP');
+});
+
+test('one hung peer read cannot suppress seven successful authorized friend fixes',async()=>{
+  const x=rig([relation(peer(1)),relation(peer(2))]);
+  const timer=manualDeadline(),pending=deferred();
+  Object.assign(x.ports,timer.ports);
+  x.ports.readPeer=id=>{
+    x.reads.push(id);
+    return id===peer(2)?pending.promise:Promise.resolve(fix);
+  };
+  const work=loadAuthorizedFriendMap(x.ports);
+  await Promise.resolve();
+  assert.deepEqual(x.reads,[peer(1),peer(2)]);
+  // Ensure peer(1)'s settled fix is retained even when the other peer hangs.
+  await Promise.resolve();
+  timer.fire();
+  const snapshot=await work;
+  assert.equal(timer.cancelled,true);
+  assert.equal(snapshot.partialFailure,true);
+  assert.deepEqual(Object.keys(snapshot.reads),[peer(1)]);
+  assert.equal(snapshot.relations.length,2);
+  pending.resolve(fix);
+  await Promise.resolve();
+  assert.deepEqual(Object.keys(snapshot.reads),[peer(1)],
+    'late peer success cannot mutate the returned snapshot');
+});
+
+test('account switch during a stalled map batch suppresses even partial private results',async()=>{
+  const x=rig([relation(peer(1)),relation(peer(2))]);
+  const timer=manualDeadline(),pending=deferred();
+  Object.assign(x.ports,timer.ports);
+  x.ports.readPeer=id=>id===peer(1)?Promise.resolve(fix):pending.promise;
+  const work=loadAuthorizedFriendMap(x.ports);
+  await Promise.resolve();
+  x.setUid(B);
+  timer.fire();
+  assert.equal(await work,null);
+  pending.resolve(fix);
+  await Promise.resolve();
+  assert.equal(timer.cancelled,true);
+});
+
+test('a healthy friend-map refresh cancels its deadline and remains complete',async()=>{
+  const x=rig(),timer=manualDeadline();
+  Object.assign(x.ports,timer.ports);
+  const snapshot=await loadAuthorizedFriendMap(x.ports);
+  assert.equal(snapshot.partialFailure,false);
+  assert.equal(Object.keys(snapshot.reads).length,1);
+  assert.equal(timer.cancelled,true);
+  // A callback already queued before cancellation must not mutate a result.
+  timer.fire();
+  assert.equal(snapshot.partialFailure,false);
+  assert.equal(Object.keys(snapshot.reads).length,1);
 });
