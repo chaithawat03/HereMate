@@ -277,3 +277,31 @@ test('timer adapter failure never leaves a false active friend-map session',asyn
  await flush();
  assert.equal(reads,0);
 });
+
+
+test('dispose fences UI OFF callback before it can reenter START on unmount',async()=>{
+ let controller,reads=0,restartAttempts=0,cancelled=0;
+ const events=[],timers=[];
+ controller=createAndroidFriendMapPoller({
+   isAndroid:()=>true,isForeground:()=>true,currentUid:()=>USER,
+   now:()=>1_800_000_000_000,
+   scheduleInterval:fn=>{const h={fn};timers.push(h);return h;},
+   cancelInterval:()=>{cancelled++;},
+   refresh:async()=>{reads++;},
+   onActive:active=>{
+     events.push(active);
+     if(!active){restartAttempts++;controller.start();}
+   }
+ });
+ assert.equal(controller.start(),true);
+ await flush();
+ assert.equal(reads,1);
+ controller.dispose();
+ assert.equal(controller.isActive(),false);
+ assert.equal(controller.start(),false);
+ assert.equal(cancelled,1);
+ assert.equal(restartAttempts,0,'unmounted UI must not receive OFF callback');
+ assert.deepEqual(events,[true]);
+ timers[0].fn();await flush();
+ assert.equal(reads,1,'disposed callback cannot refresh');
+});
