@@ -217,4 +217,44 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
    d.data().expireAt instanceof Timestamp));
  // Separate real Firestore docs remain server-only and expire by finite TTL.
  assert.ok((await db.collection('private_location_grants').doc(B+'__'+A).get()).exists);
+
+ // Real Firestore regression: a malformed persisted zone TTL previously
+ // bypassed `zone.expiresAtMs > now`, silently overwriting a corrupt active
+ // record and deleting dedupe state. Fail closed without ANY zone/state write.
+ now+=60_001;
+ await rel.update({status:'accepted',senderConsent:true,recipientConsent:true,
+   updatedAt:Timestamp.fromMillis(now)});
+ for(const malformed of [
+   {ownerUid:A,subjectUid:B,status:'active',circle},
+   {ownerUid:A,subjectUid:B,status:'active',circle,expiresAtMs:String(now-1000)},
+   {ownerUid:A,subjectUid:B,status:'corrupt',circle,expiresAtMs:now-1000},
+   // Structurally complete, already-expired zone: the older PROPOSE guard
+   // would erase invalid consent chronology and the dedupe sentinel.
+   {ownerUid:A,subjectUid:B,status:'active',circle,
+    relationRevision:'0:0',createdAtMs:'corrupt',
+    approvedAtMs:now-90_000,expiresAtMs:now-1},
+   {ownerUid:A,subjectUid:B,status:'active',circle,
+    relationRevision:'0:0',createdAtMs:now-100_000,
+    approvedAtMs:'corrupt',expiresAtMs:now-1},
+   {ownerUid:A,subjectUid:B,status:'active',circle,
+    relationRevision:'0:0',createdAtMs:now-100_000,
+    approvedAtMs:now-100_001,expiresAtMs:now-1}
+ ]){
+   await zoneRef.set(malformed);
+   const sentinel={ownerUid:A,subjectUid:B,zone:'outside',expiresAtMs:now+30_000};
+   await stateRef.set(sentinel);
+   await assert.rejects(geofence.propose(args),GeofenceDenied);
+   assert.deepEqual((await zoneRef.get()).data(),malformed);
+   assert.deepEqual((await stateRef.get()).data(),sentinel);
+   // REVOKE remains independent of friendship/consent and clears corruption.
+   assert.deepEqual(await geofence.revoke({
+     idToken:bearer(B),ownerUid:A,subjectUid:B
+   }),{revoked:true});
+   assert.equal((await zoneRef.get()).exists,false);
+   assert.equal((await stateRef.get()).exists,false);
+   now+=60_001;
+ }
+ const safeReplacement=await geofence.propose(args);
+ assert.equal(safeReplacement.proposed,true);
+ assert.equal((await zoneRef.get()).data().status,'pending');
 });

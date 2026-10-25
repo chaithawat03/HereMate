@@ -86,9 +86,36 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
      await limit(ownerUid,'propose');
      return tx(ownerUid,subjectUid,async ({relation,zone,setZone,deleteState})=>{
        const now=clockNow(clock),revision=authorizeRelation(relation,ownerUid,subjectUid);
-       // Each pair can have only one pending/active geofence, never parallel
-       // duplicate records; a new proposal is never self-approved.
-       if(zone && zone.expiresAtMs>now)deny();
+       // A corrupt persisted zone must never be silently overwritten by
+       // PROPOSE. In particular, missing/string/unsafe expiresAtMs used to
+       // bypass the previous `zone.expiresAtMs > now` check. Only an expired,
+       // structurally valid zone for this exact pair can be replaced.
+       // Participants can always use the independent REVOKE route to recover
+       // from an invalid record, including after friendship removal.
+       if(zone && (
+         zone.ownerUid!==ownerUid||zone.subjectUid!==subjectUid||
+         !['pending','active'].includes(zone.status)||
+         !Number.isSafeInteger(zone.expiresAtMs)||zone.expiresAtMs<=0||
+         zone.expiresAtMs>now||!validCircle(zone.circle)
+       ))deny();
+       // Expired does not mean structurally safe: a malformed persisted
+       // approval/creation timeline must not be silently overwritten by
+       // PROPOSE. This is separate from validating live zones on REVIEW
+       // and EVALUATE; independently authenticated REVOKE remains available.
+       if(zone){
+         const created=zone.createdAtMs;
+         if(!Number.isSafeInteger(created)||created<=0||created>now||
+            zone.expiresAtMs<=created)deny();
+         if(zone.status==='pending'){
+           if(zone.expiresAtMs>created+PENDING_LIFETIME_MS)deny();
+         }else{
+           const approved=zone.approvedAtMs;
+           if(!Number.isSafeInteger(approved)||approved<created||
+              approved>now||approved>=created+PENDING_LIFETIME_MS||
+              zone.expiresAtMs<=approved||
+              zone.expiresAtMs>approved+MAX_ZONE_LIFETIME_MS)deny();
+         }
+       }
        const expiresAtMs=now+PENDING_LIFETIME_MS;
        setZone({ownerUid,subjectUid,circle:{...circle},status:'pending',
          relationRevision:revision,createdAtMs:now,expiresAtMs,
