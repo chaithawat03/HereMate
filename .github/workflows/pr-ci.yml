@@ -81,8 +81,12 @@ jobs:
         run: node --test tests/m3-m4-transport-permission-race.test.mjs
       - name: M3 publisher session V2 HTTP strict schema and identity (offline)
         run: node --test tests/m3-device-session-http.test.mjs
+      - name: M3 viewer READ denies mismatched v2 publisher session lease (offline)
+        run: node --test tests/m3-read-session-integrity.test.mjs
       - name: M3/M2 authenticated STOP cross-pair key collision guard (offline)
         run: node --test tests/m3-pair-stop-collision.test.mjs
+      - name: M3/M4 all-write cross-pair key collision guard (offline)
+        run: node --test tests/m3-m4-pair-write-collision.test.mjs
       - name: Test M2.1 transactional backend privacy and bearer HTTP contract (offline)
         run: |
           node --check backend/location/location-service.mjs
@@ -208,6 +212,17 @@ jobs:
             --project demo-heremate-m053 \
             --config firebase.json \
             "node --test backend/location-runtime/emulator.test.mjs"
+      - name: Real Firestore Admin M3/M4 legacy pair-key collision isolation (offline)
+        env:
+          GCLOUD_PROJECT: demo-heremate-m053
+          FIREBASE_CONFIG: '{"projectId":"demo-heremate-m053"}'
+          GOOGLE_APPLICATION_CREDENTIALS: ''
+        run: |
+          npx --yes firebase-tools@15.34.0 emulators:exec \
+            --only firestore \
+            --project demo-heremate-m053 \
+            --config firebase.json \
+            "node --test backend/location-runtime/pair-write-collision-emulator.test.mjs"
       - name: Verify gated Android/iOS M4 subject consent UX and HTTPS client (offline)
         run: node --test tests/m4-staging-mobile-transport.test.mjs tests/m4-foreground-watch.test.mjs
       - name: M4 bounded HTTP framing, privacy and error contract (offline)
