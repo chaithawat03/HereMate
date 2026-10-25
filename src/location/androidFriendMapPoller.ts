@@ -101,7 +101,11 @@ export function createAndroidFriendMapPoller(p:FriendMapPollPorts){
    void tick(run); // An explicit user tap starts first read immediately.
    return true;
  }
- function dispose(){stop();disposed=true;}
+ function dispose(){
+   // Mark disposed BEFORE STOP. Its onActive(false) UI callback must never
+   // restart an interval while this component is being unmounted.
+   disposed=true;stop();
+ }
  return Object.freeze({
    start,stop,dispose,isActive:()=>active
  });
