@@ -110,6 +110,34 @@ test('M3 logout and login to the same UID still requires a new device capability
  await x.transport.publish(PEER,fix());
  assert.equal(x.calls.filter(c=>c.endpoint.endsWith('/start')).length,2);
 });
+test('M3 delayed START cannot resurrect a capability after same-UID logout and login (ABA)',async()=>{
+ let release,seen;
+ const gate=new Promise(resolve=>{release=resolve;});
+ const entered=new Promise(resolve=>{seen=resolve;});
+ let starts=0;
+ const x=rig(async({endpoint})=>{
+   if(endpoint.endsWith('/start')){
+     starts++;
+     if(starts===1){seen();await gate;}
+   }
+   return {ok:true,status:200,json:async()=>({
+     enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP_A
+   })};
+ });
+ const first=x.transport.start(PEER);
+ await entered;
+ x.setUser(null);
+ x.transport.invalidateDeviceSession();
+ x.setUser(FIRST);
+ x.transport.invalidateDeviceSession();
+ release();
+ await assert.rejects(first,/UNAVAILABLE/,
+   'matching Firebase UID must not revive a pre-logout START result');
+ await assert.rejects(x.transport.publish(PEER,fix()),/UNAVAILABLE/);
+ assert.equal(starts,1);
+ assert.equal((await x.transport.start(PEER)).enabled,true);
+ assert.equal(starts,2,'new login needs a new server-approved START');
+});
 test('M3 sharing UI erases v2 token on auth change and auth-state error',()=>{
  const ui=readFileSync(new URL('../src/location/M2SharingPanel.tsx',import.meta.url),'utf8');
  const transport=readFileSync(new URL('../src/location/m2StagingTransport.ts',import.meta.url),'utf8');
