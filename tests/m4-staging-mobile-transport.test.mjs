@@ -145,7 +145,7 @@ test('M4 consent responses fail closed for expired, impossible or future-dated T
      proposalCreatedAtMs:Date.now()-5_000}],
    ['review',{circle,expiresAtMs:Date.now()+pending+60_000,
      proposalCreatedAtMs:Date.now()-5_000}],
-   ['review',{circle,expiresAtMs:Date.now()+30_000,
+   ['review',{circle,expiresAtMs:Date.now()+90_000,
      proposalCreatedAtMs:Date.now()+60_000}],
    ['review',{circle,expiresAtMs:Date.now()+30_000,
      proposalCreatedAtMs:Date.now()+40_000}],
