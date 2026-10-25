@@ -53,6 +53,31 @@ function activeM2Grant(grant,publisher,owner,subject,relation,now){
     publisher.ownerUid!==subject||publisher.viewerUid!==owner||
     publisher.expiresAtMs!==grant.expiresAtMs)deny();
 }
+// A stored M4 transition record is server-only but may be malformed after a
+// partial migration or a previous write defect. Never let a corrupt cooldown
+// or synthetic first-half sample turn ONE fresh fix into a false Enter/Exit.
+// Old/expired approval state is intentionally reset to a new baseline.
+function checkedDedupeState(state,owner,subject,revision,active,now){
+ if(!state)return EMPTY_STATE;
+ // Do not read or overwrite a different pair's colliding legacy document.
+ if(state.ownerUid!==owner||state.subjectUid!==subject)deny();
+ if(state.relationRevision!==revision||
+    state.approvedAtMs!==active.approvedAtMs)return EMPTY_STATE;
+ const expires=state.expiresAtMs;
+ if(!Number.isSafeInteger(expires)||expires<=0||
+    expires>active.expiresAtMs||expires>now+MAX_ZONE_LIFETIME_MS)deny();
+ if(expires<=now)return EMPTY_STATE;
+ const sample=state.lastSampleCapturedAtMs,event=state.lastEventAtMs;
+ if(!['unknown','inside','outside'].includes(state.zone)||
+    ![null,'inside','outside'].includes(state.pending)||
+    (state.streak!==0&&state.streak!==1)||
+    (state.pending===null)!==(state.streak===0)||
+    (state.pending!==null&&state.pending===state.zone)||
+    !(sample===null||(Number.isSafeInteger(sample)&&sample>0&&sample<=now+5000))||
+    !(event===null||(Number.isSafeInteger(event)&&event>0&&event<=now))||
+    (state.pending!==null&&sample===null))deny();
+ return state;
+}
 export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.now}){
  if(adminAuth?.app?.options?.projectId!==STAGING_PROJECT||
     typeof adminAuth.verifyIdToken!=='function'||
@@ -159,9 +184,8 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        activeM2Grant(grant,publisher,ownerUid,subjectUid,revision,current);
        if(!validFix(point,current))deny();
        // State is strictly zone-classification/dedupe. Never store GPS point.
-       const previous=state?.relationRevision===revision&&
-          state?.approvedAtMs===active.approvedAtMs&&
-          state.expiresAtMs>current?state:EMPTY_STATE;
+       const previous=checkedDedupeState(
+         state,ownerUid,subjectUid,revision,active,current);
        const {next,event,quality}=advanceState(active.circle,point,current,previous);
        if(quality==='invalid')deny();
        const expiresAtMs=Math.min(active.expiresAtMs,current+MAX_ZONE_LIFETIME_MS);
