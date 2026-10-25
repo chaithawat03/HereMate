@@ -179,3 +179,69 @@ test('M4 rejects 307/308 responses rather than exposing a consented zone to redi
    assert.ok(!String(seen[0].input).includes('foreign.run.app'));
  }
 });
+
+
+test('M4 entire-request deadline rejects hung Firebase token and never sends a late zone revoke',async()=>{
+ let release;
+ const waiting=new Promise(resolve=>{release=resolve;});
+ const sent=[];
+ const x=make({
+   timeoutMs:1000,
+   currentIdentity:()=>({uid:UID,getIdToken:()=>waiting}),
+   fetchImpl:async(input)=>{sent.push(input);throw Error('late private POST');}
+ });
+ const pending=x.transport.revoke(PEER,UID);
+ await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(sent.length,0,'no request can leave while Firebase token is unresolved');
+ release(SECRET);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(sent.length,0,'late Firebase token must not issue a revoked request');
+});
+
+test('M4 entire-request deadline rejects hung OS permission and never sends GPS after it resolves',async()=>{
+ let release;
+ const waiting=new Promise(resolve=>{release=resolve;});
+ const sent=[];
+ const x=make({
+   timeoutMs:1000,
+   foregroundPermissionGranted:()=>waiting,
+   fetchImpl:async(input)=>{sent.push(input);throw Error('late GPS POST');}
+ });
+ const pending=x.transport.evaluate(PEER,{
+   latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()
+ });
+ await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(sent.length,0,'private GPS must never leave during a hung OS prompt');
+ release(true);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(sent.length,0,'late permission approval must not publish stale GPS');
+});
+
+test('M4 entire-request deadline bounds HTTP and JSON awaits even when fetch mocks ignore AbortSignal',async()=>{
+ let releaseFetch;
+ const waitingFetch=new Promise(resolve=>{releaseFetch=resolve;});
+ let observedSignal;
+ const x=make({
+   timeoutMs:1000,
+   fetchImpl:async(_url,opts)=>{
+     observedSignal=opts.signal;
+     await waitingFetch;
+     return {ok:true,status:200,json:async()=>({revoked:true})};
+   }
+ });
+ const pending=x.transport.revoke(PEER,UID);
+ await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(observedSignal.aborted,true,'network signal must be aborted');
+ releaseFetch();
+ await new Promise(resolve=>setImmediate(resolve));
+ let releaseJson;
+ const waitingJson=new Promise(resolve=>{releaseJson=resolve;});
+ const y=make({
+   timeoutMs:1000,
+   fetchImpl:async()=>({ok:true,status:200,json:()=>waitingJson})
+ });
+ const pendingJson=y.transport.review(PEER);
+ await assert.rejects(pendingJson,/M4_GEOFENCE_NOT_AVAILABLE/);
+ releaseJson({circle,expiresAtMs:now()+10_000,proposalCreatedAtMs});
+ await new Promise(resolve=>setImmediate(resolve));
+});
