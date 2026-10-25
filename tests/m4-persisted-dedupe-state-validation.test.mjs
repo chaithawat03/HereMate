@@ -18,7 +18,9 @@ const relation={senderUid:OWNER,recipientUid:SUBJECT,status:'accepted',
  senderConsent:true,recipientConsent:true,
  updatedAt:{seconds:1800000000,nanoseconds:0}};
 const zone={ownerUid:OWNER,subjectUid:SUBJECT,status:'active',
- relationRevision:REV,approvedAtMs:NOW-50_000,
+ // Persisted active zone must have a valid proposal/approval chronology
+ // when PR #116 is integrated; the dedupe cases must reach state validation.
+ relationRevision:REV,createdAtMs:NOW-60_000,approvedAtMs:NOW-50_000,
  expiresAtMs:NOW+120_000,circle:CIRCLE};
 const grant={ownerUid:SUBJECT,viewerUid:OWNER,enabled:true,
  relationRevision:REV,expiresAtMs:NOW+50_000};
