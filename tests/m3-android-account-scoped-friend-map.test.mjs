@@ -56,8 +56,7 @@ test('direct identity change during pending HTTP reads drops all private names a
   const pending=deferred();
   x.ports.readPeer=async id=>{x.reads.push(id);return pending.promise;};
   const work=loadAuthorizedFriendMap(x.ports);
-  await Promise.resolve();
-  assert.equal(x.reads.length,2);
+  await waitForReadStarts(x.reads,2);
   x.setUid(B);
   pending.resolve(fix);
   assert.equal(await work,null);
@@ -101,6 +100,12 @@ test('Android mounted panel validates live Firebase identity before refresh, com
   assert.doesNotMatch(s,/AsyncStorage|startLocationUpdatesAsync|requestBackgroundPermissionsAsync/);
 });
 
+async function waitForReadStarts(reads,count){
+  // Promise.race adds an intentional async boundary after the relation read.
+  // Wait only for queued microtasks, never for wall-clock/network timing.
+  for(let i=0;i<12&&reads.length<count;i++)await Promise.resolve();
+  assert.equal(reads.length,count,'all authorized peer reads were initiated');
+}
 function manualDeadline(){
   let callback=null,delay=null,cancelled=false;
   const ports={
@@ -140,7 +145,7 @@ test('one hung peer read cannot suppress seven successful authorized friend fixe
     return id===peer(2)?pending.promise:Promise.resolve(fix);
   };
   const work=loadAuthorizedFriendMap(x.ports);
-  await Promise.resolve();
+  await waitForReadStarts(x.reads,2);
   assert.deepEqual(x.reads,[peer(1),peer(2)]);
   // Ensure peer(1)'s settled fix is retained even when the other peer hangs.
   await Promise.resolve();
