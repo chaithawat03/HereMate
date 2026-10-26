@@ -13,6 +13,9 @@ const freshFix=(fix:ShareFix,now:number)=>
  fix.accuracyMeters<=100;
 export const M4_WATCH_MAX_MS=60_000;
 export const M4_WATCH_MIN_FIX_INTERVAL_MS=10_000;
+// A v2 publisher lease may be retired without any subsequent native GPS fix.
+// Bound native watcher teardown even when Android/iOS stops delivering fixes.
+export const M4_WATCH_LEASE_RECHECK_MS=5_000;
 export type M4WatchPhase='off'|'starting'|'watching';
 export type M4WatchPorts=Readonly<{
  identity:()=>string|null;
@@ -37,6 +40,7 @@ const UID=/^[A-Za-z0-9_-]{12,128}$/;
 export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  let phase:M4WatchPhase='off',generation=0,disposed=false;
  let watcher:{remove:()=>void}|null=null,timer:unknown=null;
+ let leaseRecheckTimer:unknown=null;
  let processing=false,lastFixAt=-Infinity;
  let owner:string|null=null,actor:string|null=null;
  let watchLeaseProof:(()=>boolean)|null=null;
@@ -50,6 +54,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  function stop(){
    ++generation;
    if(timer!==null){p.cancel(timer);timer=null;}
+   if(leaseRecheckTimer!==null){p.cancel(leaseRecheckTimer);leaseRecheckTimer=null;}
    watcher?.remove();watcher=null;
    owner=null;actor=null;watchLeaseProof=null;processing=false;
    lastFixAt=-Infinity;
@@ -59,6 +64,18 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    return !disposed&&epoch===generation&&phase!=='off'&&
      actor!==null&&p.identity()===actor&&p.isForeground()&&
      leaseCurrent(watchLeaseProof);
+ }
+ // STOP/expiry/handoff can retire the M3 lease while native GPS is silent.
+ // Do not wait for another location fix to release the OS watcher. A stale
+ // queued recheck must never stop a newer explicitly authorized generation.
+ function scheduleLeaseRecheck(epoch:number){
+   if(watchLeaseProof===null||epoch!==generation||phase!=='watching')return;
+   leaseRecheckTimer=p.schedule(()=>{
+     if(epoch!==generation||phase!=='watching')return;
+     leaseRecheckTimer=null;
+     if(!active(epoch)){stop();return;}
+     scheduleLeaseRecheck(epoch);
+   },M4_WATCH_LEASE_RECHECK_MS);
  }
  async function start(zoneOwnerUid:string,relationshipApproved:boolean){
    if(disposed||phase!=='off'||!relationshipApproved||!UID.test(zoneOwnerUid))
@@ -115,6 +132,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      // Only this exact opt-in watcher may expire itself: a retired timeout
      // must not terminate a newer consented foreground watcher.
      timer=p.schedule(()=>{if(epoch===generation)stop();},M4_WATCH_MAX_MS);
+     scheduleLeaseRecheck(epoch);
      return true;
    }catch{
      // Android can reject a permission prompt or native watch bind AFTER a
