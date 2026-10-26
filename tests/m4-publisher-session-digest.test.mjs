@@ -3,13 +3,17 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {createGeofenceService,GeofenceDenied} from '../backend/geofences/geofence-service.mjs';
 import {STAGING_PROJECT} from '../backend/location/location-service.mjs';
 
 const NOW=1_800_000_000_000;
 const OWNER='zoneowner000000001',SUBJECT='subject0000000001';
 const RELATION_REVISION='1800000000:0';
-const DIGEST_A='a'.repeat(64),DIGEST_B='b'.repeat(64);
+const TOKEN_A='a'.repeat(64),TOKEN_B='b'.repeat(64);
+const digest=secret=>createHash('sha256')
+ .update('m3-device-session:v1:'+secret).digest('hex');
+const DIGEST_A=digest(TOKEN_A),DIGEST_B=digest(TOKEN_B);
 const FIX={latitude:0,longitude:0,accuracyMeters:12,capturedAtMs:NOW-1000};
 const token=uid=>'T'.repeat(64)+uid;
 const relation={senderUid:OWNER,recipientUid:SUBJECT,status:'accepted',
@@ -56,8 +60,9 @@ function rig(grant,publisher){
       rateLimiter:{persistent:true,consume:async()=>true},clock:()=>NOW})
   };
 }
-const evaluate=service=>service.evaluate({
+const evaluate=(service,sessionToken)=>service.evaluate({
   idToken:token(SUBJECT),ownerUid:OWNER,point:FIX,
+  ...(sessionToken===undefined?{}:{sessionToken}),
   appInForeground:true,foregroundPermissionGranted:true
 });
 
@@ -74,9 +79,30 @@ test('M4 permits legacy v1 same-pair active publisher with neither session diges
 test('M4 permits a matching well-formed M3 session digest without storing GPS history',async()=>{
   const x=rig({...baseGrant,sessionDigest:DIGEST_A},
     {...basePublisher,sessionDigest:DIGEST_A});
-  assert.equal((await evaluate(x.service)).evaluated,true);
+  assert.equal((await evaluate(x.service,TOKEN_A)).evaluated,true);
   assert.equal(x.writes.length,1);
   assert.equal(Object.hasOwn(x.writes[0],'point'),false);
+});
+
+test('M4 denies a second same-Firebase-UID device without the active M3 publisher capability',async()=>{
+ const x=rig({...baseGrant,sessionDigest:DIGEST_A},
+   {...basePublisher,sessionDigest:DIGEST_A});
+ // Firebase ID token and foreground flags alone are not publisher proof.
+ for(const wrong of [undefined,TOKEN_B,'0'.repeat(64),'bad',null,'A'.repeat(64)]){
+   await assert.rejects(evaluate(x.service,wrong),GeofenceDenied);
+   assert.deepEqual(x.writes,[],'unauthorized handset cannot update dedupe state');
+ }
+ assert.equal((await evaluate(x.service,TOKEN_A)).evaluated,true);
+ assert.equal(x.writes.length,1);
+ assert.equal(JSON.stringify(x.writes).includes(TOKEN_A),false,
+   'never store device bearer capability in M4 state');
+});
+
+test('M4 v1 cannot be confused with v2 by adding a capability to a legacy lease',async()=>{
+ const x=rig({...baseGrant},{...basePublisher});
+ await assert.rejects(evaluate(x.service,TOKEN_A),GeofenceDenied);
+ assert.deepEqual(x.writes,[]);
+ assert.equal((await evaluate(x.service)).evaluated,true);
 });
 
 test('M4 rejects cross-session M3 grant/publisher mismatch before writing state',async()=>{
