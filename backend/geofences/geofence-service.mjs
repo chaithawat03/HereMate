@@ -194,10 +194,24 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        // inside/outside streak or emit a fabricated Enter/Exit.
        // v1 (no digest) retains its existing state schema and behavior.
        const leaseDigest=grant.sessionDigest;
-       const previous=state?.relationRevision===revision&&
+       const sameApproval=state?.relationRevision===revision&&
           state?.approvedAtMs===active.approvedAtMs&&
-          state.expiresAtMs>current&&
-          state.sessionDigest===leaseDigest?state:EMPTY_STATE;
+          state.expiresAtMs>current;
+       let previous=EMPTY_STATE;
+       if(sameApproval){
+         if(state.sessionDigest===leaseDigest){
+           previous=state;
+         }else{
+           // A new handset must not inherit another device's location
+           // baseline. The 5-minute notification cooldown, however, belongs
+           // to the APPROVED ZONE, not the publisher handset. Keep it across
+           // a legitimate lease handoff to avoid rapid duplicate Enter/Exit.
+           const lastEvent=state.lastEventAtMs??null;
+           if(lastEvent!==null&&(!Number.isSafeInteger(lastEvent)||
+              lastEvent<=0||lastEvent>current))deny();
+           previous={...EMPTY_STATE,lastEventAtMs:lastEvent};
+         }
+       }
        const {next,event,quality}=advanceState(active.circle,point,current,previous);
        if(quality==='invalid')deny();
        const expiresAtMs=Math.min(active.expiresAtMs,current+MAX_ZONE_LIFETIME_MS);
