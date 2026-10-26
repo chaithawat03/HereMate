@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createM2StagingTransport} from '../src/location/m2StagingTransport.ts';
+import {createForegroundSharingController} from '../src/location/m2ForegroundSession.ts';
 
 const SELF='ownerdeviceuid000001',PEER='viewerdeviceuid000002';
 const TOKEN='T'.repeat(80),CAP='a'.repeat(64);
@@ -425,4 +426,111 @@ test('M3 failed STOP latch is not inherited by a separately authorized new accou
  assert.equal(x.transport.getPublisherSessionToken(second,PEER),CAP,
    'only new authenticated START confirmation can reset the retired latch');
  assert.equal(stops,1);
+});
+
+test('M3 owner STOP tap fences M4 capability before the sharing controller waits for an in-flight GPS ACK',async()=>{
+ let nativeFix,releasePublish,publishSeen;
+ const publishGate=new Promise(resolve=>{releasePublish=resolve;});
+ const entered=new Promise(resolve=>{publishSeen=resolve;});
+ const sent=[];
+ const transport=createM2StagingTransport({
+   approvedCloudRunUrl:ORIGIN,projectId:'heremate',useDeviceSessions:true,
+   currentIdentity:()=>({uid:SELF,getIdToken:async()=>TOKEN}),
+   isForeground:()=>true,foregroundPermissionGranted:async()=>true,
+   fetchImpl:async(url)=>{
+     const path=new URL(url).pathname;
+     sent.push(path);
+     if(path.endsWith('/start'))return {ok:true,status:200,json:async()=>({
+       enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+     })};
+     if(path.endsWith('/publish')){
+       publishSeen();
+       await publishGate;
+       return {ok:true,status:200,json:async()=>({
+         stored:true,expiresAtMs:Date.now()+20_000
+       })};
+     }
+     if(path.endsWith('/stop'))return {ok:true,status:200,json:async()=>({enabled:false})};
+     throw Error('UNEXPECTED_ENDPOINT');
+   }
+ });
+ const states=[];
+ const controller=createForegroundSharingController({
+   ownerUid:()=>SELF,isForeground:()=>true,
+   askForegroundPermission:async()=>true,
+   watchForegroundFix:async onFix=>{nativeFix=onFix;return {remove:()=>{}};},
+   transport,now:Date.now,
+   schedule:(fn,ms)=>setTimeout(fn,ms),cancel:handle=>clearTimeout(handle),
+   onState:state=>states.push(state.phase)
+ });
+ await controller.start(PEER,{senderUid:SELF,recipientUid:PEER,
+   status:'accepted',senderConsent:true,recipientConsent:true});
+ assert.equal(controller.getState().phase,'sharing');
+ assert.equal(transport.getPublisherSessionToken(SELF,PEER),CAP);
+ nativeFix(fix());
+ await entered;
+ // Controller STOP waits for in-flight publish, but user consent withdrawal
+ // must be immediate even before the remote STOP route is dispatched.
+ const stopping=controller.stop();
+ assert.equal(transport.getPublisherSessionToken(SELF,PEER),null,
+   'M4 must lose its bearer synchronously at the STOP tap');
+ assert.equal(sent.filter(p=>p.endsWith('/stop')).length,0,
+   'remote STOP correctly waits for the earlier publish');
+ await assert.rejects(transport.publish(PEER,fix()),/UNAVAILABLE/,
+   'no new GPS may leave while controller waits for old publish');
+ releasePublish();
+ await stopping;
+ assert.equal(controller.getState().phase,'off');
+ assert.deepEqual(sent,[
+   '/v2/locations/sessions/start',
+   '/v2/locations/sessions/publish',
+   '/v2/locations/sessions/stop'
+ ]);
+ assert.equal(transport.getPublisherSessionToken(SELF,PEER),null);
+ assert.ok(states.includes('stopping'));
+});
+
+test('M3 STOP during delayed START cannot resurrect a publisher bearer from the late START ACK',async()=>{
+ let releaseStart,startSeen;
+ const startGate=new Promise(resolve=>{releaseStart=resolve;});
+ const entered=new Promise(resolve=>{startSeen=resolve;});
+ const sent=[];
+ const transport=createM2StagingTransport({
+   approvedCloudRunUrl:ORIGIN,projectId:'heremate',useDeviceSessions:true,
+   currentIdentity:()=>({uid:SELF,getIdToken:async()=>TOKEN}),
+   isForeground:()=>true,foregroundPermissionGranted:async()=>true,
+   fetchImpl:async url=>{
+     const path=new URL(url).pathname;
+     sent.push(path);
+     if(path.endsWith('/start')){
+       startSeen();await startGate;
+       return {ok:true,status:200,json:async()=>({
+         enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+       })};
+     }
+     if(path.endsWith('/stop'))return {ok:true,status:200,json:async()=>({enabled:false})};
+     throw Error('GPS_MUST_NOT_SEND_AFTER_STOP');
+   }
+ });
+ const controller=createForegroundSharingController({
+   ownerUid:()=>SELF,isForeground:()=>true,
+   askForegroundPermission:async()=>true,
+   watchForegroundFix:async()=>({remove:()=>{}}),
+   transport,now:Date.now,
+   schedule:(fn,ms)=>setTimeout(fn,ms),cancel:handle=>clearTimeout(handle),
+   onState:()=>{}
+ });
+ const starting=controller.start(PEER,{senderUid:SELF,recipientUid:PEER,
+   status:'accepted',senderConsent:true,recipientConsent:true});
+ await entered;
+ const stopping=controller.stop();
+ assert.equal(transport.getPublisherSessionToken(SELF,PEER),null);
+ releaseStart();
+ await Promise.all([starting,stopping]);
+ assert.equal(controller.getState().phase,'off');
+ assert.equal(transport.getPublisherSessionToken(SELF,PEER),null,
+   'late START ACK must preserve the earlier STOP intent until STOP ACK');
+ assert.deepEqual(sent,[
+   '/v2/locations/sessions/start','/v2/locations/sessions/stop'
+ ]);
 });
