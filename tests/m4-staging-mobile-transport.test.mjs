@@ -125,6 +125,32 @@ test('M4 reads M3 device capability only after awaited identity and OS permissio
    'stale capability from before awaited Firebase token must not be sent');
 });
 
+test('M4 suppresses in-flight v2 geofence event after same-UID device capability handoff',async()=>{
+ let activeToken='a'.repeat(64),resume,entered;
+ const waiting=new Promise(resolve=>{resume=resolve;});
+ const requestEntered=new Promise(resolve=>{entered=resolve;});
+ const sent=[];
+ const x=make({
+   getPublisherSessionToken:()=>activeToken,
+   fetchImpl:async(input,init)=>{
+     sent.push({input,init});
+     entered();
+     await waiting;
+     return {status:200,ok:true,json:async()=>({
+       evaluated:true,event:'enter',quality:'ok'
+     })};
+   }
+ });
+ const fix={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
+ const pending=x.transport.evaluate(PEER,fix);
+ await requestEntered;
+ assert.equal(JSON.parse(sent[0].init.body).sessionToken,'a'.repeat(64));
+ activeToken='b'.repeat(64); // same Firebase UID, newer publisher session
+ resume();
+ await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(sent.length,1,'stale event must never trigger another request');
+});
+
 test('invalid coordinates, permission OFF or forged caller never send GPS or proposed circle',async()=>{
  const x=make();
  await assert.rejects(x.transport.propose(PEER,{...circle,radiusMeters:10}),/M4_GEOFENCE_NOT_AVAILABLE/);
