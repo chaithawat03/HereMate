@@ -47,7 +47,12 @@ export async function handleGeofenceHttp({
  if(!token)return response(401,{error:'unauthorized'});
  let body;
  try{body=JSON.parse(bodyText);}catch{return response(400,{error:'invalid_request'});}
- if(!exact(body,route.keys))return response(400,{error:'invalid_request'});
+ // Only EVALUATE may optionally carry the M3 device-bound capability.
+ // All other M4 endpoints remain exact-shape, including independent REVOKE.
+ const keys=route.method==='evaluate'&&body&&typeof body==='object'&&
+   !Array.isArray(body)&&Object.hasOwn(body,'sessionToken')
+   ? [...route.keys,'sessionToken'] : route.keys;
+ if(!exact(body,keys))return response(400,{error:'invalid_request'});
  try{
    const result=await service[route.method]({idToken:token,...body});
    return response(200,result);
