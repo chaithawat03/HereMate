@@ -153,9 +153,9 @@ test('Android M4 real JWT/HTTP/Firestore consent and event privacy (emulators on
       'foreign handset cannot create a geofence baseline or event');
     // Four independent synthetic samples establish outside, then Enter.
     // Captures are distinct and ordered; no physical GPS or elapsed wait.
-    const captured=Date.now()-10000;
+    const captured=Date.now(); // Only post-device-START consented fixes.
     const sample=(lat,offset)=>({
-      latitude:lat,longitude:0,accuracyMeters:12,capturedAtMs:captured+offset
+      latitude:lat,longitude:0,accuracyMeters:12,capturedAtMs:captured+offset/2
     });
     assert.equal((await subjectM4.evaluate(owner.uid,sample(0.02,0))).event,null);
     assert.equal((await subjectM4.evaluate(owner.uid,sample(0.02,2000))).event,null);
