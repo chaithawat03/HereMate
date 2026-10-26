@@ -158,6 +158,37 @@ test('M4 v2 rejects fresh-but-pre-START GPS without state or event mutation',asy
  })).evaluated,true,'M2 v1 generic freshness policy is unchanged');
 });
 
+test('M4 v2 rejects post-expiry captured GPS within generic 5s clock skew',async()=>{
+ const expiresAtMs=NOW+1000;
+ const grant={...baseGrant,expiresAtMs,sessionDigest:DIGEST_A};
+ const publisher={...basePublisher,expiresAtMs,sessionDigest:DIGEST_A};
+ const x=rig(grant,publisher);
+ // The 1ms future-skewed fix is not expired at request time, but its
+ // capture timestamp is outside the current publisher's consented lease.
+ for(const capturedAtMs of [expiresAtMs+1,expiresAtMs+1000]){
+   await assert.rejects(evaluate(x.service,TOKEN_A,{
+     ...FIX,capturedAtMs
+   }),GeofenceDenied);
+   assert.deepEqual(x.writes,[],
+     'no geofence baseline, cooldown or event writes after lease end');
+ }
+ const boundary=await evaluate(x.service,TOKEN_A,{
+   ...FIX,capturedAtMs:expiresAtMs
+ });
+ assert.equal(boundary.evaluated,true,'lease-end capture is valid');
+ const original=structuredClone(x.currentState());
+ await assert.rejects(evaluate(x.service,TOKEN_A,{
+   ...FIX,capturedAtMs:expiresAtMs+1
+ }),GeofenceDenied);
+ assert.deepEqual(x.currentState(),original,
+   'post-expiry fix must not mutate an existing approved-zone state');
+ // Original M2/v1 remains governed by the existing generic skew tolerance.
+ const legacy=rig({...baseGrant,expiresAtMs},{...basePublisher,expiresAtMs});
+ assert.equal((await evaluate(legacy.service,undefined,{
+   ...FIX,capturedAtMs:expiresAtMs+1
+ })).evaluated,true);
+});
+
 test('M4 v2 device lease handoff discards prior handset geofence baseline without a false EXIT',async()=>{
  const prior={ownerUid:OWNER,subjectUid:SUBJECT,
    relationRevision:RELATION_REVISION,approvedAtMs:zone.approvedAtMs,
