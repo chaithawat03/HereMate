@@ -199,6 +199,24 @@ test('logout or permissions revocation while HTTP response pending cannot delive
  finish2();
  await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
 });
+test('M4 v2 UI cannot mount without an explicit same-device publisher capability bridge',()=>{
+ const wiring=read('src/geofences/M4GeofenceStagingScreens.tsx');
+ const androidRoot=read('M2StagingApp.tsx');
+ const iosRoot=read('M3IOSStagingApp.tsx');
+ const transport=read('src/geofences/m4StagingTransport.ts');
+ assert.match(wiring,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'/);
+ assert.match(wiring,/requiresV2Capability&&typeof getPublisherSessionToken!=='function'/);
+ assert.match(wiring,/requiresV2Capability\?\{getPublisherSessionToken\}:\{\}/);
+ assert.match(wiring,/getPublisherSessionToken\?:\(\)=>string\|null/);
+ assert.match(transport,/getPublisherSessionToken\?:\(\)=>string\|null/);
+ // Neither current app root supplies a publisher bearer to the M4 panel.
+ // A future v2 release MUST explicitly wire a same-account/same-device
+ // scoped bridge rather than silently using a v1 UID-only EVALUATE.
+ assert.doesNotMatch(androidRoot,/getPublisherSessionToken=/);
+ assert.doesNotMatch(iosRoot,/getPublisherSessionToken=/);
+ assert.doesNotMatch(read('eas.json'),/EXPO_PUBLIC_ENABLE_M4_GEOFENCES/);
+});
+
 test('M4 UI requires independent owner/subject consent, distinct revoke and explicit OS GPS tap',()=>{
  const app=read('M2StagingApp.tsx');
  const ios=read('M3IOSStagingApp.tsx');
