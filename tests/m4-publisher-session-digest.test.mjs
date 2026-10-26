@@ -28,8 +28,9 @@ const baseGrant={ownerUid:SUBJECT,viewerUid:OWNER,enabled:true,
   relationRevision:RELATION_REVISION,expiresAtMs:NOW+50_000};
 const basePublisher={ownerUid:SUBJECT,viewerUid:OWNER,expiresAtMs:NOW+50_000};
 
-function rig(grant,publisher){
+function rig(grant,publisher,initialState=null){
   const writes=[];
+  let state=initialState;
   const store={
     projectId:STAGING_PROJECT,
     async transactZone({ownerUid,subjectUid},work){
@@ -37,11 +38,12 @@ function rig(grant,publisher){
       assert.equal(subjectUid,SUBJECT);
       const pending=[];
       const result=await work({
-        relation,zone,state:null,grant,publisher,
+        relation,zone,state,grant,publisher,
         setState:row=>pending.push(row),
         deleteState:()=>pending.push(null)
       });
       writes.push(...pending);
+      if(pending.length)state=pending.at(-1);
       return result;
     }
   };
@@ -55,13 +57,13 @@ function rig(grant,publisher){
     }
   };
   return {
-    writes,
+    writes,currentState:()=>state,
     service:createGeofenceService({adminAuth,store,
       rateLimiter:{persistent:true,consume:async()=>true},clock:()=>NOW})
   };
 }
-const evaluate=(service,sessionToken)=>service.evaluate({
-  idToken:token(SUBJECT),ownerUid:OWNER,point:FIX,
+const evaluate=(service,sessionToken,point=FIX)=>service.evaluate({
+  idToken:token(SUBJECT),ownerUid:OWNER,point,
   ...(sessionToken===undefined?{}:{sessionToken}),
   appInForeground:true,foregroundPermissionGranted:true
 });
@@ -129,4 +131,71 @@ test('M4 still rejects expired M2/M3 publisher lease even with matching digest',
     {...basePublisher,sessionDigest:DIGEST_A,expiresAtMs:NOW-1});
   await assert.rejects(evaluate(x.service),GeofenceDenied);
   assert.deepEqual(x.writes,[]);
+});
+
+test('M4 v2 device lease handoff discards prior handset geofence baseline without a false EXIT',async()=>{
+ const prior={ownerUid:OWNER,subjectUid:SUBJECT,
+   relationRevision:RELATION_REVISION,approvedAtMs:zone.approvedAtMs,
+   expiresAtMs:NOW+40_000,zone:'inside',pending:null,streak:0,
+   lastEventAtMs:null,lastSampleCapturedAtMs:NOW-4000,
+   sessionDigest:DIGEST_A};
+ const x=rig({...baseGrant,sessionDigest:DIGEST_B},
+   {...basePublisher,sessionDigest:DIGEST_B},prior);
+ const outside={latitude:0.01,longitude:0,accuracyMeters:10,
+   capturedAtMs:NOW-2000};
+ const first=await evaluate(x.service,TOKEN_B,outside);
+ assert.equal(first.event,null,'new device first fix is baseline only');
+ assert.equal(x.currentState().zone,'unknown');
+ assert.equal(x.currentState().pending,'outside');
+ assert.equal(x.currentState().sessionDigest,DIGEST_B);
+ const second=await evaluate(x.service,TOKEN_B,{
+   ...outside,capturedAtMs:NOW-500
+ });
+ assert.equal(second.event,null,'new device second fix establishes baseline, not EXIT');
+ assert.equal(x.currentState().zone,'outside');
+ assert.equal(x.currentState().sessionDigest,DIGEST_B);
+ assert.equal(x.writes.length,2);
+ for(const row of x.writes){
+   for(const forbidden of ['point','latitude','longitude','history','sessionToken'])
+     assert.equal(Object.hasOwn(row,forbidden),false);
+   assert.equal(JSON.stringify(row).includes(TOKEN_B),false,
+     'device bearer capability is never persisted');
+ }
+});
+
+test('M4 v2 same-lease state continues its transition; v1 state remains compatible',async()=>{
+ const prior={ownerUid:OWNER,subjectUid:SUBJECT,
+   relationRevision:RELATION_REVISION,approvedAtMs:zone.approvedAtMs,
+   expiresAtMs:NOW+40_000,zone:'inside',pending:null,streak:0,
+   lastEventAtMs:null,lastSampleCapturedAtMs:NOW-4000};
+ const outside={latitude:0.01,longitude:0,accuracyMeters:10,
+   capturedAtMs:NOW-2000};
+ for(const useV2 of [false,true]){
+   const state=useV2?{...prior,sessionDigest:DIGEST_A}:prior;
+   const grant=useV2?{...baseGrant,sessionDigest:DIGEST_A}:{...baseGrant};
+   const publisher=useV2?{...basePublisher,sessionDigest:DIGEST_A}:{...basePublisher};
+   const x=rig(grant,publisher,state);
+   assert.equal((await evaluate(x.service,useV2?TOKEN_A:undefined,outside)).event,null);
+   const second=await evaluate(x.service,useV2?TOKEN_A:undefined,{
+     ...outside,capturedAtMs:NOW-500
+   });
+   assert.equal(second.event,'exit','same lease must preserve existing dedupe behavior');
+   assert.equal(x.currentState().zone,'outside');
+   assert.equal(Object.hasOwn(x.currentState(),'sessionDigest'),useV2);
+ }
+});
+
+test('M4 v1 never inherits v2 geofence baseline when the device lease downgrades',async()=>{
+ const prior={ownerUid:OWNER,subjectUid:SUBJECT,
+   relationRevision:RELATION_REVISION,approvedAtMs:zone.approvedAtMs,
+   expiresAtMs:NOW+40_000,zone:'inside',pending:null,streak:0,
+   lastEventAtMs:null,lastSampleCapturedAtMs:NOW-4000,
+   sessionDigest:DIGEST_A};
+ const x=rig({...baseGrant},{...basePublisher},prior);
+ const first=await evaluate(x.service,undefined,{
+   latitude:0.01,longitude:0,accuracyMeters:10,capturedAtMs:NOW-2000
+ });
+ assert.equal(first.event,null);
+ assert.equal(x.currentState().zone,'unknown');
+ assert.equal(Object.hasOwn(x.currentState(),'sessionDigest'),false);
 });
