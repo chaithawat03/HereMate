@@ -19,7 +19,7 @@ export type M4TransportPorts=Readonly<{
  currentIdentity:()=>Identity|null;
  // Optional, explicitly reviewed M3 transport bridge. Never persist or log
  // the publisher capability. Without this bridge v2 EVALUATE fails on server.
- getPublisherSessionToken?:()=>string|null;
+ getPublisherSessionToken?:(ownerUid:string)=>string|null;
  isForeground:()=>boolean;
  foregroundPermissionGranted:()=>Promise<boolean>;
  fetchImpl:typeof fetch;timeoutMs?:number;
@@ -107,7 +107,11 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    let sentCapability:string|null=null;
    if(endpoint==='/v1/geofences/evaluate'&&ports.getPublisherSessionToken){
      let capability:string|null;
-     try{capability=ports.getPublisherSessionToken();}catch{return unavailable();}
+     // The provider must bind the capability to this exact geofence owner.
+     // A single Firebase UID may have different publisher leases per peer.
+     const ownerUid=body.ownerUid;
+     if(typeof ownerUid!=='string'||!CODE.test(ownerUid))return unavailable();
+     try{capability=ports.getPublisherSessionToken(ownerUid);}catch{return unavailable();}
      if(typeof capability!=='string'||!/^[0-9a-f]{64}$/.test(capability))
        return unavailable();
      sentCapability=capability;
@@ -138,7 +142,11 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
      // an event from that retired session, even if the server replied 200.
      if(sentCapability!==null){
        let current:string|null;
-       try{current=ports.getPublisherSessionToken?.()??null;}
+       try{
+         const ownerUid=body.ownerUid;
+         current=typeof ownerUid==='string'?
+           ports.getPublisherSessionToken?.(ownerUid)??null:null;
+       }
        catch{return unavailable();}
        if(current!==sentCapability)return unavailable();
      }
