@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {
  createM4ForegroundZoneWatch,M4_WATCH_MAX_MS,M4_WATCH_MIN_FIX_INTERVAL_MS,
- M4_WATCH_LEASE_RECHECK_MS
+ M4_WATCH_LEASE_RECHECK_MS,M4_WATCH_PERMISSION_READ_MAX_MS
 } from '../src/geofences/m4ForegroundZoneWatch.ts';
 
 const SUBJECT='geofencesubjectuid002',OWNER='geofenceowneruid00001';
@@ -614,4 +614,74 @@ test('M4 stale delayed OS permission denial cannot terminate a new explicitly op
  assert.deepEqual(x.failures,[]);
  x.controller.stop();
  assert.equal(x.stats().removed,2);
+});
+
+test('M4 v2 bounds a hung silent OS permission recheck and releases native GPS without a fix',async()=>{
+ let checks=0;
+ const never=new Promise(()=>{});
+ const x=rig({
+   captureWatchLeaseProof:()=>()=>true,
+   hasPermission:()=>++checks===3?never:Promise.resolve(true)
+ });
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const expiry=x.timers.find(t=>t.ms===M4_WATCH_MAX_MS);
+ const recheck=x.timers.find(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS);
+ recheck.fn();
+ await flush();
+ assert.equal(checks,3,'OS permission read has started and is stuck');
+ const deadline=x.timers.find(t=>t.ms===M4_WATCH_PERMISSION_READ_MAX_MS);
+ assert.ok(deadline,'bounded fail-closed permission-read deadline must be armed');
+ assert.equal(x.controller.getPhase(),'watching');
+ deadline.fn(); // OS promise never settles; local deadline must still release GPS
+ await flush();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.equal(x.stats().evalCount,0);
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,['error']);
+ assert.equal(expiry.cancelled,true);
+ assert.equal(x.timers.filter(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS).length,1,
+   'hung permission read must not schedule a successor GPS recheck');
+});
+
+test('M4 stale permission-read deadline cannot cancel or stop a newer opted-in watcher',async()=>{
+ let checks=0,releaseOld,releaseNew;
+ const oldRead=new Promise(resolve=>{releaseOld=resolve;});
+ const newRead=new Promise(resolve=>{releaseNew=resolve;});
+ const x=rig({
+   captureWatchLeaseProof:()=>()=>true,
+   hasPermission:()=>{
+     const n=++checks;
+     if(n===3)return oldRead;
+     if(n===6)return newRead;
+     return Promise.resolve(true);
+   }
+ });
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.timers.find(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS).fn();
+ await flush();
+ const oldDeadline=x.timers.find(t=>t.ms===M4_WATCH_PERMISSION_READ_MAX_MS);
+ assert.ok(oldDeadline);
+ x.controller.stop();
+ assert.equal(oldDeadline.cancelled,true);
+ assert.equal(await x.controller.start(OWNER,true),true);
+ x.timers.filter(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS).at(-1).fn();
+ await flush();
+ const freshDeadline=x.timers.filter(t=>t.ms===M4_WATCH_PERMISSION_READ_MAX_MS).at(-1);
+ assert.notEqual(oldDeadline,freshDeadline);
+ assert.equal(freshDeadline.cancelled,false);
+ oldDeadline.fn(); // queued old callback may run despite cancellation
+ await flush();
+ assert.equal(x.controller.getPhase(),'watching');
+ assert.equal(freshDeadline.cancelled,false,
+   'old permission-read continuation cannot cancel the new deadline');
+ releaseOld(true);await flush();
+ assert.equal(x.controller.getPhase(),'watching');
+ assert.equal(freshDeadline.cancelled,false);
+ releaseNew(true);await flush();
+ assert.equal(x.controller.getPhase(),'watching');
+ assert.equal(freshDeadline.cancelled,true,'successful OS read cancels its own deadline');
+ x.controller.stop();
+ assert.equal(x.stats().removed,2);
+ assert.deepEqual(x.failures,[]);
 });
