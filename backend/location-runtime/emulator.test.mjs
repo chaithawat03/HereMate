@@ -142,6 +142,15 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   const validDigest=deviceGrant.data().sessionDigest;
   const pointV2=await v2LatestRef.get();
   assert.equal(pointV2.data().sessionDigest,validDigest);
+  // Matching digest alone cannot expose a point captured before START.
+  // Verify denial does not mutate Firestore data or updateTime.
+  await v2LatestRef.update({'point.capturedAtMs':now-1});
+  const beforePreLeaseRead=await v2LatestRef.get();
+  await assert.rejects(read(),LocationDenied);
+  const afterPreLeaseRead=await v2LatestRef.get();
+  assert.deepEqual(afterPreLeaseRead.data(),beforePreLeaseRead.data());
+  assert.ok(afterPreLeaseRead.updateTime.isEqual(beforePreLeaseRead.updateTime));
+  await v2LatestRef.update({'point.capturedAtMs':deviceFix.capturedAtMs});
   assert.equal(Object.hasOwn((await read()),'sessionDigest'),false,
     'the server never exposes private lease metadata to the viewer');
   await v2LatestRef.update({sessionDigest:FieldValue.delete()});
