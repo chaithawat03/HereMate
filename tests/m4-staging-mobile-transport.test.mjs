@@ -311,6 +311,15 @@ test('M3 and M4 transports can share only the same in-memory peer-scoped publish
  await assert.rejects(m4.transport.evaluate('otherowneruid00003',fix),
    /M4_GEOFENCE_NOT_AVAILABLE/);
  assert.equal(m4.calls.length,1,'different peer cannot borrow the publisher lease');
+ const otherAccount=make({
+   currentIdentity:()=>({uid:'otherfirebaseactor00003',getIdToken:async()=>SECRET}),
+   getPublisherSessionToken:(actorUid,peer)=>
+     m3.getPublisherSessionToken(actorUid,peer)
+ });
+ await assert.rejects(otherAccount.transport.evaluate(publisherPeer,fix),
+   /M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(otherAccount.calls.length,0,
+   'a different Firebase actor cannot transmit GPS with another account lease');
  await m3.stop(publisherPeer);
  await assert.rejects(m4.transport.evaluate(publisherPeer,fix),
    /M4_GEOFENCE_NOT_AVAILABLE/);
