@@ -152,6 +152,21 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   await assert.rejects(read(),LocationDenied);
   await v2PublisherRef.update({sessionDigest:validDigest});
   assert.deepEqual((await read()).point,fix);
+  // Real Admin Firestore: forged matching 4-minute grant/publisher expiry
+  // cannot prolong a 60-second M3 v2 lease. Both READ and PUBLISH must deny
+  // without touching the latest point or its Firestore updateTime.
+  const validExpiry=deviceGrant.data().expiresAtMs;
+  await v2GrantRef.update({expiresAtMs:now+4*60_000});
+  await v2PublisherRef.update({expiresAtMs:now+4*60_000});
+  const beforeExtended=await v2LatestRef.get();
+  await assert.rejects(read(),LocationDenied);
+  await assert.rejects(send(device.sessionToken),LocationDenied);
+  const afterExtended=await v2LatestRef.get();
+  assert.deepEqual(afterExtended.data(),beforeExtended.data());
+  assert.ok(afterExtended.updateTime.isEqual(beforeExtended.updateTime));
+  await v2GrantRef.update({expiresAtMs:validExpiry});
+  await v2PublisherRef.update({expiresAtMs:validExpiry});
+  assert.deepEqual((await read()).point,fix);
   await assert.rejects(svc.stopDevice({idToken:bearer(A),viewerUid:B,
     sessionToken:'0'.repeat(64)}),LocationDenied);
   await svc.stopDevice({idToken:bearer(A),viewerUid:B,sessionToken:device.sessionToken});
