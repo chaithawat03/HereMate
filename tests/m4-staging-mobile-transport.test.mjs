@@ -211,8 +211,8 @@ test('M4 v2 UI cannot mount without an explicit same-device publisher capability
  assert.match(read('src/location/M3IOSStagingScreens.tsx'),/useDeviceSessions:true/);
  assert.match(wiring,/requiresV2Capability&&typeof getPublisherSessionToken!=='function'/);
  assert.match(wiring,/requiresV2Capability\?\{getPublisherSessionToken\}:\{\}/);
- assert.match(wiring,/getPublisherSessionToken\?:\(ownerUid:string\)=>string\|null/);
- assert.match(transport,/getPublisherSessionToken\?:\(ownerUid:string\)=>string\|null/);
+ assert.match(wiring,/getPublisherSessionToken\?:\(actorUid:string,ownerUid:string\)=>string\|null/);
+ assert.match(transport,/getPublisherSessionToken\?:\(actorUid:string,ownerUid:string\)=>string\|null/);
  // Neither current app root supplies a publisher bearer to the M4 panel.
  // A future v2 release MUST explicitly wire a same-account/same-device
  // scoped bridge rather than silently using a v1 UID-only EVALUATE.
@@ -269,16 +269,16 @@ test('M4 rejects 307/308 responses rather than exposing a consented zone to redi
 
 test('M4 v2 asks the capability provider for the exact owner peer before send and after reply',async()=>{
  const requested=[];
- const x=make({getPublisherSessionToken:ownerUid=>{
-   requested.push(ownerUid);
+ const x=make({getPublisherSessionToken:(actorUid,ownerUid)=>{
+   requested.push([actorUid,ownerUid]);
    return ownerUid===PEER?'a'.repeat(64):null;
  }});
  const point={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
  assert.equal((await x.transport.evaluate(PEER,point)).event,'enter');
- assert.deepEqual(requested,[PEER,PEER]);
+ assert.deepEqual(requested,[[UID,PEER],[UID,PEER]]);
  const other='anotherowneruid00003';
  await assert.rejects(x.transport.evaluate(other,point),/M4_GEOFENCE_NOT_AVAILABLE/);
- assert.deepEqual(requested,[PEER,PEER,other]);
+ assert.deepEqual(requested,[[UID,PEER],[UID,PEER],[UID,other]]);
  assert.equal(x.calls.length,1,'a lease for one peer must not send GPS for another peer');
 });
 
@@ -303,7 +303,8 @@ test('M3 and M4 transports can share only the same in-memory peer-scoped publish
  const publisherPeer=PEER;
  assert.equal(m3.getPublisherSessionToken(publisherPeer),null);
  await m3.start(publisherPeer);
- const m4=make({getPublisherSessionToken:peer=>m3.getPublisherSessionToken(peer)});
+ const m4=make({getPublisherSessionToken:(actorUid,peer)=>
+   m3.getPublisherSessionToken(actorUid,peer)});
  const fix={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
  assert.equal((await m4.transport.evaluate(publisherPeer,fix)).event,'enter');
  assert.equal(JSON.parse(m4.calls[0].init.body).sessionToken,token);
