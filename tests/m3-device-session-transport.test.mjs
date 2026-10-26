@@ -198,3 +198,80 @@ test('M3->M4 bridge never exposes a publisher token past its lease expiry',async
  await new Promise(resolve=>setTimeout(resolve,170));
  assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
 });
+
+
+test('M3 v2 rejects an overlong START lease before retaining a publisher capability',async()=>{
+ let attempts=0;
+ const x=harness({fetchImpl:async(url)=>{
+   assert.equal(new URL(url).pathname,'/v2/locations/sessions/start');
+   attempts++;
+   return {ok:true,status:200,json:async()=>({
+     enabled:true,expiresAtMs:Date.now()+(attempts===1?300_000:50_000),
+     sessionToken:CAP
+   })};
+ }});
+ await assert.rejects(x.transport.start(PEER),/UNAVAILABLE/);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null,
+   'a forged five-minute server lease must not become an M4 GPS capability');
+ assert.equal((await x.transport.start(PEER)).enabled,true,
+   'rejected START must release the local lock for a reviewed retry');
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),CAP);
+ assert.equal(attempts,2);
+});
+
+test('M3 v2 never sends GPS after its local lease expires, while STOP remains possible',async()=>{
+ const x=harness({fetchImpl:async(url)=>{
+   const path=new URL(url).pathname;
+   return {ok:true,status:200,json:async()=>path.endsWith('/start')?
+     {enabled:true,expiresAtMs:Date.now()+70,sessionToken:CAP}:
+     {enabled:false}};
+ }});
+ await x.transport.start(PEER);
+ await new Promise(resolve=>setTimeout(resolve,110));
+ await assert.rejects(x.transport.publish(PEER,fix()),/UNAVAILABLE/);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
+ assert.deepEqual(await x.transport.stop(PEER),{enabled:false},
+   'STOP must not be blocked by a locally expired capability');
+});
+
+test('M3 v2 blocks GPS if STOP starts while native OS permission is pending',async()=>{
+ let permissionPending=false,releasePermission,permissionSeen,stopSeen,releaseStop;
+ const permissionGate=new Promise(resolve=>{releasePermission=resolve;});
+ const permissionStarted=new Promise(resolve=>{permissionSeen=resolve;});
+ const stopGate=new Promise(resolve=>{releaseStop=resolve;});
+ const stopStarted=new Promise(resolve=>{stopSeen=resolve;});
+ const sent=[];
+ const x=harness({
+   foregroundPermissionGranted:async()=>{
+     if(permissionPending){permissionSeen();await permissionGate;}
+     return true;
+   },
+   fetchImpl:async(url,init)=>{
+     const path=new URL(url).pathname;
+     sent.push(path);
+     if(path.endsWith('/start'))return {ok:true,status:200,json:async()=>({
+       enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+     })};
+     if(path.endsWith('/stop')){
+       stopSeen();await stopGate;
+       return {ok:true,status:200,json:async()=>({enabled:false})};
+     }
+     throw Error('GPS_MUST_NOT_LEAVE_AFTER_STOP_REQUEST');
+   }
+ });
+ await x.transport.start(PEER);
+ permissionPending=true;
+ const publishing=x.transport.publish(PEER,fix());
+ await permissionStarted;
+ const stopping=x.transport.stop(PEER);
+ await stopStarted;
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
+ permissionPending=false;
+ releasePermission();
+ await assert.rejects(publishing,/UNAVAILABLE/);
+ assert.deepEqual(sent,[
+   '/v2/locations/sessions/start','/v2/locations/sessions/stop'
+ ],'a pending STOP must fence the final pre-send GPS gate');
+ releaseStop();
+ assert.deepEqual(await stopping,{enabled:false});
+});
