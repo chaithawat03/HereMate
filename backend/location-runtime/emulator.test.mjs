@@ -33,7 +33,7 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
     collection:name=>raw.collection(name),
     runTransaction:fn=>raw.runTransaction(fn)
   };
-  const now=1800000000000;
+  let now=1800000000000;
   const stamp=(ms)=>Timestamp.fromMillis(ms);
   const relation=(owner,viewer)=>({
     schemaVersion:1,senderUid:owner,recipientUid:viewer,status:'accepted',
@@ -184,6 +184,31 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   await v2GrantRef.update({expiresAtMs:validExpiry});
   await v2PublisherRef.update({expiresAtMs:validExpiry});
   assert.deepEqual((await read()).point,deviceFix);
+  // Real Firestore updateTime proof: with only 1s remaining, generic
+  // +5s clock skew still permits a timestamp AFTER the consented lease end.
+  // M3 v2 must reject both PUBLISH and viewer READ without any mutation.
+  const initialNow=now;
+  now=validExpiry-1000;
+  const publishAt=capturedAtMs=>svc.publishDevice({
+    idToken:bearer(A),viewerUid:B,sessionToken:device.sessionToken,
+    point:{...deviceFix,capturedAtMs},
+    appInForeground:true,foregroundPermissionGranted:true
+  });
+  await publishAt(now);
+  const beforeLeaseEnd=await v2LatestRef.get();
+  await assert.rejects(publishAt(validExpiry+1),LocationDenied);
+  const afterLeaseEnd=await v2LatestRef.get();
+  assert.deepEqual(afterLeaseEnd.data(),beforeLeaseEnd.data());
+  assert.ok(afterLeaseEnd.updateTime.isEqual(beforeLeaseEnd.updateTime));
+  await v2LatestRef.update({'point.capturedAtMs':validExpiry+1});
+  const forgedPostLease=await v2LatestRef.get();
+  await assert.rejects(read(),LocationDenied);
+  const deniedPostLease=await v2LatestRef.get();
+  assert.deepEqual(deniedPostLease.data(),forgedPostLease.data());
+  assert.ok(deniedPostLease.updateTime.isEqual(forgedPostLease.updateTime));
+  await v2LatestRef.update({'point.capturedAtMs':now});
+  assert.equal((await read()).point.capturedAtMs,now);
+  now=initialNow;
   await assert.rejects(svc.stopDevice({idToken:bearer(A),viewerUid:B,
     sessionToken:'0'.repeat(64)}),LocationDenied);
   await svc.stopDevice({idToken:bearer(A),viewerUid:B,sessionToken:device.sessionToken});
