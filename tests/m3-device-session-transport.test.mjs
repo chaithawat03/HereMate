@@ -139,3 +139,60 @@ test('M3 failed START releases local lock for an explicit retry without caching 
  await assert.rejects(x.transport.start(PEER),/UNAVAILABLE/);
  assert.equal(attempts,2);
 });
+
+
+test('M3->M4 publisher capability lookup is peer-scoped, in-memory, and revoked on account switch',async()=>{
+ const x=harness();
+ const other='anotherpeeruid000003';
+ assert.equal(x.transport.getPublisherSessionToken(PEER),null);
+ await x.transport.start(PEER);
+ assert.equal(x.transport.getPublisherSessionToken(PEER),CAP);
+ assert.equal(x.transport.getPublisherSessionToken(other),null);
+ assert.equal(x.transport.getPublisherSessionToken(SELF),null);
+ x.setActive(false);
+ assert.equal(x.transport.getPublisherSessionToken(PEER),null);
+ x.setActive(true);
+ x.setUser('secondowneruid00003');
+ assert.equal(x.transport.getPublisherSessionToken(PEER),null);
+ x.setUser(SELF);
+ assert.equal(x.transport.getPublisherSessionToken(PEER),null,
+   'an observed account switch permanently retires the previous capability');
+ assert.equal(x.calls.length,1,'read-only lookup must not call network');
+});
+
+test('M3->M4 publisher capability is hidden while STOP is pending and after confirmed STOP',async()=>{
+ let resumeStop,stopEntered;
+ const waiting=new Promise(resolve=>{resumeStop=resolve;});
+ const entered=new Promise(resolve=>{stopEntered=resolve;});
+ const x=harness({fetchImpl:async(url)=>{
+   if(new URL(url).pathname.endsWith('/start'))return {
+     ok:true,status:200,json:async()=>({
+       enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+     })
+   };
+   stopEntered();
+   await waiting;
+   return {ok:true,status:200,json:async()=>({enabled:false})};
+ }});
+ await x.transport.start(PEER);
+ assert.equal(x.transport.getPublisherSessionToken(PEER),CAP);
+ const stop=x.transport.stop(PEER);
+ await entered;
+ assert.equal(x.transport.getPublisherSessionToken(PEER),null,
+   'M4 must not borrow token after STOP was initiated');
+ resumeStop();
+ assert.deepEqual(await stop,{enabled:false});
+ assert.equal(x.transport.getPublisherSessionToken(PEER),null);
+});
+
+test('M3->M4 bridge never exposes a publisher token past its lease expiry',async()=>{
+ const x=harness({fetchImpl:async()=>({
+   ok:true,status:200,json:async()=>({
+     enabled:true,expiresAtMs:Date.now()+120,sessionToken:CAP
+   })
+ })});
+ await x.transport.start(PEER);
+ assert.equal(x.transport.getPublisherSessionToken(PEER),CAP);
+ await new Promise(resolve=>setTimeout(resolve,170));
+ assert.equal(x.transport.getPublisherSessionToken(PEER),null);
+});
