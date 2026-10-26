@@ -33,6 +33,8 @@ export type M4Transport=Readonly<{
   Promise<{approved:boolean;expiresAtMs?:number}>;
  revoke:(ownerUid:string,subjectUid:string)=>Promise<{revoked:true}>;
  evaluate:(ownerUid:string,point:ShareFix)=>Promise<GeofenceOutcome>;
+ /** In-memory proof only: never return a bearer to React UI/state. */
+ capturePublisherLeaseProof:(ownerUid:string)=>()=>boolean;
 }>;
 // Exact provider-observed origins for the single, owner-reviewed M2 Cloud Run
 // service. The five M4 routes are NOT deployed there today.
@@ -158,6 +160,31 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    finally{clearTimeout(timer);}
  }
  return Object.freeze({
+   capturePublisherLeaseProof(ownerUid:string){
+     // Capture the exact device lease BEFORE an async GPS evaluation. A
+     // subsequent STOP, lease expiry, account switch or device handoff must
+     // suppress a late foreground alert even AFTER the transport returned.
+     // Only this private closure holds the token; React receives no bearer.
+     const actor=ports.currentIdentity();
+     if(!actor||!CODE.test(actor.uid)||!CODE.test(ownerUid)||
+        actor.uid===ownerUid||!ports.isForeground())return ()=>false;
+     if(!ports.getPublisherSessionToken){
+       // Preserve the existing v1 behavior when no v2 device lease exists.
+       return ()=>ports.currentIdentity()?.uid===actor.uid&&ports.isForeground();
+     }
+     let original:string|null;
+     try{original=ports.getPublisherSessionToken(actor.uid,ownerUid);}
+     catch{return ()=>false;}
+     if(typeof original!=='string'||!/^[0-9a-f]{64}$/.test(original))
+       return ()=>false;
+     return ()=>{
+       if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())
+         return false;
+       try{
+         return ports.getPublisherSessionToken?.(actor.uid,ownerUid)===original;
+       }catch{return false;}
+     };
+   },
    async propose(subjectUid,circle){
      if(!validCircle(circle))return unavailable();
      const row=await send('/v1/geofences/propose',{subjectUid:peer(subjectUid),circle},false);
