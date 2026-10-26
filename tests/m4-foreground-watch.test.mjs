@@ -479,7 +479,9 @@ test('M4 v2 retires silent native GPS watcher when publisher lease is withdrawn 
  assert.deepEqual(x.events,[]);
  assert.deepEqual(x.failures,[],'lease retirement is not an OS GPS error');
  assert.equal(expiry.cancelled,true);
- assert.equal(recheck.cancelled,true);
+ // The recheck already fired, so it needs no cancellation; no successor
+ // timer may be armed after the native watcher has been removed.
+ assert.equal(x.timers.filter(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS).length,1);
 });
 
 test('M4 retired lease recheck cannot terminate a newer explicit foreground opt-in',async()=>{
