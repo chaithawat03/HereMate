@@ -16,6 +16,9 @@ export const M4_WATCH_MIN_FIX_INTERVAL_MS=10_000;
 // A v2 publisher lease may be retired without any subsequent native GPS fix.
 // Bound native watcher teardown even when Android/iOS stops delivering fixes.
 export const M4_WATCH_LEASE_RECHECK_MS=5_000;
+// A hung native OS permission read must not suspend the silent-lease watcher
+// watchdog indefinitely. Keep this shorter than the 5s recheck cadence.
+export const M4_WATCH_PERMISSION_READ_MAX_MS=3_000;
 export type M4WatchPhase='off'|'starting'|'watching';
 export type M4WatchPorts=Readonly<{
  identity:()=>string|null;
@@ -40,7 +43,7 @@ const UID=/^[A-Za-z0-9_-]{12,128}$/;
 export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  let phase:M4WatchPhase='off',generation=0,disposed=false;
  let watcher:{remove:()=>void}|null=null,timer:unknown=null;
- let leaseRecheckTimer:unknown=null;
+ let leaseRecheckTimer:unknown=null,permissionReadTimer:unknown=null;
  let processing=false,lastFixAt=-Infinity;
  let owner:string|null=null,actor:string|null=null;
  let watchLeaseProof:(()=>boolean)|null=null;
@@ -55,6 +58,7 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    ++generation;
    if(timer!==null){p.cancel(timer);timer=null;}
    if(leaseRecheckTimer!==null){p.cancel(leaseRecheckTimer);leaseRecheckTimer=null;}
+   if(permissionReadTimer!==null){p.cancel(permissionReadTimer);permissionReadTimer=null;}
    watcher?.remove();watcher=null;
    owner=null;actor=null;watchLeaseProof=null;processing=false;
    lastFixAt=-Infinity;
@@ -79,17 +83,38 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      // so lease proof alone is insufficient to release the OS subscription.
      // Do not request permission again: only read current OS authorization.
      // This check is v2-only, never runs on a watcher without lease proof.
-     void Promise.resolve().then(()=>p.hasPermission()).then(granted=>{
-       if(epoch!==generation||phase!=='watching')return;
-       if(!active(epoch)){stop();return;}
-       if(granted!==true){stop();p.onFailure();return;}
-       scheduleLeaseRecheck(epoch);
-     }).catch(()=>{
-       if(epoch!==generation||phase!=='watching')return;
-       const warn=active(epoch);
-       stop();
-       if(warn)p.onFailure();
-     });
+     // Android/iOS can leave a read-only OS permission promise unresolved.
+    // Race it against a bounded local deadline, or the 5s lease watcher
+    // would stop checking a retired publisher lease while GPS is silent.
+    // The deadline belongs to THIS generation; an old continuation must
+    // never cancel a replacement watcher's timer.
+    let ownDeadline:unknown=null;
+    const deadline=new Promise<boolean>(resolve=>{
+      ownDeadline=p.schedule(()=>{
+        if(permissionReadTimer===ownDeadline)permissionReadTimer=null;
+        resolve(false);
+      },M4_WATCH_PERMISSION_READ_MAX_MS);
+      permissionReadTimer=ownDeadline;
+    });
+    const cancelDeadline=()=>{
+      if(permissionReadTimer===ownDeadline){
+        p.cancel(ownDeadline);permissionReadTimer=null;
+      }
+    };
+    void Promise.race([Promise.resolve().then(()=>p.hasPermission()),deadline])
+      .then(granted=>{
+        cancelDeadline();
+        if(epoch!==generation||phase!=='watching')return;
+        if(!active(epoch)){stop();return;}
+        if(granted!==true){stop();p.onFailure();return;}
+        scheduleLeaseRecheck(epoch);
+      }).catch(()=>{
+        cancelDeadline();
+        if(epoch!==generation||phase!=='watching')return;
+        const warn=active(epoch);
+        stop();
+        if(warn)p.onFailure();
+      });
    },M4_WATCH_LEASE_RECHECK_MS);
  }
  async function start(zoneOwnerUid:string,relationshipApproved:boolean){
