@@ -64,6 +64,16 @@ function validPublisher(publisher,ownerUid,viewerUid,now,grant) {
   if(!publisher || publisher.ownerUid!==ownerUid ||
     publisher.viewerUid!==viewerUid || !num(publisher.expiresAtMs) ||
     publisher.expiresAtMs<=now || publisher.expiresAtMs!==grant.expiresAtMs)deny();
+  // M3 device sessions are issued for exactly GRANT_MS (60s). The older
+  // M2/v1 contract retains its original validation window, but a v2
+  // capability-tagged grant must never become a forged longer-lived lease
+  // merely because the grant and owner-wide publisher agree on expiry.
+  // This check applies to both publisher writes and viewer reads; STOP
+  // remains independent of the lease validity so the owner can revoke.
+  if(grant.sessionDigest!==undefined||publisher.sessionDigest!==undefined){
+    if(!Number.isSafeInteger(grant.expiresAtMs)||
+      grant.expiresAtMs>now+GRANT_MS)deny();
+  }
 }
 // M3: short-lived device-session capability (never stored in plaintext).
 // This fences accidental concurrent publishers signed in under the same
