@@ -278,6 +278,14 @@ test('M3 v2 rejects GPS captured before device lease issuance without mutating l
  await send(now);
  const accepted=structuredClone(x.db.rows.get(latestKey));
  assert.deepEqual((await x.view()).point,devicePoint());
+ // A persisted v2 point with the right digest but a pre-lease capture
+ // timestamp must also be hidden from the authenticated viewer.
+ const forged={...accepted,point:{...accepted.point,capturedAtMs:now-1}};
+ x.db.rows.set(latestKey,forged);
+ await fails(x.view());
+ assert.deepEqual(x.db.rows.get(latestKey),forged,'denied READ is read-only');
+ x.db.rows.set(latestKey,accepted);
+ assert.deepEqual((await x.view()).point,devicePoint());
  await fails(send(now-1));
  assert.deepEqual(x.db.rows.get(latestKey),accepted,
    'a pre-lease fix must not overwrite a consented latest point or TTL');
