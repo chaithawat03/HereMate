@@ -126,14 +126,22 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      const sub=await p.watch(fix=>{void observe(fix,epoch);},()=>{
        if(active(epoch)){stop();p.onFailure();}
      });
-     // Permission or Firebase identity can change while the native watcher
-     // subscription is being established. Recheck AFTER the async bind and
-     // release its native handle before returning; otherwise a late bind can
-     // strand this controller in 'starting' with an unowned GPS subscription.
+     // A late native bind must be released even if STOP retired its start.
+     // Once the bind succeeds, own the subscription BEFORE awaiting the
+     // second OS permission read. Otherwise STOP/dispose during a delayed
+     // permission read cannot remove the already-installed native watcher.
+     if(!active(epoch)){
+       sub.remove();
+       if(epoch===generation)stop();
+       return false;
+     }
+     watcher=sub;
      let stillPermitted=false;
      try{stillPermitted=await p.hasPermission();}catch{/* fail closed */}
      if(!active(epoch)||!stillPermitted){
-       sub.remove();
+       // STOP may already have removed this handle. Never remove it twice,
+       // and never touch a newer generation's native watcher.
+       if(watcher===sub){watcher=null;sub.remove();}
        if(epoch===generation){
          const warn=active(epoch)&&!stillPermitted;
          stop();
@@ -141,7 +149,6 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
        }
        return false;
      }
-     watcher=sub;
      notify('watching');
      // Android/JS may run a timeout callback already queued before cancel().
      // Only this exact opt-in watcher may expire itself: a retired timeout
