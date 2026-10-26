@@ -74,7 +74,22 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      if(epoch!==generation||phase!=='watching')return;
      leaseRecheckTimer=null;
      if(!active(epoch)){stop();return;}
-     scheduleLeaseRecheck(epoch);
+     // A user can revoke Android/iOS foreground location permission while
+     // the native watcher is silent. The publisher lease may still be valid,
+     // so lease proof alone is insufficient to release the OS subscription.
+     // Do not request permission again: only read current OS authorization.
+     // This check is v2-only, never runs on a watcher without lease proof.
+     void Promise.resolve().then(()=>p.hasPermission()).then(granted=>{
+       if(epoch!==generation||phase!=='watching')return;
+       if(!active(epoch)){stop();return;}
+       if(granted!==true){stop();p.onFailure();return;}
+       scheduleLeaseRecheck(epoch);
+     }).catch(()=>{
+       if(epoch!==generation||phase!=='watching')return;
+       const warn=active(epoch);
+       stop();
+       if(warn)p.onFailure();
+     });
    },M4_WATCH_LEASE_RECHECK_MS);
  }
  async function start(zoneOwnerUid:string,relationshipApproved:boolean){
