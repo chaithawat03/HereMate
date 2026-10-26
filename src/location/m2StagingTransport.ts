@@ -148,8 +148,13 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       // Only this transport's live owner+peer may borrow the publisher
       // capability. Never return a token from a retired lease, during STOP,
       // emergency STOP, or when the handset is no longer in foreground.
+      // Observing an account switch retires this in-memory lease even if
+      // the original UID later signs back in (no same-UID resurrection).
+      if(session&&session.uid!==ports.currentIdentity()?.uid){
+        deviceSession=null;
+        return null;
+      }
       if(ports.useDeviceSessions!==true||!session||
-         session.uid!==ports.currentIdentity()?.uid||
          session.peerUid!==peerUid||!CODE.test(peerUid)||
          !ports.isForeground()||deviceSessionStopPending||
          emergencyStopPending||deviceSessionStartPending||
