@@ -392,3 +392,69 @@ test('M4 canceled old expiry cannot abort replacement during asynchronous native
  x.controller.stop();
  assert.equal(removed,2);
 });
+
+test('M4 refuses native GPS permission and watcher without an exact active publisher lease',async()=>{
+ let leaseValid=false,prompts=0;
+ const x=rig({
+   captureWatchLeaseProof:owner=>()=>owner===OWNER&&leaseValid,
+   requestPermission:async()=>{++prompts;return true;}
+ });
+ assert.equal(await x.controller.start(OWNER,true),false);
+ assert.equal(prompts,0,'no native permission request without M3 publisher authorization');
+ assert.equal(x.stats().watchCount,0);
+ assert.equal(x.controller.getPhase(),'off');
+ leaseValid=true;
+ assert.equal(await x.controller.start(OWNER,true),true);
+ assert.equal(prompts,1);
+ x.controller.stop();
+});
+
+test('M4 lease retirement during native permission prompt cancels before any GPS watcher bind',async()=>{
+ let leaseValid=true,releasePermission,prompts=0;
+ const permission=new Promise(resolve=>{releasePermission=resolve;});
+ const x=rig({
+   captureWatchLeaseProof:()=>()=>leaseValid,
+   requestPermission:()=>{++prompts;return permission;}
+ });
+ const started=x.controller.start(OWNER,true);
+ assert.equal(x.controller.getPhase(),'starting');
+ assert.equal(prompts,1);
+ leaseValid=false; // owner STOP or device handoff while Android permission UI is open
+ releasePermission(true);
+ assert.equal(await started,false);
+ assert.equal(x.stats().watchCount,0,'must not install native GPS after lease retirement');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.deepEqual(x.failures,[]);
+});
+
+test('M4 removes a late native GPS bind if the exact publisher lease retired during await',async()=>{
+ let leaseValid=true,releaseBind,removed=0;
+ const binding=new Promise(resolve=>{releaseBind=resolve;});
+ const x=rig({
+   captureWatchLeaseProof:()=>()=>leaseValid,
+   watch:()=>binding
+ });
+ const started=x.controller.start(OWNER,true);
+ await flush();
+ assert.equal(x.controller.getPhase(),'starting');
+ leaseValid=false;
+ releaseBind({remove:()=>{++removed;}});
+ assert.equal(await started,false);
+ assert.equal(removed,1,'late native watcher must be disposed');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.timers.length,0);
+});
+
+test('M4 stops an existing foreground GPS watch on the next native fix after lease retirement',async()=>{
+ let leaseValid=true;
+ const x=rig({captureWatchLeaseProof:()=>()=>leaseValid});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ leaseValid=false;
+ x.send();await flush();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.equal(x.stats().evalCount,0,'retired lease cannot send GPS to M4');
+ assert.deepEqual(x.events,[]);
+ const panel=readFileSync(new URL('../src/geofences/M4GeofencePanel.tsx',import.meta.url),'utf8');
+ assert.match(panel,/captureWatchLeaseProof:ownerUid=>transport\.capturePublisherLeaseProof\(ownerUid\)/);
+});
