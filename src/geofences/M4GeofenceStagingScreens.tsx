@@ -16,7 +16,7 @@ type Props=Readonly<{
  approvedCloudRunUrl:string;backendReviewedAndEnabled:boolean;
  /** Inject ONLY from the authenticated M3 publisher of this same device.
   * No default capability, local storage, token logging or UID-only fallback. */
- getPublisherSessionToken?:()=>string|null;
+ getPublisherSessionToken?:(ownerUid:string)=>string|null;
 }>;
 
 export function M4GeofenceStagingScreens({
