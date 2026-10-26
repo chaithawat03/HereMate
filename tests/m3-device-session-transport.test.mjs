@@ -325,3 +325,78 @@ test('M3 v2 suppresses a late GPS publish ACK after local or owner-wide STOP beg
    ]);
  }
 });
+
+
+test('M3 v2 failed local or emergency STOP keeps consent withdrawn until confirmed retry',async()=>{
+ for(const kind of ['stop','emergencyStop']){
+   let stops=0;
+   const sent=[];
+   const x=harness({fetchImpl:async(url)=>{
+     const path=new URL(url).pathname;
+     sent.push(path);
+     if(path.endsWith('/start'))return {ok:true,status:200,json:async()=>({
+       enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+     })};
+     if(path.endsWith('/stop')){
+       stops++;
+       if(stops===1)return {ok:false,status:503,json:async()=>({})};
+       return {ok:true,status:200,json:async()=>({enabled:false})};
+     }
+     if(path.endsWith('/publish'))return {ok:true,status:200,json:async()=>({
+       stored:true,expiresAtMs:Date.now()+20_000
+     })};
+     throw Error('UNEXPECTED_ENDPOINT');
+   }});
+   await x.transport.start(PEER);
+   assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),CAP);
+   await assert.rejects(x.transport[kind](PEER),/UNAVAILABLE/);
+   assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null,
+     'a failed STOP must never reactivate the M4 publisher capability');
+   await assert.rejects(x.transport.publish(PEER,fix()),/UNAVAILABLE/,
+     'a failed STOP must never resume outgoing GPS');
+   assert.equal(sent.filter(p=>p.endsWith('/publish')).length,0);
+   assert.deepEqual(await x.transport[kind](PEER),{enabled:false},
+     'retain only the STOP capability for a verified retry');
+   assert.equal(stops,2);
+   assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
+   await assert.rejects(x.transport.publish(PEER,fix()),/UNAVAILABLE/);
+   await x.transport.start(PEER);
+   assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),CAP,
+     'only a new explicit START can re-enable a successfully revoked lease');
+ }
+});
+
+test('M3 v2 late GPS ACK cannot resume sharing after STOP failed',async()=>{
+ let publishEntered,releasePublish;
+ const publishSeen=new Promise(resolve=>{publishEntered=resolve;});
+ const publishGate=new Promise(resolve=>{releasePublish=resolve;});
+ let stops=0;
+ const x=harness({fetchImpl:async(url)=>{
+   const path=new URL(url).pathname;
+   if(path.endsWith('/start'))return {ok:true,status:200,json:async()=>({
+     enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+   })};
+   if(path.endsWith('/publish')){
+     publishEntered();await publishGate;
+     return {ok:true,status:200,json:async()=>({
+       stored:true,expiresAtMs:Date.now()+20_000
+     })};
+   }
+   if(path.endsWith('/stop')){
+     stops++;
+     return stops===1?{ok:false,status:503,json:async()=>({})}:
+       {ok:true,status:200,json:async()=>({enabled:false})};
+   }
+   throw Error('UNEXPECTED_ENDPOINT');
+ }});
+ await x.transport.start(PEER);
+ const pendingPublish=x.transport.publish(PEER,fix());
+ await publishSeen;
+ await assert.rejects(x.transport.stop(PEER),/UNAVAILABLE/);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
+ releasePublish();
+ await assert.rejects(pendingPublish,/UNAVAILABLE/,
+   'failed remote STOP must not turn a delayed publish ACK into sharing');
+ assert.deepEqual(await x.transport.stop(PEER),{enabled:false});
+ assert.equal(stops,2);
+});
