@@ -400,3 +400,29 @@ test('M3 v2 late GPS ACK cannot resume sharing after STOP failed',async()=>{
  assert.deepEqual(await x.transport.stop(PEER),{enabled:false});
  assert.equal(stops,2);
 });
+
+test('M3 failed STOP latch is not inherited by a separately authorized new account lease',async()=>{
+ const second='secondowneruid00003';
+ let stops=0;
+ const x=harness({fetchImpl:async(url)=>{
+   const path=new URL(url).pathname;
+   if(path.endsWith('/start'))return {ok:true,status:200,json:async()=>({
+     enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+   })};
+   if(path.endsWith('/stop')){
+     stops++;
+     return {ok:false,status:503,json:async()=>({})};
+   }
+   throw Error('UNEXPECTED_ENDPOINT');
+ }});
+ await x.transport.start(PEER);
+ await assert.rejects(x.transport.stop(PEER),/UNAVAILABLE/);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
+ x.setUser(second);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null,
+   'observed account switch must retire old lease before another START');
+ await x.transport.start(PEER);
+ assert.equal(x.transport.getPublisherSessionToken(second,PEER),CAP,
+   'only new authenticated START confirmation can reset the retired latch');
+ assert.equal(stops,1);
+});
