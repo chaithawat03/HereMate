@@ -299,7 +299,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       try {
         if(startSettled)await startSettled;
         if(ports.currentIdentity()?.uid!==uid)unavailable();
-        if(deviceSession?.uid===uid&&deviceSession.peerUid===viewerUid)
+        if(deviceSession?.uid===uid&&deviceSession?.peerUid===viewerUid)
           deviceSessionStopIntent=true;
         const result=await send('/v1/locations/grants/stop',{viewerUid},false);
         if(!fields(result,['enabled'])||
