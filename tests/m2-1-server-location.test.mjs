@@ -157,7 +157,7 @@ test('M3 capability-fenced device sessions prevent same Firebase account cross-d
  await fails(share('0'.repeat(64)));
  await fails(stop('0'.repeat(64)));
  await share(first.sessionToken);
- assert.deepEqual((await x.view()).point,point());
+ assert.deepEqual((await x.view()).point,{...point(),capturedAtMs:now});
  await stop(first.sessionToken);
  await fails(x.view());
  // A stale STOP from the first phone cannot erase the newer same-viewer
@@ -167,7 +167,7 @@ test('M3 capability-fenced device sessions prevent same Firebase account cross-d
  await fails(stop(first.sessionToken));
  await fails(share(first.sessionToken));
  await share(newer.sessionToken);
- assert.deepEqual((await x.view()).point,point());
+ assert.deepEqual((await x.view()).point,{...point(),capturedAtMs:now});
  // A signed-in owner can emergency revoke even without the capability.
  assert.deepEqual(await x.stop(),{enabled:false});
  await fails(x.view());
