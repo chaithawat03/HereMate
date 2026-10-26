@@ -8,7 +8,7 @@ import {
  EMPTY_STATE,advanceState
 } from './geofence-policy.mjs';
 import {createHash} from 'node:crypto';
-import {STAGING_PROJECT,UID_PATTERN,GRANT_MS} from '../location/location-service.mjs';
+import {STAGING_PROJECT,UID_PATTERN} from '../location/location-service.mjs';
 const deny=()=>{throw new GeofenceDenied();};
 const invalid=()=>{throw new GeofenceInvalid();};
 const isNum=n=>typeof n==='number'&&Number.isFinite(n);
@@ -187,11 +187,6 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        activeM2Grant(grant,publisher,ownerUid,subjectUid,revision,current);
        verifyEvaluateDeviceSession(grant,publisher,sessionToken);
        if(!validFix(point,current))deny();
-       // M3 v2 consent begins at device-session START, not when a cached GPS
-       // fix was captured. A fresh-but-pre-lease fix must not drive geofence
-       // Enter/Exit or mutate its dedupe state. Legacy M2 v1 is unchanged.
-       if(grant.sessionDigest!==undefined&&
-          point.capturedAtMs<grant.expiresAtMs-GRANT_MS)deny();
        // State is strictly zone-classification/dedupe. Never store GPS point.
        // A new M3 device publisher may share the same Firebase UID, friend
        // relation and approved zone as the previous handset. Its first GPS
