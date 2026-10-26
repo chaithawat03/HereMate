@@ -22,6 +22,9 @@ type LocationTransportPorts=Readonly<{
 type LocationTransport=SharePorts['transport']&M2FriendLocationTransport&Readonly<{
   /** Explicit owner action, independent of this handset's session capability. */
   emergencyStop:(peerUid:string)=>Promise<{enabled:false}>;
+  /** Read-only ephemeral capability for a matching authenticated M4 peer.
+   * Never expose through UI text, storage or logs. */
+  getPublisherSessionToken:(peerUid:string)=>string|null;
 }>;
 const CODE=/^[A-Za-z0-9_-]{12,128}$/;
 const fields=(obj:unknown,keys:readonly string[]):boolean=>{
@@ -65,7 +68,9 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   const origin=validUrl(ports.approvedCloudRunUrl);
   const timeout=ports.timeoutMs??8000;
   if(!Number.isSafeInteger(timeout)||timeout<1000||timeout>10000)unavailable();
-  let deviceSession:{uid:string;peerUid:string;token:string}|null=null;
+  let deviceSession:{uid:string;peerUid:string;token:string;expiresAtMs:number}|null=null;
+  // Do not let M4 issue a new evaluation while a v2 STOP is in flight.
+  let deviceSessionStopPending=false;
   // A delayed first START must not allow another handset/session request to
   // race through this transport and overwrite its opaque publisher capability.
   let deviceSessionStartPending=false;
@@ -138,6 +143,20 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     return peerUid;
   };
   return Object.freeze({
+    getPublisherSessionToken(peerUid:string){
+      const session=deviceSession;
+      // Only this transport's live owner+peer may borrow the publisher
+      // capability. Never return a token from a retired lease, during STOP,
+      // emergency STOP, or when the handset is no longer in foreground.
+      if(ports.useDeviceSessions!==true||!session||
+         session.uid!==ports.currentIdentity()?.uid||
+         session.peerUid!==peerUid||!CODE.test(peerUid)||
+         !ports.isForeground()||deviceSessionStopPending||
+         emergencyStopPending||deviceSessionStartPending||
+         !Number.isSafeInteger(session.expiresAtMs)||
+         session.expiresAtMs<=Date.now())return null;
+      return session.token;
+    },
     async start(peerUid:string){
       const viewerUid=safePeer(peerUid);
       if(startSettled||emergencyStopPending)unavailable();
@@ -161,9 +180,10 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
           const row=result as {enabled:unknown;expiresAtMs:unknown;sessionToken:unknown};
           const expiry=row.expiresAtMs,token=row.sessionToken;
           if(row.enabled!==true||!validNumber(expiry)||
+            !Number.isSafeInteger(expiry)||expiry<=Date.now()||
             !validCapability(token)||ports.currentIdentity()?.uid!==uid)
             return unavailable();
-          deviceSession={uid,peerUid:viewerUid,token};
+          deviceSession={uid,peerUid:viewerUid,token,expiresAtMs:expiry};
           return {enabled:true,expiresAtMs:expiry};
         } finally {
           deviceSessionStartPending=false;
@@ -187,13 +207,19 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
         const active=deviceSession;
         if(!active||active.uid!==ports.currentIdentity()?.uid||
            active.peerUid!==viewerUid)return unavailable();
-        const result=await send('/v2/locations/sessions/stop',{
-          viewerUid,sessionToken:active.token
-        },false);
-        if(!fields(result,['enabled'])||
-           (result as {enabled:unknown}).enabled!==false)unavailable();
-        if(deviceSession?.token===active.token)deviceSession=null;
-        return {enabled:false};
+        if(deviceSessionStopPending)return unavailable();
+        deviceSessionStopPending=true;
+        try {
+          const result=await send('/v2/locations/sessions/stop',{
+            viewerUid,sessionToken:active.token
+          },false);
+          if(!fields(result,['enabled'])||
+             (result as {enabled:unknown}).enabled!==false)unavailable();
+          if(deviceSession?.token===active.token)deviceSession=null;
+          return {enabled:false};
+        } finally {
+          deviceSessionStopPending=false;
+        }
       }
       const result=await send('/v1/locations/grants/stop',{viewerUid},false);
       if(!fields(result,['enabled'])||(result as {enabled:unknown}).enabled!==false)unavailable();
