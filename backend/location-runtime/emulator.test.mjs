@@ -117,13 +117,21 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   assert.equal(deviceGrant.data().sessionDigest,devicePublisher.data().sessionDigest);
   assert.notEqual(deviceGrant.data().sessionDigest,device.sessionToken);
   await assert.rejects(pub(),LocationDenied); // v1 device cannot publish into v2.
+  const deviceFix={...fix,capturedAtMs:now};
   const send=token=>svc.publishDevice({idToken:bearer(A),viewerUid:B,
-    sessionToken:token,point:fix,
+    sessionToken:token,point:deviceFix,
     appInForeground:true,foregroundPermissionGranted:true});
+  // Real Firestore transaction: a fresh GPS fix from BEFORE M3 device START
+  // is not authorized by this lease. Denial must not create a latest point.
+  await assert.rejects(svc.publishDevice({idToken:bearer(A),viewerUid:B,
+    sessionToken:device.sessionToken,point:fix,
+    appInForeground:true,foregroundPermissionGranted:true}),LocationDenied);
+  assert.equal((await raw.collection('private_latest_locations')
+    .doc(A+'__'+B).get()).exists,false);
   await assert.rejects(send('0'.repeat(64)),LocationDenied);
   assert.deepEqual(await send(device.sessionToken),
     {stored:true,expiresAtMs:now+30000});
-  assert.deepEqual((await read()).point,fix);
+  assert.deepEqual((await read()).point,deviceFix);
   // Actual Admin Firestore readback: v2 latest-point provenance is bound to
   // the SAME hashed device lease as grant and owner-wide publisher. A
   // corrupted/orphan point cannot leak through a valid viewer read. Denial
@@ -151,7 +159,7 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   await v2PublisherRef.update({sessionDigest:'c'.repeat(64)});
   await assert.rejects(read(),LocationDenied);
   await v2PublisherRef.update({sessionDigest:validDigest});
-  assert.deepEqual((await read()).point,fix);
+  assert.deepEqual((await read()).point,deviceFix);
   // Real Admin Firestore: forged matching 4-minute grant/publisher expiry
   // cannot prolong a 60-second M3 v2 lease. Both READ and PUBLISH must deny
   // without touching the latest point or its Firestore updateTime.
@@ -166,7 +174,7 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   assert.ok(afterExtended.updateTime.isEqual(beforeExtended.updateTime));
   await v2GrantRef.update({expiresAtMs:validExpiry});
   await v2PublisherRef.update({expiresAtMs:validExpiry});
-  assert.deepEqual((await read()).point,fix);
+  assert.deepEqual((await read()).point,deviceFix);
   await assert.rejects(svc.stopDevice({idToken:bearer(A),viewerUid:B,
     sessionToken:'0'.repeat(64)}),LocationDenied);
   await svc.stopDevice({idToken:bearer(A),viewerUid:B,sessionToken:device.sessionToken});
