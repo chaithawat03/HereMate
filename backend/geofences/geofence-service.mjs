@@ -189,9 +189,12 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        if(!validFix(point,current))deny();
        // A v2 fix captured before the current device's consented START must
        // never drive an Enter/Exit or overwrite private geofence state.
+       // Equally, a future-skew-tolerated fix captured AFTER lease expiry
+       // cannot update zone baseline or event cooldown.
        // M2/v1 does not carry a session digest and remains unchanged.
        if(grant.sessionDigest!==undefined&&
-          point.capturedAtMs<grant.expiresAtMs-GRANT_MS)deny();
+          (point.capturedAtMs<grant.expiresAtMs-GRANT_MS||
+           point.capturedAtMs>grant.expiresAtMs))deny();
        // State is strictly zone-classification/dedupe. Never store GPS point.
        // A new M3 device publisher may share the same Firebase UID, friend
        // relation and approved zone as the previous handset. Its first GPS
