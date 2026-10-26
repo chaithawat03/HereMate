@@ -210,7 +210,8 @@ test('real emulated JWT+HTTP+Admin Firestore positive and privacy negative E2E',
       viewerUid:owner.uid,point:fix(),
       appInForeground:true,foregroundPermissionGranted:true
     })).status,404,'legacy v1 cannot inject into a v2 lease');
-    assert.equal((await androidV2.publish(owner.uid,fix())).stored,true);
+    assert.equal((await androidV2.publish(owner.uid,
+      {...fix(),capturedAtMs:Date.now()})).stored,true);
     assert.equal((await call(owner,'read',{ownerUid:viewer.uid})).status,200);
     assert.equal((await call(stranger,'read',{ownerUid:viewer.uid})).status,404);
     assert.equal((await call(viewer,'deviceStop',{
@@ -234,7 +235,8 @@ test('real emulated JWT+HTTP+Admin Firestore positive and privacy negative E2E',
     // Explicit re-start after a confirmed emergency STOP creates a new
     // session; a normal v2 STOP clears the only latest fix and lease.
     assert.equal((await androidV2.start(owner.uid)).enabled,true);
-    assert.equal((await androidV2.publish(owner.uid,fix())).stored,true);
+    assert.equal((await androidV2.publish(owner.uid,
+      {...fix(),capturedAtMs:Date.now()})).stored,true);
     assert.deepEqual(await androidV2.stop(owner.uid),{enabled:false});
     for(const collection of ['private_location_grants','private_latest_locations']){
       assert.equal((await db.collection(collection).doc(pairId).get()).exists,false);
