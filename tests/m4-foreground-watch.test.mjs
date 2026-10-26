@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {
- createM4ForegroundZoneWatch,M4_WATCH_MAX_MS,M4_WATCH_MIN_FIX_INTERVAL_MS
+ createM4ForegroundZoneWatch,M4_WATCH_MAX_MS,M4_WATCH_MIN_FIX_INTERVAL_MS,
+ M4_WATCH_LEASE_RECHECK_MS
 } from '../src/geofences/m4ForegroundZoneWatch.ts';
 
 const SUBJECT='geofencesubjectuid002',OWNER='geofenceowneruid00001';
@@ -457,4 +458,49 @@ test('M4 stops an existing foreground GPS watch on the next native fix after lea
  assert.deepEqual(x.events,[]);
  const panel=readFileSync(new URL('../src/geofences/M4GeofencePanel.tsx',import.meta.url),'utf8');
  assert.match(panel,/captureWatchLeaseProof:ownerUid=>transport\.capturePublisherLeaseProof\(ownerUid\)/);
+});
+
+
+test('M4 v2 retires silent native GPS watcher when publisher lease is withdrawn without a new fix',async()=>{
+ let leaseValid=true;
+ const x=rig({captureWatchLeaseProof:()=>()=>leaseValid});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ assert.equal(x.stats().watchCount,1);
+ const expiry=x.timers.find(t=>t.ms===M4_WATCH_MAX_MS);
+ const recheck=x.timers.find(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS);
+ assert.ok(expiry,'existing 60-second foreground cap remains armed');
+ assert.ok(recheck,'v2-only lease retirement timer is armed');
+ assert.equal(x.stats().evalCount,0);
+ leaseValid=false; // user STOP, publisher handoff, or lease expiry; GPS goes silent
+ recheck.fn();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1,'native OS watch released without waiting for GPS');
+ assert.equal(x.stats().evalCount,0,'no coordinate was sent');
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,[],'lease retirement is not an OS GPS error');
+ assert.equal(expiry.cancelled,true);
+ assert.equal(recheck.cancelled,true);
+});
+
+test('M4 retired lease recheck cannot terminate a newer explicit foreground opt-in',async()=>{
+ let leaseValid=true;
+ const x=rig({captureWatchLeaseProof:()=>()=>leaseValid});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const old=x.timers.find(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS);
+ assert.ok(old);
+ x.controller.stop();
+ assert.equal(old.cancelled,true);
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const fresh=x.timers.filter(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS).at(-1);
+ assert.notEqual(old,fresh);
+ old.fn(); // queued before cancellation; generation fence must ignore it
+ assert.equal(x.controller.getPhase(),'watching');
+ assert.equal(x.stats().removed,1);
+ fresh.fn(); // live lease: reschedule rather than stopping the native watcher
+ assert.equal(x.controller.getPhase(),'watching');
+ const again=x.timers.filter(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS).at(-1);
+ assert.notEqual(again,fresh);
+ x.controller.stop();
+ assert.equal(x.stats().removed,2);
+ assert.equal(again.cancelled,true);
 });
