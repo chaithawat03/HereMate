@@ -29,7 +29,11 @@ export function M4GeofenceStagingScreens({
    // Never mount a superficially working M4 panel that will silently use
    // the legacy UID-only v1 request when v2 is selected.
    const requiresV2Capability=
-     process.env.EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true';
+     process.env.EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'||
+     // iOS foreground Staging opts into v2 sessions unconditionally;
+     // unlike Android it has no separate DEVICE_SESSIONS flag.
+     (Platform.OS==='ios'&&
+      process.env.EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND==='true');
    if((requiresV2Capability&&typeof getPublisherSessionToken!=='function')||
       !backendReviewedAndEnabled||
       !['android','ios'].includes(Platform.OS)||
