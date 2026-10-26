@@ -296,6 +296,45 @@ test('M3 v2 rejects GPS captured before device lease issuance without mutating l
  assert.deepEqual((await x.view()).point,point());
 });
 
+test('M3 v2 rejects future-skew GPS captured beyond lease expiry on PUBLISH and READ',async()=>{
+ const x=setup();
+ const lease=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
+ // The lease has 1s left: a timestamp 1ms AFTER expiry still passes the
+ // generic 5s clock-skew tolerance. It must not pass v2 lease consent.
+ now=lease.expiresAtMs-1000;
+ const key='private_latest_locations/'+pair;
+ const send=capturedAtMs=>x.svc.publishDevice({
+   idToken:bearer(A),viewerUid:B,sessionToken:lease.sessionToken,
+   point:{...point(),capturedAtMs},
+   appInForeground:true,foregroundPermissionGranted:true
+ });
+ await send(now);
+ const original=structuredClone(x.db.rows.get(key));
+ assert.deepEqual((await x.view()).point,{...point(),capturedAtMs:now});
+ for(const capturedAtMs of [lease.expiresAtMs+1,lease.expiresAtMs+1000]){
+   await fails(send(capturedAtMs));
+   assert.deepEqual(x.db.rows.get(key),original,
+     'post-expiry capture must not overwrite latest GPS or TTL');
+   const forged={...original,point:{...original.point,capturedAtMs}};
+   x.db.rows.set(key,forged);
+   await fails(x.view());
+   assert.deepEqual(x.db.rows.get(key),forged,
+     'viewer denial must never rewrite a forged future point');
+   x.db.rows.set(key,original);
+ }
+ await send(lease.expiresAtMs);
+ assert.equal((await x.view()).point.capturedAtMs,lease.expiresAtMs,
+   'capture exactly at the lease boundary remains allowed');
+ // The v1 M2 contract deliberately retains its existing 5s skew rule.
+ const legacy=setup();
+ const v1=await legacy.start();
+ now=v1.expiresAtMs-1000;
+ const legacyFix={...point(),capturedAtMs:v1.expiresAtMs+1};
+ await legacy.svc.publish({idToken:bearer(A),viewerUid:B,point:legacyFix,
+   appInForeground:true,foregroundPermissionGranted:true});
+ assert.deepEqual((await legacy.view()).point,legacyFix);
+});
+
 test('M3 sequential second START is denied while first device lease is active',async()=>{
  const x=setup();
  const first=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
