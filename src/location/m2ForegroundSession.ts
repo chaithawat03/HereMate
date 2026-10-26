@@ -25,6 +25,9 @@ export type SharePorts={
     start:(peerUid:string)=>Promise<{enabled:boolean;expiresAtMs:number}>;
     publish:(peerUid:string,fix:ShareFix)=>Promise<{stored:boolean;expiresAtMs:number}>;
     stop:(peerUid:string)=>Promise<{enabled:boolean}>;
+    /** Optional M3 v2 local fence. Called synchronously when the owner
+     * requests STOP, before waiting for an in-flight GPS publish. */
+    signalStopIntent?:()=>void;
   };
   now:()=>number;
   schedule:(fn:()=>void,delayMs:number)=>unknown;
@@ -66,6 +69,14 @@ export function createForegroundSharingController(p:SharePorts) {
   async function stop():Promise<void> {
     if(inStop)return inStop;
     const peer=state.peerUid;
+    // STOP consent takes effect immediately on this handset. The remote
+    // STOP request is still serialized after pending START/PUBLISH, but M4
+    // must not borrow a v2 bearer while that earlier publish is settling.
+    // Optional method keeps all legacy M2/v1 transport contracts unchanged.
+    if(peer){
+      try{p.transport.signalStopIntent?.();}
+      catch{/* Never prevent the independent remote STOP attempt. */}
+    }
     ++epoch;activeOwner=null;cancelLocal();
     if(!peer){publishState(off);return;}
     publishState({phase:'stopping',peerUid:peer,expiresAtMs:null,error:null});
