@@ -17,6 +17,9 @@ type Identity=Readonly<{uid:string;getIdToken:()=>Promise<string>}>;
 export type M4TransportPorts=Readonly<{
  approvedCloudRunUrl:string;projectId:string;
  currentIdentity:()=>Identity|null;
+ // Optional, explicitly reviewed M3 transport bridge. Never persist or log
+ // the publisher capability. Without this bridge v2 EVALUATE fails on server.
+ getPublisherSessionToken?:()=>string|null;
  isForeground:()=>boolean;
  foregroundPermissionGranted:()=>Promise<boolean>;
  fetchImpl:typeof fetch;timeoutMs?:number;
@@ -73,7 +76,9 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
  if(ports.projectId!=='heremate'||typeof ports.currentIdentity!=='function'||
     typeof ports.isForeground!=='function'||
     typeof ports.foregroundPermissionGranted!=='function'||
-    typeof ports.fetchImpl!=='function')return unavailable();
+    typeof ports.fetchImpl!=='function'||
+    (ports.getPublisherSessionToken!==undefined&&
+     typeof ports.getPublisherSessionToken!=='function'))return unavailable();
  const origin=exactOrigin(ports.approvedCloudRunUrl);
  const timeout=ports.timeoutMs??8000;
  if(!Number.isSafeInteger(timeout)||timeout<1000||timeout>10_000)return unavailable();
@@ -95,7 +100,18 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    if(requireGps&&!(await ports.foregroundPermissionGranted()))return unavailable();
    // Do not transmit the original subject's GPS with a stale Firebase bearer.
    if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
-   const json=JSON.stringify(body);
+   // Resolve the M3 device capability only at the LAST pre-send gate.
+   // Never capture it before awaited Firebase/OS permission checks. Legacy
+   // v1 stays unchanged when no approved bridge is supplied; v2 then denies.
+   let payload=body;
+   if(endpoint==='/v1/geofences/evaluate'&&ports.getPublisherSessionToken){
+     let capability:string|null;
+     try{capability=ports.getPublisherSessionToken();}catch{return unavailable();}
+     if(typeof capability!=='string'||!/^[0-9a-f]{64}$/.test(capability))
+       return unavailable();
+     payload={...body,sessionToken:capability};
+   }
+   const json=JSON.stringify(payload);
    if(json.length>2048)return unavailable();
    const controller=new AbortController();
    const timer=setTimeout(()=>controller.abort(),timeout);
