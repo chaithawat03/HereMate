@@ -221,6 +221,36 @@ test('M4 v2 UI cannot mount without an explicit same-device publisher capability
  assert.doesNotMatch(read('eas.json'),/EXPO_PUBLIC_ENABLE_M4_GEOFENCES/);
 });
 
+test('M3 Android and iOS capability provider callback lifecycle is fail-closed (static contract)',()=>{
+ // Source-only contract: no React renderer/device acceptance is claimed.
+ // A future root may opt into this callback only after reviewed Staging v2
+ // authorization. The published reference must be the SAME M3 transport.
+ const android=read('src/location/M2AndroidStagingScreens.tsx');
+ const ios=read('src/location/M3IOSStagingScreens.tsx');
+ for(const [platform,source,flag] of [
+   ['android',android,'EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS'],
+   ['ios',ios,'EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND']
+ ]){
+   assert.match(source,/onPublisherProviderChange\?:\(provider:PublisherProvider\|null\)=>void/,
+     platform+' must keep callback optional');
+   assert.match(source,/const publisherProvider:PublisherProvider\|null=transport&&/,
+     platform+' must never create a separate M4 bearer source');
+   assert.ok(source.includes("process.env."+flag+"==='true'?"),
+     platform+' must publish only under explicit v2 opt-in');
+   assert.match(source,/transport\.getPublisherSessionToken:null/,
+     platform+' must publish only the current M3 transport function');
+   assert.match(source,/useEffect\(\(\)=>\{\s*onPublisherProviderChange\?\.\(publisherProvider\);\s*return \(\)=>onPublisherProviderChange\?\.\(null\);\s*\},\[onPublisherProviderChange,publisherProvider\]\)/,
+     platform+' must withdraw the callback on unmount or provider change');
+   assert.doesNotMatch(source,/AsyncStorage|SecureStore|setItem\(|console\.log\(.*sessionToken/,
+     platform+' must not persist or log the opaque device capability');
+ }
+ const androidRoot=read('M2StagingApp.tsx'),iosRoot=read('M3IOSStagingApp.tsx');
+ assert.doesNotMatch(androidRoot,/onPublisherProviderChange=/);
+ assert.doesNotMatch(iosRoot,/onPublisherProviderChange=/);
+ assert.doesNotMatch(read('eas.json'),/EXPO_PUBLIC_ENABLE_M4_GEOFENCES/,
+   'callback preparation must not activate M4 in any committed build');
+});
+
 test('M4 UI requires independent owner/subject consent, distinct revoke and explicit OS GPS tap',()=>{
  const app=read('M2StagingApp.tsx');
  const ios=read('M3IOSStagingApp.tsx');
