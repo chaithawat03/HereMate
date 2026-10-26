@@ -133,6 +133,31 @@ test('M4 still rejects expired M2/M3 publisher lease even with matching digest',
   assert.deepEqual(x.writes,[]);
 });
 
+test('M4 v2 rejects fresh-but-pre-START GPS without state or event mutation',async()=>{
+ const x=rig({...baseGrant,sessionDigest:DIGEST_A},
+   {...basePublisher,sessionDigest:DIGEST_A});
+ // This v2 lease was issued at NOW-10s, despite a 30s generic fix window.
+ for(const capturedAtMs of [NOW-29_000,NOW-10_001]){
+   await assert.rejects(evaluate(x.service,TOKEN_A,{
+     ...FIX,capturedAtMs
+   }),GeofenceDenied);
+   assert.deepEqual(x.writes,[]);
+ }
+ assert.equal((await evaluate(x.service,TOKEN_A,{
+   ...FIX,capturedAtMs:NOW-10_000
+ })).evaluated,true,'lease-start boundary remains allowed');
+ assert.equal((await evaluate(x.service,TOKEN_A,FIX)).evaluated,true);
+ assert.equal(x.writes.length,2);
+ for(const row of x.writes){
+   for(const key of ['point','latitude','longitude','history','sessionToken'])
+     assert.equal(Object.hasOwn(row,key),false);
+ }
+ const legacy=rig({...baseGrant},{...basePublisher});
+ assert.equal((await evaluate(legacy.service,undefined,{
+   ...FIX,capturedAtMs:NOW-29_000
+ })).evaluated,true,'M2 v1 generic freshness policy is unchanged');
+});
+
 test('M4 v2 device lease handoff discards prior handset geofence baseline without a false EXIT',async()=>{
  const prior={ownerUid:OWNER,subjectUid:SUBJECT,
    relationRevision:RELATION_REVISION,approvedAtMs:zone.approvedAtMs,
