@@ -15,6 +15,7 @@ const A='m2owneruid000000001',B='m2vieweruid00000002',C='m2strangeruid000003';
 const pair=A+'__'+B;
 let now=1800000000000;
 const point=()=>({latitude:13.75,longitude:100.5,accuracyMeters:12,capturedAtMs:now-1000});
+const devicePoint=()=>({...point(),capturedAtMs:now});
 const bearer=id=>'T'.repeat(64)+id;
 const relation=(patch={})=>({schemaVersion:1,senderUid:A,recipientUid:B,
   updatedAt:{seconds:Math.floor(now/1000),nanoseconds:0},
@@ -146,7 +147,7 @@ test('M3 capability-fenced device sessions prevent same Firebase account cross-d
  assert.equal(JSON.stringify([...x.db.rows.values()]).includes(first.sessionToken),false);
  const share=secret=>x.svc.publishDevice({
    idToken:bearer(A),viewerUid:B,sessionToken:secret,
-   point:point(),appInForeground:true,foregroundPermissionGranted:true
+   point:devicePoint(),appInForeground:true,foregroundPermissionGranted:true
  });
  const stop=secret=>x.svc.stopDevice({
    idToken:bearer(A),viewerUid:B,sessionToken:secret
@@ -157,7 +158,7 @@ test('M3 capability-fenced device sessions prevent same Firebase account cross-d
  await fails(share('0'.repeat(64)));
  await fails(stop('0'.repeat(64)));
  await share(first.sessionToken);
- assert.deepEqual((await x.view()).point,point());
+ assert.deepEqual((await x.view()).point,devicePoint());
  await stop(first.sessionToken);
  await fails(x.view());
  // A stale STOP from the first phone cannot erase the newer same-viewer
@@ -167,7 +168,7 @@ test('M3 capability-fenced device sessions prevent same Firebase account cross-d
  await fails(stop(first.sessionToken));
  await fails(share(first.sessionToken));
  await share(newer.sessionToken);
- assert.deepEqual((await x.view()).point,point());
+ assert.deepEqual((await x.view()).point,devicePoint());
  // A signed-in owner can emergency revoke even without the capability.
  assert.deepEqual(await x.stop(),{enabled:false});
  await fails(x.view());
@@ -176,7 +177,7 @@ test('M3 viewer never exposes a latest point detached from its exact device leas
  const x=setup();
  const device=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
  await x.svc.publishDevice({idToken:bearer(A),viewerUid:B,
-   sessionToken:device.sessionToken,point:point(),
+   sessionToken:device.sessionToken,point:devicePoint(),
    appInForeground:true,foregroundPermissionGranted:true});
  const gk='private_location_grants/'+pair;
  const pk='private_location_publishers/'+A;
@@ -189,7 +190,7 @@ test('M3 viewer never exposes a latest point detached from its exact device leas
  assert.equal(publisher.sessionDigest,grant.sessionDigest);
  assert.notEqual(latest.sessionDigest,device.sessionToken);
  assert.equal(JSON.stringify(latest).includes(device.sessionToken),false);
- assert.deepEqual((await x.view()).point,point());
+ assert.deepEqual((await x.view()).point,devicePoint());
  // Each corruption is applied to otherwise-valid, still-unexpired records.
  // No forged same-pair grant/publisher combination may disclose a GPS point
  // from an older or unknown device session. Reads never mutate persisted data.
@@ -213,7 +214,7 @@ test('M3 viewer never exposes a latest point detached from its exact device leas
    assert.deepEqual(x.db.rows.get(lk),before);
  }
  x.db.rows.set(gk,grant);x.db.rows.set(pk,publisher);x.db.rows.set(lk,latest);
- assert.deepEqual((await x.view()).point,point(),
+ assert.deepEqual((await x.view()).point,devicePoint(),
    'restored valid current device lease remains readable');
  // The original M2 v1 path has NO digest in grant, publisher or latest point.
  const legacy=setup();
@@ -231,7 +232,7 @@ test('M3 v2 publisher lease cannot be silently extended beyond its 60-second iss
  const x=setup();
  const device=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
  const send=()=>x.svc.publishDevice({idToken:bearer(A),viewerUid:B,
-   sessionToken:device.sessionToken,point:point(),
+   sessionToken:device.sessionToken,point:devicePoint(),
    appInForeground:true,foregroundPermissionGranted:true});
  await send();
  const grantKey='private_location_grants/'+pair;
@@ -252,11 +253,39 @@ test('M3 v2 publisher lease cannot be silently extended beyond its 60-second iss
  }
  x.db.rows.set(grantKey,grant);
  x.db.rows.set(publisherKey,publisher);
- assert.deepEqual((await x.view()).point,point());
+ assert.deepEqual((await x.view()).point,devicePoint());
  await send();
- assert.deepEqual((await x.view()).point,point());
+ assert.deepEqual((await x.view()).point,devicePoint());
  await x.svc.stopDevice({idToken:bearer(A),viewerUid:B,
    sessionToken:device.sessionToken});
+});
+
+test('M3 v2 rejects GPS captured before device lease issuance without mutating latest point',async()=>{
+ const x=setup();
+ const lease=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
+ const latestKey='private_latest_locations/'+pair;
+ const send=capturedAtMs=>x.svc.publishDevice({
+   idToken:bearer(A),viewerUid:B,sessionToken:lease.sessionToken,
+   point:{...point(),capturedAtMs},
+   appInForeground:true,foregroundPermissionGranted:true
+ });
+ // Both fixes are fresh according to the 30s generic M2 rule, but they
+ // predate this device's M3 opt-in START and must not be exposed as live.
+ for(const timestamp of [now-10_000,now-1,now+0.5]){
+   await fails(send(timestamp));
+   assert.equal(x.db.rows.has(latestKey),false);
+ }
+ await send(now);
+ const accepted=structuredClone(x.db.rows.get(latestKey));
+ assert.deepEqual((await x.view()).point,devicePoint());
+ await fails(send(now-1));
+ assert.deepEqual(x.db.rows.get(latestKey),accepted,
+   'a pre-lease fix must not overwrite a consented latest point or TTL');
+ await x.svc.stopDevice({idToken:bearer(A),viewerUid:B,
+   sessionToken:lease.sessionToken});
+ // M2/v1 semantics remain untouched: a 1-second-old point is allowed.
+ await x.start();await x.publish();
+ assert.deepEqual((await x.view()).point,point());
 });
 
 test('M3 sequential second START is denied while first device lease is active',async()=>{
