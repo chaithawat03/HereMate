@@ -34,6 +34,8 @@ const fields=(obj:unknown,keys:readonly string[]):boolean=>{
 };
 const unavailable=():never=>{throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');};
 const validNumber=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
+// M3 v2 START issues a 60-second device capability, not a renewable bearer.
+const MAX_V2_LEASE_MS=60_000;
 /** Provider-confirmed Cloud Run origins in the one approved HereMate project.
  * Reject every other *.run.app host before Firebase bearer or GPS transfer. */
 export const APPROVED_M2_STAGING_ORIGINS=Object.freeze([
@@ -102,6 +104,16 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     // after backgrounding while the final permission promise was pending.
     if(ports.currentIdentity()?.uid!==first.uid||
        (requireForeground&&!ports.isForeground()))unavailable();
+    // Foreground/OS permission and Firebase token awaits can race an explicit
+    // STOP or lease expiry. Never send a v2 GPS fix after STOP was requested,
+    // even if the backend would reject the stale capability.
+    if(endpoint==='/v2/locations/sessions/publish'){
+      const lease=deviceSession;
+      if(!lease||deviceSessionStopPending||emergencyStopPending||
+         deviceSessionStartPending||lease.expiresAtMs<=Date.now()||
+         lease.uid!==first.uid||lease.peerUid!==payload.viewerUid||
+         lease.token!==payload.sessionToken)unavailable();
+    }
     const body=JSON.stringify(payload);
     if(body.length>1024)unavailable();
     const ctrl=new AbortController();
@@ -187,6 +199,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
           const expiry=row.expiresAtMs,token=row.sessionToken;
           if(row.enabled!==true||!validNumber(expiry)||
             !Number.isSafeInteger(expiry)||expiry<=Date.now()||
+            expiry>Date.now()+MAX_V2_LEASE_MS||
             !validCapability(token)||ports.currentIdentity()?.uid!==uid)
             return unavailable();
           deviceSession={uid,peerUid:viewerUid,token,expiresAtMs:expiry};
@@ -237,7 +250,9 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       const session=ports.useDeviceSessions===true?deviceSession:null;
       if(ports.useDeviceSessions===true&&
         (!session||session.uid!==ports.currentIdentity()?.uid||
-          session.peerUid!==viewerUid))unavailable();
+          session.peerUid!==viewerUid||session.expiresAtMs<=Date.now()||
+          deviceSessionStopPending||emergencyStopPending||
+          deviceSessionStartPending))unavailable();
       const result=await send(ports.useDeviceSessions===true?
         '/v2/locations/sessions/publish':'/v1/locations/points/publish',{
         viewerUid,
