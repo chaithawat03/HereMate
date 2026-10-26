@@ -136,6 +136,29 @@ test('M4 never emits an old geofence event after final async OS permission check
  }
 });
 
+test('M4 suppresses a confirmed zone alert if the exact M3 publisher lease is retired while final OS permission is pending',async()=>{
+ for(const cause of ['owner STOP','new-device handoff']){
+   let release,checks=0,leaseCurrent=true;
+   const finalPermission=new Promise(resolve=>{release=resolve;});
+   const x=rig({
+     hasPermission:async()=>++checks===4?finalPermission:true,
+     isEvaluationStillAuthorized:ownerUid=>
+       ownerUid===OWNER&&leaseCurrent
+   });
+   assert.equal(await x.controller.start(OWNER,true),true);
+   x.send();await flush();
+   assert.equal(checks,4);
+   assert.equal(x.stats().evalCount,1,'the server already confirmed an event');
+   leaseCurrent=false; // M3 STOP or a different handset took over the lease
+   release(true);await flush();
+   assert.deepEqual(x.events,[],cause+' must suppress the stale alert');
+   assert.equal(x.controller.getPhase(),'off');
+   assert.equal(x.stats().removed,1);
+   x.send();await flush();
+   assert.deepEqual(x.events,[]);
+ }
+});
+
 test('M4 watcher errors fail closed; no background services or GPS history',async()=>{
  const x=rig();
  await x.controller.start(OWNER,true);
