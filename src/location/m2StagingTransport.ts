@@ -76,6 +76,11 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   // A failed/timeout STOP is still an explicit owner withdrawal of consent.
   // Retain the opaque token solely for STOP retry; never resume GPS/M4 use.
   let deviceSessionStopIntent=false;
+  // A user STOP in the sharing controller may need to await an in-flight
+  // GPS publish BEFORE calling transport.stop(). Fence M4 borrowing and
+  // further GPS synchronously at the original tap, not after that await.
+  // Track STOP generations so a late START response cannot clear the intent.
+  let deviceSessionStopGeneration=0;
   // A delayed first START must not allow another handset/session request to
   // race through this transport and overwrite its opaque publisher capability.
   let deviceSessionStartPending=false;
@@ -158,6 +163,13 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     return peerUid;
   };
   return Object.freeze({
+    signalStopIntent(){
+      // This is a local, non-network consent withdrawal. M2/v1 has no
+      // publisher capability and retains its original STOP behavior.
+      if(ports.useDeviceSessions!==true)return;
+      deviceSessionStopGeneration++;
+      deviceSessionStopIntent=true;
+    },
     getPublisherSessionToken(actorUid:string,peerUid:string){
       const session=deviceSession;
       // Only this transport's live owner+peer may borrow the publisher
@@ -194,6 +206,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
         // Acquire synchronously before the first await; release on every
         // rejection, timeout or identity change without persisting a token.
         deviceSessionStartPending=true;
+        const stopGenerationAtStart=deviceSessionStopGeneration;
         try {
           const result=await send('/v2/locations/sessions/start',{viewerUid},true);
           if(!fields(result,['enabled','expiresAtMs','sessionToken']))
@@ -207,7 +220,11 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
             return unavailable();
           // A new explicit, server-confirmed START may replace a retired
           // account/lease; a failed STOP alone cannot clear the intent latch.
-          deviceSessionStopIntent=false;
+          // A STOP requested during an in-flight START must stay latched.
+          // Only a separately initiated and confirmed START may retire an
+          // older failed-STOP latch after the old lease was removed.
+          if(stopGenerationAtStart===deviceSessionStopGeneration)
+            deviceSessionStopIntent=false;
           deviceSession={uid,peerUid:viewerUid,token,expiresAtMs:expiry};
           return {enabled:true,expiresAtMs:expiry};
         } finally {
