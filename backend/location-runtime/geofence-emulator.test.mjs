@@ -262,7 +262,7 @@ test('real Firestore: M4 publisher lease handoff resets old-device transition st
     stateRef.set({ownerUid:owner,subjectUid:subject,
       relationRevision:revision,approvedAtMs:now-5000,
       expiresAtMs:now+3600_000,zone:'inside',pending:null,streak:0,
-      lastEventAtMs:null,lastSampleCapturedAtMs:now-4000,
+      lastEventAtMs:now-1000,lastSampleCapturedAtMs:now-4000,
       sessionDigest:digest(tokenA)
     })
   ]);
@@ -295,6 +295,23 @@ test('real Firestore: M4 publisher lease handoff resets old-device transition st
   stored=(await stateRef.get()).data();
   assert.equal(stored.zone,'outside');
   assert.equal(stored.sessionDigest,digest(tokenB));
+  assert.equal(stored.lastEventAtMs,now-1000,
+    'new publisher cannot reset an approved zone notification cooldown');
+  // New handset B has established its own outside baseline. Two inside
+  // fixes within handset A's 5-minute cooldown must not duplicate Enter.
+  assert.equal((await service.evaluate({
+    idToken:bearer(subject),ownerUid:owner,sessionToken:tokenB,
+    point:{latitude:0,longitude:0,accuracyMeters:10,capturedAtMs:now+700},
+    appInForeground:true,foregroundPermissionGranted:true
+  })).event,null);
+  assert.equal((await service.evaluate({
+    idToken:bearer(subject),ownerUid:owner,sessionToken:tokenB,
+    point:{latitude:0,longitude:0,accuracyMeters:10,capturedAtMs:now+2000},
+    appInForeground:true,foregroundPermissionGranted:true
+  })).event,null,'same approved-zone cooldown spans legitimate device handoff');
+  stored=(await stateRef.get()).data();
+  assert.equal(stored.zone,'inside');
+  assert.equal(stored.lastEventAtMs,now-1000);
   for(const forbidden of ['point','latitude','longitude','fix','history','sessionToken'])
     assert.equal(Object.hasOwn(stored,forbidden),false);
   assert.equal(JSON.stringify(stored).includes(tokenB),false,
