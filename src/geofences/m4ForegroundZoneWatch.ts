@@ -21,6 +21,8 @@ export type M4WatchPorts=Readonly<{
  hasPermission:()=>Promise<boolean>;
  watch:(onFix:(fix:ShareFix)=>void,onError:()=>void)=>Promise<{remove:()=>void}>;
  evaluate:(zoneOwnerUid:string,fix:ShareFix)=>Promise<'enter'|'exit'|null>;
+ /** Optional final in-memory M3 lease proof, checked AFTER async OS permission. */
+ isEvaluationStillAuthorized?:(zoneOwnerUid:string)=>boolean;
  now:()=>number;
  schedule:(fn:()=>void,delayMs:number)=>unknown;
  cancel:(handle:unknown)=>void;
@@ -129,7 +131,9 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      // Firebase account changes may happen while it is pending. Recheck the
      // same watcher generation AFTER the await, before any subject-only alert.
      const stillPermitted=await p.hasPermission();
-     if(!stillPermitted||!active(epoch))throw Error('revoked');
+     if(!stillPermitted||!active(epoch)||
+        (p.isEvaluationStillAuthorized!==undefined&&
+         !p.isEvaluationStillAuthorized(destination)))throw Error('revoked');
      if(event==='enter'||event==='exit')p.onEvent(event);
    }catch{
      if(!disposed&&epoch===generation){
