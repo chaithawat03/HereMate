@@ -8,7 +8,7 @@
  * This root is selected ONLY by index.ts with explicit Android Staging build
  * flags in the manual, single-APK workflow. The normal App.tsx is untouched.
  */
-import React from 'react';
+import React,{useCallback,useState} from 'react';
 import {
   Platform,SafeAreaView,ScrollView,StatusBar,Text,View,useWindowDimensions
 } from 'react-native';
@@ -23,6 +23,33 @@ import {M4GeofenceStagingScreens} from './src/geofences/M4GeofenceStagingScreens
 // and exercised in the successful three-account live Staging E2E.
 export const HERE_M2_STAGING_ORIGIN=
   'https://heremate-m2-location-staging-2inhowyo2a-as.a.run.app' as const;
+
+// Source-only, flag-gated bridge: keep the provider callback (never the bearer)
+ // inside the authenticated subtree. The M3 transport remains the only owner
+ // of the ephemeral token; no global singleton, persistence or UI token state.
+type PublisherProvider=(actorUid:string,peerUid:string)=>string|null;
+function StagingServices(){
+  const [publisherProvider,setPublisherProvider]=useState<PublisherProvider|null>(null);
+  const onPublisherProviderChange=useCallback((provider:PublisherProvider|null)=>{
+    // React treats a function passed to setState as an updater. Wrap the
+    // capability callback so it is stored, never invoked by React.
+    setPublisherProvider(()=>provider);
+  },[]);
+  return <>
+    <M2AndroidStagingScreens
+      approvedCloudRunUrl={HERE_M2_STAGING_ORIGIN}
+      backendReviewedAndEnabled={true}
+      onPublisherProviderChange={
+        process.env.EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'&&
+        process.env.EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'?
+          onPublisherProviderChange:undefined}/>
+    {process.env.EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'?
+      <M4GeofenceStagingScreens
+        approvedCloudRunUrl={HERE_M2_STAGING_ORIGIN}
+        backendReviewedAndEnabled={true}
+        getPublisherSessionToken={publisherProvider??undefined}/>:null}
+  </>;
+}
 
 function M2Screen(){
   const {colors:c,theme,language,t}=usePreferences();
@@ -56,13 +83,7 @@ function M2Screen(){
           </View>
           <UserProfilePanel/>
           <FriendsPanel/>
-          <M2AndroidStagingScreens
-            approvedCloudRunUrl={HERE_M2_STAGING_ORIGIN}
-            backendReviewedAndEnabled={true}/>
-          {process.env.EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'?
-            <M4GeofenceStagingScreens
-              approvedCloudRunUrl={HERE_M2_STAGING_ORIGIN}
-              backendReviewedAndEnabled={true}/>:null}
+          <StagingServices/>
           <Text style={{fontSize:12,color:c.muted}}>{t('m2MapSchematic')}</Text>
         </ScrollView>
       </GuestAuthGate> : <View style={{padding:20}}>
