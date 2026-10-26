@@ -144,18 +144,20 @@ test('M3 failed START releases local lock for an explicit retry without caching 
 test('M3->M4 publisher capability lookup is peer-scoped, in-memory, and revoked on account switch',async()=>{
  const x=harness();
  const other='anotherpeeruid000003';
- assert.equal(x.transport.getPublisherSessionToken(PEER),null);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
  await x.transport.start(PEER);
- assert.equal(x.transport.getPublisherSessionToken(PEER),CAP);
- assert.equal(x.transport.getPublisherSessionToken(other),null);
- assert.equal(x.transport.getPublisherSessionToken(SELF),null);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),CAP);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,other),null);
+ assert.equal(x.transport.getPublisherSessionToken('differentactoruid00003',PEER),null,
+   'a different M4 Firebase actor cannot borrow this handset lease');
+ assert.equal(x.transport.getPublisherSessionToken(SELF,SELF),null);
  x.setActive(false);
- assert.equal(x.transport.getPublisherSessionToken(PEER),null);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
  x.setActive(true);
  x.setUser('secondowneruid00003');
- assert.equal(x.transport.getPublisherSessionToken(PEER),null);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
  x.setUser(SELF);
- assert.equal(x.transport.getPublisherSessionToken(PEER),null,
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null,
    'an observed account switch permanently retires the previous capability');
  assert.equal(x.calls.length,1,'read-only lookup must not call network');
 });
@@ -175,14 +177,14 @@ test('M3->M4 publisher capability is hidden while STOP is pending and after conf
    return {ok:true,status:200,json:async()=>({enabled:false})};
  }});
  await x.transport.start(PEER);
- assert.equal(x.transport.getPublisherSessionToken(PEER),CAP);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),CAP);
  const stop=x.transport.stop(PEER);
  await entered;
- assert.equal(x.transport.getPublisherSessionToken(PEER),null,
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null,
    'M4 must not borrow token after STOP was initiated');
  resumeStop();
  assert.deepEqual(await stop,{enabled:false});
- assert.equal(x.transport.getPublisherSessionToken(PEER),null);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
 });
 
 test('M3->M4 bridge never exposes a publisher token past its lease expiry',async()=>{
@@ -192,7 +194,7 @@ test('M3->M4 bridge never exposes a publisher token past its lease expiry',async
    })
  })});
  await x.transport.start(PEER);
- assert.equal(x.transport.getPublisherSessionToken(PEER),CAP);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),CAP);
  await new Promise(resolve=>setTimeout(resolve,170));
- assert.equal(x.transport.getPublisherSessionToken(PEER),null);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
 });
