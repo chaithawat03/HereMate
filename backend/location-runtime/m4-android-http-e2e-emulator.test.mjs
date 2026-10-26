@@ -140,13 +140,17 @@ test('Android M4 real JWT/HTTP/Firestore consent and event privacy (emulators on
     }),/M4_GEOFENCE_NOT_AVAILABLE/,'approval alone is not an M2 publisher grant');
     assert.equal((await subjectM3.start(owner.uid)).enabled,true);
     assert.match(publisherSessionToken,/^[0-9a-f]{64}$/);
-    // A second same-account handset with no device capability must fail.
+    // A second handset with the SAME real Firebase UID but a different
+    // syntactically valid M3 capability reaches the real Auth/Firestore
+    // transaction and is denied by server lease binding, with zero writes.
     const otherHandset=createM4StagingTransport({
-      ...ports(subject),getPublisherSessionToken:()=>null
+      ...ports(subject),getPublisherSessionToken:()=> '0'.repeat(64)
     });
     await assert.rejects(otherHandset.evaluate(owner.uid,{
       latitude:0,longitude:0,accuracyMeters:12,capturedAtMs:Date.now()-1000
     }),/M4_GEOFENCE_NOT_AVAILABLE/);
+    assert.equal((await state.get()).exists,false,
+      'foreign handset cannot create a geofence baseline or event');
     // Four independent synthetic samples establish outside, then Enter.
     // Captures are distinct and ordered; no physical GPS or elapsed wait.
     const captured=Date.now()-10000;
