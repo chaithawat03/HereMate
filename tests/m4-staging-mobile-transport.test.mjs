@@ -87,6 +87,44 @@ test('consent UX APIs send exact, authenticated, no-store POST bodies only',asyn
   '/v1/geofences/decide','/v1/geofences/revoke','/v1/geofences/evaluate'
  ]);
 });
+test('M4 optional M3 device capability is scoped to EVALUATE, never to REVOKE or zone proposal',async()=>{
+ let activeToken='a'.repeat(64);
+ const x=make({getPublisherSessionToken:()=>activeToken});
+ assert.equal((await x.transport.propose(PEER,circle)).proposed,true);
+ assert.equal((await x.transport.revoke(PEER,UID)).revoked,true);
+ const fix={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
+ assert.equal((await x.transport.evaluate(PEER,fix)).event,'enter');
+ assert.equal(x.calls.length,3);
+ assert.equal(JSON.parse(x.calls[0].init.body).sessionToken,undefined);
+ assert.equal(JSON.parse(x.calls[1].init.body).sessionToken,undefined);
+ assert.equal(JSON.parse(x.calls[2].init.body).sessionToken,activeToken);
+ activeToken=null;
+ await assert.rejects(x.transport.evaluate(PEER,fix),/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(x.calls.length,3,'no private GPS request without a device capability');
+ assert.equal((await x.transport.revoke(PEER,UID)).revoked,true,
+   'independent revoke remains available without device capability');
+ assert.equal(x.calls.length,4);
+});
+
+test('M4 reads M3 device capability only after awaited identity and OS permission preflight',async()=>{
+ let activeToken='a'.repeat(64),resume;
+ let started;
+ const waiting=new Promise(resolve=>{resume=resolve;});
+ const entered=new Promise(resolve=>{started=resolve;});
+ const x=make({
+   getPublisherSessionToken:()=>activeToken,
+   currentIdentity:()=>({uid:UID,getIdToken:async()=>{started();await waiting;return SECRET;}})
+ });
+ const fix={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
+ const pending=x.transport.evaluate(PEER,fix);
+ await entered;
+ activeToken='b'.repeat(64);
+ resume();
+ assert.equal((await pending).event,'enter');
+ assert.equal(JSON.parse(x.calls[0].init.body).sessionToken,'b'.repeat(64),
+   'stale capability from before awaited Firebase token must not be sent');
+});
+
 test('invalid coordinates, permission OFF or forged caller never send GPS or proposed circle',async()=>{
  const x=make();
  await assert.rejects(x.transport.propose(PEER,{...circle,radiusMeters:10}),/M4_GEOFENCE_NOT_AVAILABLE/);
