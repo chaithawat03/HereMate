@@ -264,6 +264,12 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         validPublisher(publisher,ownerUid,viewerUid,now,grant);
         verifyDeviceSession(grant,publisher,sessionDigest);
         validPoint(point,now);
+        // A location fix captured BEFORE this device was granted its M3
+        // publisher lease must not be re-used as a consented live position.
+        // The v2 lease is issued for exactly GRANT_MS; v1 is unchanged.
+        // No GPS history or additional Firestore fields are required.
+        if(!Number.isSafeInteger(point.capturedAtMs)||
+           point.capturedAtMs<grant.expiresAtMs-GRANT_MS)deny();
         const expiresAtMs=Math.min(grant.expiresAtMs,now+FIX_MAX_AGE_MS);
         setPoint({ownerUid,viewerUid,point:{...point},sessionDigest,expiresAtMs,
           expireAt:new Date(expiresAtMs)});
