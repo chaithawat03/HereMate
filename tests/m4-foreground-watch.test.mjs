@@ -206,6 +206,52 @@ test('M4 permission revoked during async native watch bind removes watcher and f
  assert.deepEqual(x.failures,['error']);
  assert.equal(x.timers.length,0);
 });
+test('M4 STOP removes a bound native GPS watcher immediately while final OS permission read is pending',async()=>{
+ let resolveOld,checks=0,removed=0;
+ const pending=new Promise(resolve=>{resolveOld=resolve;});
+ const x=rig({
+   captureWatchLeaseProof:()=>()=>true,
+   hasPermission:()=>++checks===2?pending:Promise.resolve(true),
+   watch:async()=>({remove:()=>{removed++;}})
+ });
+ const first=x.controller.start(OWNER,true);
+ await flush();
+ assert.equal(checks,2,'native watcher is bound, but OS recheck is unresolved');
+ assert.equal(x.controller.getPhase(),'starting');
+ x.controller.stop();
+ assert.equal(removed,1,'STOP must release native GPS before OS promise settles');
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(await x.controller.start(OWNER,true),true,
+   'a new explicit opt-in can proceed independently');
+ resolveOld(true);
+ assert.equal(await first,false);
+ assert.equal(removed,1,'old async continuation must not remove twice or touch new watch');
+ assert.equal(x.controller.getPhase(),'watching');
+ x.controller.stop();
+ assert.equal(removed,2,'new watcher must still be independently removable');
+});
+
+test('M4 dispose releases a bound native watcher despite a stalled OS permission recheck',async()=>{
+ let resolveOld,checks=0,removed=0;
+ const pending=new Promise(resolve=>{resolveOld=resolve;});
+ const x=rig({
+   captureWatchLeaseProof:()=>()=>true,
+   hasPermission:()=>++checks===2?pending:Promise.resolve(true),
+   watch:async()=>({remove:()=>{removed++;}})
+ });
+ const first=x.controller.start(OWNER,true);
+ await flush();
+ assert.equal(checks,2);
+ x.controller.dispose();
+ assert.equal(removed,1,'unmount must release native GPS synchronously');
+ assert.equal(x.controller.getPhase(),'off');
+ resolveOld(false);
+ assert.equal(await first,false);
+ assert.equal(removed,1,'late OS denial must not remove twice');
+ assert.deepEqual(x.failures,[],'disposed UI must not receive delayed errors');
+ assert.equal(await x.controller.start(OWNER,true),false);
+});
+
 test('M4 native permission recheck error after bind still removes watcher',async()=>{
  let checks=0,removed=0;
  const x=rig({
