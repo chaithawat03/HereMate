@@ -188,13 +188,22 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        verifyEvaluateDeviceSession(grant,publisher,sessionToken);
        if(!validFix(point,current))deny();
        // State is strictly zone-classification/dedupe. Never store GPS point.
+       // A new M3 device publisher may share the same Firebase UID, friend
+       // relation and approved zone as the previous handset. Its first GPS
+       // samples MUST establish a fresh baseline, not inherit a prior device's
+       // inside/outside streak or emit a fabricated Enter/Exit.
+       // v1 (no digest) retains its existing state schema and behavior.
+       const leaseDigest=grant.sessionDigest;
        const previous=state?.relationRevision===revision&&
           state?.approvedAtMs===active.approvedAtMs&&
-          state.expiresAtMs>current?state:EMPTY_STATE;
+          state.expiresAtMs>current&&
+          state.sessionDigest===leaseDigest?state:EMPTY_STATE;
        const {next,event,quality}=advanceState(active.circle,point,current,previous);
        if(quality==='invalid')deny();
        const expiresAtMs=Math.min(active.expiresAtMs,current+MAX_ZONE_LIFETIME_MS);
        setState({...next,ownerUid,subjectUid,relationRevision:revision,
+         // Store only a purpose-hashed lease digest, NEVER its bearer capability.
+         ...(leaseDigest===undefined?{}:{sessionDigest:leaseDigest}),
          approvedAtMs:active.approvedAtMs,expiresAtMs,expireAt:new Date(expiresAtMs)});
        // Events returned ONLY to the authenticated tracked subject,
        // not stored as a location event/history, no push at this stage.
