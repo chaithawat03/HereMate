@@ -227,6 +227,38 @@ test('M3 viewer never exposes a latest point detached from its exact device leas
  await fails(legacy.view()); // v2-tagged point must not downgrade to v1.
 });
 
+test('M3 v2 publisher lease cannot be silently extended beyond its 60-second issue window',async()=>{
+ const x=setup();
+ const device=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
+ const send=()=>x.svc.publishDevice({idToken:bearer(A),viewerUid:B,
+   sessionToken:device.sessionToken,point:point(),
+   appInForeground:true,foregroundPermissionGranted:true});
+ await send();
+ const grantKey='private_location_grants/'+pair;
+ const publisherKey='private_location_publishers/'+A;
+ const pointKey='private_latest_locations/'+pair;
+ const grant=structuredClone(x.db.rows.get(grantKey));
+ const publisher=structuredClone(x.db.rows.get(publisherKey));
+ const latest=structuredClone(x.db.rows.get(pointKey));
+ // Both documents still agree on pair, token digest and expiry. Their
+ // extended lifetime alone must NOT make a forged long-lived v2 lease valid.
+ for(const expiry of [now+GRANT_MS+1,now+4*GRANT_MS,now+GRANT_MS+0.5]){
+   x.db.rows.set(grantKey,{...grant,expiresAtMs:expiry});
+   x.db.rows.set(publisherKey,{...publisher,expiresAtMs:expiry});
+   await fails(x.view());
+   await fails(send());
+   assert.deepEqual(x.db.rows.get(pointKey),latest,
+     'denied v2 lease extension must not mutate GPS or its TTL');
+ }
+ x.db.rows.set(grantKey,grant);
+ x.db.rows.set(publisherKey,publisher);
+ assert.deepEqual((await x.view()).point,point());
+ await send();
+ assert.deepEqual((await x.view()).point,point());
+ await x.svc.stopDevice({idToken:bearer(A),viewerUid:B,
+   sessionToken:device.sessionToken});
+});
+
 test('M3 sequential second START is denied while first device lease is active',async()=>{
  const x=setup();
  const first=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
