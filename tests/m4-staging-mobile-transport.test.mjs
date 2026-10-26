@@ -370,3 +370,37 @@ test('M3 and M4 transports can share only the same in-memory peer-scoped publish
  assert.equal(calls[0].body.sessionToken,undefined,
    'START response token is never stored in a request body');
 });
+
+test('M4 post-evaluation proof never exposes bearer and rejects STOP, device handoff, account switch or background',()=>{
+ let actor=UID,token='a'.repeat(64),foreground=true;
+ const x=make({
+   currentIdentity:()=>actor?{uid:actor,getIdToken:async()=>SECRET}:null,
+   isForeground:()=>foreground,
+   getPublisherSessionToken:(who,peer)=>
+     who===UID&&peer===PEER?token:null
+ });
+ const proof=x.transport.capturePublisherLeaseProof(PEER);
+ assert.equal(typeof proof,'function');
+ assert.equal(proof(),true);
+ assert.equal(x.transport.capturePublisherLeaseProof('otherowneruid00003')(),false);
+ token=null; // owner STOP revoked the in-memory M3 capability
+ assert.equal(proof(),false);
+ token='b'.repeat(64); // a new publisher device took over
+ assert.equal(proof(),false,'old event must not follow a new lease');
+ token='a'.repeat(64);
+ actor='otherfirebaseactor00003';
+ assert.equal(proof(),false,'wrong Firebase account cannot surface the event');
+ actor=UID;foreground=false;
+ assert.equal(proof(),false,'background cannot surface the event');
+ assert.equal(x.calls.length,0,'proof check must never transmit GPS or a token');
+});
+
+test('M4 foreground watch and one-shot recheck exact publisher lease after async permission',()=>{
+ const panel=read('src/geofences/M4GeofencePanel.tsx');
+ const watcher=read('src/geofences/m4ForegroundZoneWatch.ts');
+ assert.match(panel,/transport\.capturePublisherLeaseProof\(ownerUid\)/);
+ assert.match(panel,/isEvaluationStillAuthorized:\(\)=>evaluatedLeaseProof\(\)/);
+ assert.match(panel,/isCurrent:\(\)=>isCurrent\(\)&&leaseProof\(\)/);
+ assert.match(watcher,/!p\.isEvaluationStillAuthorized\(destination\)/);
+ assert.doesNotMatch(panel,/AsyncStorage|SecureStore|console\.log\(.*[Tt]oken/);
+});
