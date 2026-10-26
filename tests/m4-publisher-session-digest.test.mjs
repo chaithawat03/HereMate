@@ -199,3 +199,52 @@ test('M4 v1 never inherits v2 geofence baseline when the device lease downgrades
  assert.equal(x.currentState().zone,'unknown');
  assert.equal(Object.hasOwn(x.currentState(),'sessionDigest'),false);
 });
+
+test('M4 device handoff resets location baseline but preserves approved-zone event cooldown',async()=>{
+ const outside={latitude:0.01,longitude:0,accuracyMeters:10};
+ const inside={latitude:0,longitude:0,accuracyMeters:10};
+ for(const [priorEvent,expectEnter] of [
+   [NOW-1000,null],[NOW-300_001,'enter']
+ ]){
+   const prior={ownerUid:OWNER,subjectUid:SUBJECT,
+     relationRevision:RELATION_REVISION,approvedAtMs:zone.approvedAtMs,
+     expiresAtMs:NOW+40_000,zone:'inside',pending:null,streak:0,
+     lastEventAtMs:priorEvent,lastSampleCapturedAtMs:NOW-4000,
+     sessionDigest:DIGEST_A};
+   const x=rig({...baseGrant,sessionDigest:DIGEST_B},
+     {...basePublisher,sessionDigest:DIGEST_B},prior);
+   // First two observations on handset B establish its OWN outside baseline.
+   assert.equal((await evaluate(x.service,TOKEN_B,{
+     ...outside,capturedAtMs:NOW-2000})).event,null);
+   assert.equal(x.currentState().zone,'unknown');
+   assert.equal(x.currentState().lastEventAtMs,priorEvent,
+     'lease change must not erase the per-zone cooldown timestamp');
+   assert.equal((await evaluate(x.service,TOKEN_B,{
+     ...outside,capturedAtMs:NOW-500})).event,null);
+   assert.equal(x.currentState().zone,'outside');
+   // Even after two valid inside fixes, a recent A event must still suppress
+   // the duplicate Enter on B; an already-expired cooldown must not block it.
+   assert.equal((await evaluate(x.service,TOKEN_B,{
+     ...inside,capturedAtMs:NOW+700})).event,null);
+   assert.equal((await evaluate(x.service,TOKEN_B,{
+     ...inside,capturedAtMs:NOW+2000})).event,expectEnter);
+   assert.equal(x.currentState().zone,'inside');
+   assert.equal(x.currentState().lastEventAtMs,
+     expectEnter===null?priorEvent:NOW);
+   assert.equal(x.currentState().sessionDigest,DIGEST_B);
+ }
+});
+
+test('M4 lease handoff denies malformed old-device event cooldown without writes',async()=>{
+ for(const bad of ['invalid',NaN,NOW+1,0,1.5]){
+   const prior={ownerUid:OWNER,subjectUid:SUBJECT,
+     relationRevision:RELATION_REVISION,approvedAtMs:zone.approvedAtMs,
+     expiresAtMs:NOW+40_000,zone:'inside',pending:null,streak:0,
+     lastEventAtMs:bad,lastSampleCapturedAtMs:NOW-4000,
+     sessionDigest:DIGEST_A};
+   const x=rig({...baseGrant,sessionDigest:DIGEST_B},
+     {...basePublisher,sessionDigest:DIGEST_B},prior);
+   await assert.rejects(evaluate(x.service,TOKEN_B),GeofenceDenied);
+   assert.deepEqual(x.writes,[]);
+ }
+});
