@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import {createM2StagingTransport} from '../src/location/m2StagingTransport.ts';
 import {
  createM4StagingTransport,APPROVED_M4_STAGING_ORIGINS
 } from '../src/geofences/m4StagingTransport.ts';
@@ -207,8 +208,8 @@ test('M4 v2 UI cannot mount without an explicit same-device publisher capability
  assert.match(wiring,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'/);
  assert.match(wiring,/requiresV2Capability&&typeof getPublisherSessionToken!=='function'/);
  assert.match(wiring,/requiresV2Capability\?\{getPublisherSessionToken\}:\{\}/);
- assert.match(wiring,/getPublisherSessionToken\?:\(\)=>string\|null/);
- assert.match(transport,/getPublisherSessionToken\?:\(\)=>string\|null/);
+ assert.match(wiring,/getPublisherSessionToken\?:\(ownerUid:string\)=>string\|null/);
+ assert.match(transport,/getPublisherSessionToken\?:\(ownerUid:string\)=>string\|null/);
  // Neither current app root supplies a publisher bearer to the M4 panel.
  // A future v2 release MUST explicitly wire a same-account/same-device
  // scoped bridge rather than silently using a v1 UID-only EVALUATE.
@@ -260,4 +261,59 @@ test('M4 rejects 307/308 responses rather than exposing a consented zone to redi
    assert.equal(new URL(seen[0].input).origin,ORIGIN);
    assert.ok(!String(seen[0].input).includes('foreign.run.app'));
  }
+});
+
+
+test('M4 v2 asks the capability provider for the exact owner peer before send and after reply',async()=>{
+ const requested=[];
+ const x=make({getPublisherSessionToken:ownerUid=>{
+   requested.push(ownerUid);
+   return ownerUid===PEER?'a'.repeat(64):null;
+ }});
+ const point={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
+ assert.equal((await x.transport.evaluate(PEER,point)).event,'enter');
+ assert.deepEqual(requested,[PEER,PEER]);
+ const other='anotherowneruid00003';
+ await assert.rejects(x.transport.evaluate(other,point),/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.deepEqual(requested,[PEER,PEER,other]);
+ assert.equal(x.calls.length,1,'a lease for one peer must not send GPS for another peer');
+});
+
+test('M3 and M4 transports can share only the same in-memory peer-scoped publisher capability',async()=>{
+ const token='b'.repeat(64),owner='geofencesubjectuid002';
+ const calls=[];
+ let actor=UID;
+ const m3=createM2StagingTransport({
+   approvedCloudRunUrl:ORIGIN,projectId:'heremate',useDeviceSessions:true,
+   currentIdentity:()=>actor?{uid:actor,getIdToken:async()=>SECRET}:null,
+   isForeground:()=>true,foregroundPermissionGranted:async()=>true,
+   fetchImpl:async(url,init)=>{
+     calls.push({url,body:JSON.parse(init.body)});
+     return {ok:true,status:200,json:async()=>url.endsWith('/start')?
+       {enabled:true,expiresAtMs:now()+50_000,sessionToken:token}:
+       {enabled:false}};
+   }
+ });
+ // Here M3 actor must be the same Firebase identity used by M4.
+ // The M3 lease is tied to one peer; M4 must never infer it from UID alone.
+ actor=UID;
+ const publisherPeer=PEER;
+ assert.equal(m3.getPublisherSessionToken(publisherPeer),null);
+ await m3.start(publisherPeer);
+ const m4=make({getPublisherSessionToken:peer=>m3.getPublisherSessionToken(peer)});
+ const fix={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
+ assert.equal((await m4.transport.evaluate(publisherPeer,fix)).event,'enter');
+ assert.equal(JSON.parse(m4.calls[0].init.body).sessionToken,token);
+ await assert.rejects(m4.transport.evaluate('otherowneruid00003',fix),
+   /M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(m4.calls.length,1,'different peer cannot borrow the publisher lease');
+ await m3.stop(publisherPeer);
+ await assert.rejects(m4.transport.evaluate(publisherPeer,fix),
+   /M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(m4.calls.length,1,'retired lease must not send a second GPS fix');
+ assert.deepEqual(calls.map(x=>new URL(x.url).pathname),[
+   '/v2/locations/sessions/start','/v2/locations/sessions/stop'
+ ]);
+ assert.equal(calls[0].body.sessionToken,undefined,
+   'START response token is never stored in a request body');
 });
