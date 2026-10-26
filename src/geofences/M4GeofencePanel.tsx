@@ -129,6 +129,9 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
        }),onError);
        return {remove:()=>sub.remove()};
      },
+     // Bind native foreground GPS to the same exact publisher lease that
+     // authorized this opt-in, not merely to the Firebase UID/friendship.
+     captureWatchLeaseProof:ownerUid=>transport.capturePublisherLeaseProof(ownerUid),
      evaluate:async(ownerUid,fix)=>{
        const proof=transport.capturePublisherLeaseProof(ownerUid);
        const event=(await transport.evaluate(ownerUid,fix)).event;
