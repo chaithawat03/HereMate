@@ -73,6 +73,9 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   let deviceSession:{uid:string;peerUid:string;token:string;expiresAtMs:number}|null=null;
   // Do not let M4 issue a new evaluation while a v2 STOP is in flight.
   let deviceSessionStopPending=false;
+  // A failed/timeout STOP is still an explicit owner withdrawal of consent.
+  // Retain the opaque token solely for STOP retry; never resume GPS/M4 use.
+  let deviceSessionStopIntent=false;
   // A delayed first START must not allow another handset/session request to
   // race through this transport and overwrite its opaque publisher capability.
   let deviceSessionStartPending=false;
@@ -109,7 +112,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     // even if the backend would reject the stale capability.
     if(endpoint==='/v2/locations/sessions/publish'){
       const lease=deviceSession;
-      if(!lease||deviceSessionStopPending||emergencyStopPending||
+      if(!lease||deviceSessionStopIntent||deviceSessionStopPending||emergencyStopPending||
          deviceSessionStartPending||lease.expiresAtMs<=Date.now()||
          lease.uid!==first.uid||lease.peerUid!==payload.viewerUid||
          lease.token!==payload.sessionToken)unavailable();
@@ -169,7 +172,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       if(ports.useDeviceSessions!==true||!session||
          session.uid!==actorUid||!CODE.test(actorUid)||
          session.peerUid!==peerUid||!CODE.test(peerUid)||
-         !ports.isForeground()||deviceSessionStopPending||
+         !ports.isForeground()||deviceSessionStopIntent||deviceSessionStopPending||
          emergencyStopPending||deviceSessionStartPending||
          !Number.isSafeInteger(session.expiresAtMs)||
          session.expiresAtMs<=Date.now())return null;
@@ -227,6 +230,9 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
         if(!active||active.uid!==ports.currentIdentity()?.uid||
            active.peerUid!==viewerUid)return unavailable();
         if(deviceSessionStopPending)return unavailable();
+        // Latch before the first network await. A timeout must not re-enable
+        // sharing simply because the in-flight STOP flag was released.
+        deviceSessionStopIntent=true;
         deviceSessionStopPending=true;
         try {
           const result=await send('/v2/locations/sessions/stop',{
@@ -235,6 +241,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
           if(!fields(result,['enabled'])||
              (result as {enabled:unknown}).enabled!==false)unavailable();
           if(deviceSession?.token===active.token)deviceSession=null;
+          deviceSessionStopIntent=false;
           return {enabled:false};
         } finally {
           deviceSessionStopPending=false;
@@ -251,7 +258,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       if(ports.useDeviceSessions===true&&
         (!session||session.uid!==ports.currentIdentity()?.uid||
           session.peerUid!==viewerUid||session.expiresAtMs<=Date.now()||
-          deviceSessionStopPending||emergencyStopPending||
+          deviceSessionStopIntent||deviceSessionStopPending||emergencyStopPending||
           deviceSessionStartPending))unavailable();
       const result=await send(ports.useDeviceSessions===true?
         '/v2/locations/sessions/publish':'/v1/locations/points/publish',{
@@ -263,7 +270,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       // but a late ACK must never re-advertise active sharing in the UI.
       // Keep v1 unchanged and let independent STOP/emergency STOP finish.
       if(session&&(deviceSession?.token!==session.token||
-         deviceSessionStopPending||emergencyStopPending||
+         deviceSessionStopIntent||deviceSessionStopPending||emergencyStopPending||
          session.expiresAtMs<=Date.now()||
          ports.currentIdentity()?.uid!==session.uid||!ports.isForeground()))
         unavailable();
@@ -289,13 +296,17 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       try {
         if(startSettled)await startSettled;
         if(ports.currentIdentity()?.uid!==uid)unavailable();
+        if(deviceSession?.uid===uid&&deviceSession.peerUid===viewerUid)
+          deviceSessionStopIntent=true;
         const result=await send('/v1/locations/grants/stop',{viewerUid},false);
         if(!fields(result,['enabled'])||
            (result as {enabled:unknown}).enabled!==false||
            ports.currentIdentity()?.uid!==uid)unavailable();
         const active=deviceSession;
-        if(active!==null&&active.uid===uid&&active.peerUid===viewerUid)
+        if(active!==null&&active.uid===uid&&active.peerUid===viewerUid){
           deviceSession=null;
+          deviceSessionStopIntent=false;
+        }
         return {enabled:false as const};
       } finally {
         emergencyStopPending=false;
