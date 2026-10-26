@@ -200,7 +200,7 @@ test('logout or permissions revocation while HTTP response pending cannot delive
  finish2();
  await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
 });
-test('M4 v2 UI cannot mount without an explicit same-device publisher capability bridge',()=>{
+test('M4 v2 UI and both roots require explicit same-device publisher capability bridge',()=>{
  const wiring=read('src/geofences/M4GeofenceStagingScreens.tsx');
  const androidRoot=read('M2StagingApp.tsx');
  const iosRoot=read('M3IOSStagingApp.tsx');
@@ -213,18 +213,26 @@ test('M4 v2 UI cannot mount without an explicit same-device publisher capability
  assert.match(wiring,/requiresV2Capability\?\{getPublisherSessionToken\}:\{\}/);
  assert.match(wiring,/getPublisherSessionToken\?:\(actorUid:string,ownerUid:string\)=>string\|null/);
  assert.match(transport,/getPublisherSessionToken\?:\(actorUid:string,ownerUid:string\)=>string\|null/);
- // Neither current app root supplies a publisher bearer to the M4 panel.
- // A future v2 release MUST explicitly wire a same-account/same-device
- // scoped bridge rather than silently using a v1 UID-only EVALUATE.
- assert.doesNotMatch(androidRoot,/getPublisherSessionToken=/);
- assert.doesNotMatch(iosRoot,/getPublisherSessionToken=/);
+ // Both roots wire ONLY the current authenticated M3 transport callback.
+ // The M4 UI still fail-closes until that provider is actually registered.
+ for(const root of [androidRoot,iosRoot]){
+   assert.match(root,/getPublisherSessionToken=\{publisherProvider\?\?undefined\}/);
+   assert.match(root,/onPublisherProviderChange=/);
+   assert.match(root,/setPublisherProvider\(\(\)=>provider\)/,
+     'React must not invoke a token provider as a setState updater');
+   assert.match(root,/<GuestAuthGate>/);
+   assert.match(root,/<StagingServices\/>/);
+   assert.doesNotMatch(root,/AsyncStorage|SecureStore|setItem\(|console\.log\(.*sessionToken/);
+ }
+ assert.match(androidRoot,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'\?/);
+ assert.match(iosRoot,/EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'\?/);
  assert.doesNotMatch(read('eas.json'),/EXPO_PUBLIC_ENABLE_M4_GEOFENCES/);
 });
 
 test('M3 Android and iOS capability provider callback lifecycle is fail-closed (static contract)',()=>{
  // Source-only contract: no React renderer/device acceptance is claimed.
- // A future root may opt into this callback only after reviewed Staging v2
- // authorization. The published reference must be the SAME M3 transport.
+ // The published reference must be the SAME M3 transport; all flags remain off
+ // in shipped profiles, and there is no live v2 M4 deployment.
  const android=read('src/location/M2AndroidStagingScreens.tsx');
  const ios=read('src/location/M3IOSStagingScreens.tsx');
  for(const [platform,source,flag] of [
@@ -245,8 +253,10 @@ test('M3 Android and iOS capability provider callback lifecycle is fail-closed (
      platform+' must not persist or log the opaque device capability');
  }
  const androidRoot=read('M2StagingApp.tsx'),iosRoot=read('M3IOSStagingApp.tsx');
- assert.doesNotMatch(androidRoot,/onPublisherProviderChange=/);
- assert.doesNotMatch(iosRoot,/onPublisherProviderChange=/);
+ assert.match(androidRoot,/onPublisherProviderChange=/);
+ assert.match(iosRoot,/onPublisherProviderChange=/);
+ assert.match(androidRoot,/onPublisherProviderChange=\{[\s\S]*?EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'\?/);
+ assert.match(iosRoot,/onPublisherProviderChange=\{[\s\S]*?EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'\?/);
  assert.doesNotMatch(read('eas.json'),/EXPO_PUBLIC_ENABLE_M4_GEOFENCES/,
    'callback preparation must not activate M4 in any committed build');
 });
