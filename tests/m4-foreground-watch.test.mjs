@@ -498,11 +498,74 @@ test('M4 retired lease recheck cannot terminate a newer explicit foreground opt-
  old.fn(); // queued before cancellation; generation fence must ignore it
  assert.equal(x.controller.getPhase(),'watching');
  assert.equal(x.stats().removed,1);
- fresh.fn(); // live lease: reschedule rather than stopping the native watcher
+ fresh.fn(); // live lease: recheck OS permission before scheduling again
+ await flush();
  assert.equal(x.controller.getPhase(),'watching');
  const again=x.timers.filter(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS).at(-1);
  assert.notEqual(again,fresh);
  x.controller.stop();
  assert.equal(x.stats().removed,2);
  assert.equal(again.cancelled,true);
+});
+
+test('M4 v2 removes a silent native GPS watcher after OS location permission is revoked, even with an active publisher lease',async()=>{
+ const x=rig({captureWatchLeaseProof:()=>()=>true});
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const recheck=x.timers.find(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS);
+ const expiry=x.timers.find(t=>t.ms===M4_WATCH_MAX_MS);
+ assert.ok(recheck&&expiry);
+ x.setPermission(false); // OS settings revoked permission; native GPS sends no callback
+ recheck.fn();
+ await flush();
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1,'native watcher must be released without a new fix');
+ assert.equal(x.stats().evalCount,0);
+ assert.deepEqual(x.events,[]);
+ assert.deepEqual(x.failures,['error'],'OS permission loss is surfaced once');
+ assert.equal(expiry.cancelled,true);
+ assert.equal(x.timers.filter(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS).length,1,
+   'a revoked permission cannot schedule another native watcher check');
+});
+
+test('M4 v2 fails closed on a silent native OS permission read error without sending GPS',async()=>{
+ let checks=0;
+ const x=rig({
+   captureWatchLeaseProof:()=>()=>true,
+   hasPermission:async()=>{if(++checks===3)throw Error('OS permission read failed');return true;}
+ });
+ assert.equal(await x.controller.start(OWNER,true),true);
+ assert.equal(checks,2);
+ x.timers.find(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS).fn();
+ await flush();
+ assert.equal(checks,3);
+ assert.equal(x.controller.getPhase(),'off');
+ assert.equal(x.stats().removed,1);
+ assert.equal(x.stats().evalCount,0);
+ assert.deepEqual(x.failures,['error']);
+});
+
+test('M4 stale delayed OS permission denial cannot terminate a new explicitly opted-in watcher',async()=>{
+ let checks=0,releaseOld;
+ const delayed=new Promise(resolve=>{releaseOld=resolve;});
+ const x=rig({
+   captureWatchLeaseProof:()=>()=>true,
+   hasPermission:()=>++checks===3?delayed:Promise.resolve(true)
+ });
+ assert.equal(await x.controller.start(OWNER,true),true);
+ const old=x.timers.find(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS);
+ old.fn();
+ await flush();
+ assert.equal(checks,3,'first generation OS permission recheck is in flight');
+ x.controller.stop();
+ assert.equal(await x.controller.start(OWNER,true),true);
+ assert.equal(x.controller.getPhase(),'watching');
+ const newTimer=x.timers.filter(t=>t.ms===M4_WATCH_LEASE_RECHECK_MS).at(-1);
+ releaseOld(false);
+ await flush();
+ assert.equal(x.controller.getPhase(),'watching');
+ assert.equal(x.stats().removed,1,'only the old watcher was removed');
+ assert.equal(newTimer.cancelled,false);
+ assert.deepEqual(x.failures,[]);
+ x.controller.stop();
+ assert.equal(x.stats().removed,2);
 });
