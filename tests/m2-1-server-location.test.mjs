@@ -146,7 +146,7 @@ test('M3 capability-fenced device sessions prevent same Firebase account cross-d
  assert.equal(JSON.stringify([...x.db.rows.values()]).includes(first.sessionToken),false);
  const share=secret=>x.svc.publishDevice({
    idToken:bearer(A),viewerUid:B,sessionToken:secret,
-   point:point(),appInForeground:true,foregroundPermissionGranted:true
+   point:{...point(),capturedAtMs:now},appInForeground:true,foregroundPermissionGranted:true
  });
  const stop=secret=>x.svc.stopDevice({
    idToken:bearer(A),viewerUid:B,sessionToken:secret
@@ -179,7 +179,9 @@ test('M3 v2 rejects same/older GPS callbacks without replacing the latest privat
    idToken:bearer(A),viewerUid:B,sessionToken:device.sessionToken,
    point:fix,appInForeground:true,foregroundPermissionGranted:true
  });
- const old=point(),fresh={...old,latitude:13.76,capturedAtMs:now-500};
+ // Both accepted fixes belong to the current M3 v2 lease; the separate
+ // #117 lease-boundary guard rejects a fix captured before START.
+ const old={...point(),capturedAtMs:now},fresh={...old,latitude:13.76,capturedAtMs:now+500};
  const key='private_latest_locations/'+pair;
  await send(old);
  await send(fresh);
@@ -187,7 +189,7 @@ test('M3 v2 rejects same/older GPS callbacks without replacing the latest privat
  const stored=structuredClone(x.db.rows.get(key));
  await fails(send({...old,longitude:101}),LocationDenied);
  await fails(send({...fresh,longitude:101}),LocationDenied);
- await fails(send({...fresh,capturedAtMs:now-500.5}),LocationDenied);
+ await fails(send({...fresh,capturedAtMs:now+499.5}),LocationDenied);
  assert.deepEqual(x.db.rows.get(key),stored,
    'duplicate/out-of-order fixes never mutate private point or TTL');
  // A corrupt stored baseline must not be silently discarded to accept
