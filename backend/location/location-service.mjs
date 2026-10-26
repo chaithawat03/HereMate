@@ -267,9 +267,11 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         // A location fix captured BEFORE this device was granted its M3
         // publisher lease must not be re-used as a consented live position.
         // The v2 lease is issued for exactly GRANT_MS; v1 is unchanged.
+        // A future-skew-tolerated fix must also fall BEFORE lease expiry.
         // No GPS history or additional Firestore fields are required.
         if(!Number.isSafeInteger(point.capturedAtMs)||
-           point.capturedAtMs<grant.expiresAtMs-GRANT_MS)deny();
+           point.capturedAtMs<grant.expiresAtMs-GRANT_MS||
+           point.capturedAtMs>grant.expiresAtMs)deny();
         const expiresAtMs=Math.min(grant.expiresAtMs,now+FIX_MAX_AGE_MS);
         setPoint({ownerUid,viewerUid,point:{...point},sessionDigest,expiresAtMs,
           expireAt:new Date(expiresAtMs)});
@@ -319,9 +321,11 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         // Apply the same v2 post-START capture boundary to viewer READ.
         // A forged/orphan latest point cannot become visible merely because
         // its session digest matches the current publisher's lease.
+        // A future-skew-tolerated fix beyond lease expiry is also denied.
         if(grant.sessionDigest!==undefined&&
            (!Number.isSafeInteger(point.point.capturedAtMs)||
-            point.point.capturedAtMs<grant.expiresAtMs-GRANT_MS))deny();
+            point.point.capturedAtMs<grant.expiresAtMs-GRANT_MS||
+            point.point.capturedAtMs>grant.expiresAtMs))deny();
         // No relationship, UID, grant, Firestore metadata, or GPS history in response.
         return {point:{...point.point},expiresAtMs:point.expiresAtMs};
       });
