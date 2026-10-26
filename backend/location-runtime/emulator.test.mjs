@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {initializeApp,deleteApp} from 'firebase-admin/app';
-import {getFirestore,Timestamp} from 'firebase-admin/firestore';
+import {getFirestore,Timestamp,FieldValue} from 'firebase-admin/firestore';
 import {createLocationService,LocationDenied,LocationLimited,STAGING_PROJECT} from '../location/location-service.mjs';
 import {createFirestoreLocationStore,createFirestoreLocationRateLimiter} from '../location/firestore-location-adapters.mjs';
 
@@ -33,7 +33,7 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
     collection:name=>raw.collection(name),
     runTransaction:fn=>raw.runTransaction(fn)
   };
-  const now=1800000000000;
+  let now=1800000000000;
   const stamp=(ms)=>Timestamp.fromMillis(ms);
   const relation=(owner,viewer)=>({
     schemaVersion:1,senderUid:owner,recipientUid:viewer,status:'accepted',
@@ -117,13 +117,98 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   assert.equal(deviceGrant.data().sessionDigest,devicePublisher.data().sessionDigest);
   assert.notEqual(deviceGrant.data().sessionDigest,device.sessionToken);
   await assert.rejects(pub(),LocationDenied); // v1 device cannot publish into v2.
+  const deviceFix={...fix,capturedAtMs:now};
   const send=token=>svc.publishDevice({idToken:bearer(A),viewerUid:B,
-    sessionToken:token,point:fix,
+    sessionToken:token,point:deviceFix,
     appInForeground:true,foregroundPermissionGranted:true});
+  // Real Firestore transaction: a fresh GPS fix from BEFORE M3 device START
+  // is not authorized by this lease. Denial must not create a latest point.
+  await assert.rejects(svc.publishDevice({idToken:bearer(A),viewerUid:B,
+    sessionToken:device.sessionToken,point:fix,
+    appInForeground:true,foregroundPermissionGranted:true}),LocationDenied);
+  assert.equal((await raw.collection('private_latest_locations')
+    .doc(A+'__'+B).get()).exists,false);
   await assert.rejects(send('0'.repeat(64)),LocationDenied);
   assert.deepEqual(await send(device.sessionToken),
     {stored:true,expiresAtMs:now+30000});
-  assert.deepEqual((await read()).point,fix);
+  assert.deepEqual((await read()).point,deviceFix);
+  // Actual Admin Firestore readback: v2 latest-point provenance is bound to
+  // the SAME hashed device lease as grant and owner-wide publisher. A
+  // corrupted/orphan point cannot leak through a valid viewer read. Denial
+  // must not update the point document or its TTL/updateTime.
+  const v2LatestRef=raw.collection('private_latest_locations').doc(A+'__'+B);
+  const v2GrantRef=raw.collection('private_location_grants').doc(A+'__'+B);
+  const v2PublisherRef=raw.collection('private_location_publishers').doc(A);
+  const validDigest=deviceGrant.data().sessionDigest;
+  const pointV2=await v2LatestRef.get();
+  assert.equal(pointV2.data().sessionDigest,validDigest);
+  // Matching digest alone cannot expose a point captured before START.
+  // Verify denial does not mutate Firestore data or updateTime.
+  await v2LatestRef.update({'point.capturedAtMs':now-1});
+  const beforePreLeaseRead=await v2LatestRef.get();
+  await assert.rejects(read(),LocationDenied);
+  const afterPreLeaseRead=await v2LatestRef.get();
+  assert.deepEqual(afterPreLeaseRead.data(),beforePreLeaseRead.data());
+  assert.ok(afterPreLeaseRead.updateTime.isEqual(beforePreLeaseRead.updateTime));
+  await v2LatestRef.update({'point.capturedAtMs':deviceFix.capturedAtMs});
+  assert.equal(Object.hasOwn((await read()),'sessionDigest'),false,
+    'the server never exposes private lease metadata to the viewer');
+  await v2LatestRef.update({sessionDigest:FieldValue.delete()});
+  const orphan=await v2LatestRef.get();
+  await assert.rejects(read(),LocationDenied);
+  const deniedOrphan=await v2LatestRef.get();
+  assert.deepEqual(deniedOrphan.data(),orphan.data());
+  assert.ok(deniedOrphan.updateTime.isEqual(orphan.updateTime));
+  await v2LatestRef.update({sessionDigest:'a'.repeat(64)});
+  await assert.rejects(read(),LocationDenied);
+  await v2LatestRef.update({sessionDigest:validDigest});
+  await v2GrantRef.update({sessionDigest:'b'.repeat(64)});
+  await assert.rejects(read(),LocationDenied);
+  await v2GrantRef.update({sessionDigest:validDigest});
+  await v2PublisherRef.update({sessionDigest:'c'.repeat(64)});
+  await assert.rejects(read(),LocationDenied);
+  await v2PublisherRef.update({sessionDigest:validDigest});
+  assert.deepEqual((await read()).point,deviceFix);
+  // Real Admin Firestore: forged matching 4-minute grant/publisher expiry
+  // cannot prolong a 60-second M3 v2 lease. Both READ and PUBLISH must deny
+  // without touching the latest point or its Firestore updateTime.
+  const validExpiry=deviceGrant.data().expiresAtMs;
+  await v2GrantRef.update({expiresAtMs:now+4*60_000});
+  await v2PublisherRef.update({expiresAtMs:now+4*60_000});
+  const beforeExtended=await v2LatestRef.get();
+  await assert.rejects(read(),LocationDenied);
+  await assert.rejects(send(device.sessionToken),LocationDenied);
+  const afterExtended=await v2LatestRef.get();
+  assert.deepEqual(afterExtended.data(),beforeExtended.data());
+  assert.ok(afterExtended.updateTime.isEqual(beforeExtended.updateTime));
+  await v2GrantRef.update({expiresAtMs:validExpiry});
+  await v2PublisherRef.update({expiresAtMs:validExpiry});
+  assert.deepEqual((await read()).point,deviceFix);
+  // Real Firestore updateTime proof: with only 1s remaining, generic
+  // +5s clock skew still permits a timestamp AFTER the consented lease end.
+  // M3 v2 must reject both PUBLISH and viewer READ without any mutation.
+  const initialNow=now;
+  now=validExpiry-1000;
+  const publishAt=capturedAtMs=>svc.publishDevice({
+    idToken:bearer(A),viewerUid:B,sessionToken:device.sessionToken,
+    point:{...deviceFix,capturedAtMs},
+    appInForeground:true,foregroundPermissionGranted:true
+  });
+  await publishAt(now);
+  const beforeLeaseEnd=await v2LatestRef.get();
+  await assert.rejects(publishAt(validExpiry+1),LocationDenied);
+  const afterLeaseEnd=await v2LatestRef.get();
+  assert.deepEqual(afterLeaseEnd.data(),beforeLeaseEnd.data());
+  assert.ok(afterLeaseEnd.updateTime.isEqual(beforeLeaseEnd.updateTime));
+  await v2LatestRef.update({'point.capturedAtMs':validExpiry+1});
+  const forgedPostLease=await v2LatestRef.get();
+  await assert.rejects(read(),LocationDenied);
+  const deniedPostLease=await v2LatestRef.get();
+  assert.deepEqual(deniedPostLease.data(),forgedPostLease.data());
+  assert.ok(deniedPostLease.updateTime.isEqual(forgedPostLease.updateTime));
+  await v2LatestRef.update({'point.capturedAtMs':now});
+  assert.equal((await read()).point.capturedAtMs,now);
+  now=initialNow;
   await assert.rejects(svc.stopDevice({idToken:bearer(A),viewerUid:B,
     sessionToken:'0'.repeat(64)}),LocationDenied);
   await svc.stopDevice({idToken:bearer(A),viewerUid:B,sessionToken:device.sessionToken});

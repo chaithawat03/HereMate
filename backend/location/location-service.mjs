@@ -64,6 +64,16 @@ function validPublisher(publisher,ownerUid,viewerUid,now,grant) {
   if(!publisher || publisher.ownerUid!==ownerUid ||
     publisher.viewerUid!==viewerUid || !num(publisher.expiresAtMs) ||
     publisher.expiresAtMs<=now || publisher.expiresAtMs!==grant.expiresAtMs)deny();
+  // M3 device sessions are issued for exactly GRANT_MS (60s). The older
+  // M2/v1 contract retains its original validation window, but a v2
+  // capability-tagged grant must never become a forged longer-lived lease
+  // merely because the grant and owner-wide publisher agree on expiry.
+  // This check applies to both publisher writes and viewer reads; STOP
+  // remains independent of the lease validity so the owner can revoke.
+  if(grant.sessionDigest!==undefined||publisher.sessionDigest!==undefined){
+    if(!Number.isSafeInteger(grant.expiresAtMs)||
+      grant.expiresAtMs>now+GRANT_MS)deny();
+  }
 }
 // M3: short-lived device-session capability (never stored in plaintext).
 // This fences accidental concurrent publishers signed in under the same
@@ -76,6 +86,21 @@ const digestSession=secret=>{
 function verifyDeviceSession(grant,publisher,sessionDigest){
   if(!grant||!publisher||grant.sessionDigest!==sessionDigest||
      publisher.sessionDigest!==sessionDigest)deny();
+}
+// M3 viewer privacy: a recent point is not sufficient proof that it belongs
+// to the CURRENT owner-wide device lease. M3 writes only a purpose-hashed
+// session digest, never the bearer token, on its one short-lived latest point.
+// Legacy M2 v1 grants and points (all without a digest) remain readable.
+function verifyReadablePointLease(grant,publisher,storedPoint){
+  const grantDigest=grant.sessionDigest;
+  const publisherDigest=publisher.sessionDigest;
+  const pointDigest=storedPoint.sessionDigest;
+  if(grantDigest===undefined&&publisherDigest===undefined){
+    if(pointDigest!==undefined)deny(); // never expose a v2 point as v1
+    return;
+  }
+  if(typeof grantDigest!=='string'||!CAPABILITY.test(grantDigest)||
+     grantDigest!==publisherDigest||grantDigest!==pointDigest)deny();
 }
 function validPoint(point,now) {
   if(!exactKeys(point,pointFields)||
@@ -239,8 +264,16 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         validPublisher(publisher,ownerUid,viewerUid,now,grant);
         verifyDeviceSession(grant,publisher,sessionDigest);
         validPoint(point,now);
+        // A location fix captured BEFORE this device was granted its M3
+        // publisher lease must not be re-used as a consented live position.
+        // The v2 lease is issued for exactly GRANT_MS; v1 is unchanged.
+        // A future-skew-tolerated fix must also fall BEFORE lease expiry.
+        // No GPS history or additional Firestore fields are required.
+        if(!Number.isSafeInteger(point.capturedAtMs)||
+           point.capturedAtMs<grant.expiresAtMs-GRANT_MS||
+           point.capturedAtMs>grant.expiresAtMs)deny();
         const expiresAtMs=Math.min(grant.expiresAtMs,now+FIX_MAX_AGE_MS);
-        setPoint({ownerUid,viewerUid,point:{...point},expiresAtMs,
+        setPoint({ownerUid,viewerUid,point:{...point},sessionDigest,expiresAtMs,
           expireAt:new Date(expiresAtMs)});
         return {stored:true,expiresAtMs};
       });
@@ -283,7 +316,16 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         if(!point||point.ownerUid!==ownerUid||point.viewerUid!==viewerUid||
            !num(point.expiresAtMs)||point.expiresAtMs<=now||
            point.expiresAtMs>grant.expiresAtMs||!exactKeys(point.point,pointFields))deny();
+        verifyReadablePointLease(grant,publisher,point);
         validPoint(point.point,now);
+        // Apply the same v2 post-START capture boundary to viewer READ.
+        // A forged/orphan latest point cannot become visible merely because
+        // its session digest matches the current publisher's lease.
+        // A future-skew-tolerated fix beyond lease expiry is also denied.
+        if(grant.sessionDigest!==undefined&&
+           (!Number.isSafeInteger(point.point.capturedAtMs)||
+            point.point.capturedAtMs<grant.expiresAtMs-GRANT_MS||
+            point.point.capturedAtMs>grant.expiresAtMs))deny();
         // No relationship, UID, grant, Firestore metadata, or GPS history in response.
         return {point:{...point.point},expiresAtMs:point.expiresAtMs};
       });
