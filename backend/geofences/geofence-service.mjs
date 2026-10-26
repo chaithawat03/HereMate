@@ -7,6 +7,7 @@ import {
  MAX_ZONE_LIFETIME_MS,PENDING_LIFETIME_MS,validCircle,validFix,
  EMPTY_STATE,advanceState
 } from './geofence-policy.mjs';
+import {createHash} from 'node:crypto';
 import {STAGING_PROJECT,UID_PATTERN} from '../location/location-service.mjs';
 const deny=()=>{throw new GeofenceDenied();};
 const invalid=()=>{throw new GeofenceInvalid();};
@@ -63,6 +64,22 @@ function activeM2Grant(grant,publisher,owner,subject,relation,now){
       !/^[0-9a-f]{64}$/.test(grantDigest)||
       grantDigest!==publisherDigest)deny();
  }
+}
+// The M3 publisher token belongs to one DEVICE, not merely a Firebase UID.
+// Without this proof, a second handset signed into the same account could
+// submit arbitrary foreground geofence fixes during the first handset's lease.
+// Legacy M2 v1 has no capability; keep that original contract unchanged.
+// This is dormant M4 server-only code: mobile v2 token handoff is NOT wired.
+function verifyEvaluateDeviceSession(grant,publisher,sessionToken){
+ const digest=grant.sessionDigest;
+ if(digest===undefined&&publisher.sessionDigest===undefined){
+   if(sessionToken!==undefined)deny(); // no v2-to-v1 downgrade
+   return;
+ }
+ if(typeof sessionToken!=='string'||!/^[0-9a-f]{64}$/.test(sessionToken))deny();
+ const expected=createHash('sha256')
+   .update('m3-device-session:v1:'+sessionToken).digest('hex');
+ if(expected!==digest||expected!==publisher.sessionDigest)deny();
 }
 export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.now}){
  if(adminAuth?.app?.options?.projectId!==STAGING_PROJECT||
@@ -155,7 +172,7 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        return {revoked:true};
      });
    },
-   async evaluate({idToken,ownerUid,point,appInForeground,foregroundPermissionGranted}){
+   async evaluate({idToken,ownerUid,point,sessionToken,appInForeground,foregroundPermissionGranted}){
      const subjectUid=await actor(idToken);
      if(appInForeground!==true||foregroundPermissionGranted!==true)deny();
      const now=clockNow(clock);
@@ -168,6 +185,7 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        const revision=authorizeRelation(relation,ownerUid,subjectUid);
        const active=sameZone(zone,ownerUid,subjectUid,revision,current,'active');
        activeM2Grant(grant,publisher,ownerUid,subjectUid,revision,current);
+       verifyEvaluateDeviceSession(grant,publisher,sessionToken);
        if(!validFix(point,current))deny();
        // State is strictly zone-classification/dedupe. Never store GPS point.
        const previous=state?.relationRevision===revision&&
