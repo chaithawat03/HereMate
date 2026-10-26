@@ -21,6 +21,9 @@ export type M4WatchPorts=Readonly<{
  hasPermission:()=>Promise<boolean>;
  watch:(onFix:(fix:ShareFix)=>void,onError:()=>void)=>Promise<{remove:()=>void}>;
  evaluate:(zoneOwnerUid:string,fix:ShareFix)=>Promise<'enter'|'exit'|null>;
+ /** Exact M3 lease proof captured before requesting OS GPS permission or
+  * installing a native watcher. Retiring this lease cancels the watch. */
+ captureWatchLeaseProof?:(zoneOwnerUid:string)=>()=>boolean;
  /** Optional final in-memory M3 lease proof, checked AFTER async OS permission. */
  isEvaluationStillAuthorized?:(zoneOwnerUid:string)=>boolean;
  now:()=>number;
@@ -36,6 +39,10 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  let watcher:{remove:()=>void}|null=null,timer:unknown=null;
  let processing=false,lastFixAt=-Infinity;
  let owner:string|null=null,actor:string|null=null;
+ let watchLeaseProof:(()=>boolean)|null=null;
+ const leaseCurrent=(proof:(()=>boolean)|null)=>{
+   try{return proof===null||proof()===true;}catch{return false;}
+ };
  const notify=(next:M4WatchPhase)=>{
    phase=next;
    if(!disposed)p.onPhase(next);
@@ -44,13 +51,14 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    ++generation;
    if(timer!==null){p.cancel(timer);timer=null;}
    watcher?.remove();watcher=null;
-   owner=null;actor=null;processing=false;
+   owner=null;actor=null;watchLeaseProof=null;processing=false;
    lastFixAt=-Infinity;
    notify('off');
  }
  function active(epoch:number){
    return !disposed&&epoch===generation&&phase!=='off'&&
-     actor!==null&&p.identity()===actor&&p.isForeground();
+     actor!==null&&p.identity()===actor&&p.isForeground()&&
+     leaseCurrent(watchLeaseProof);
  }
  async function start(zoneOwnerUid:string,relationshipApproved:boolean){
    if(disposed||phase!=='off'||!relationshipApproved||!UID.test(zoneOwnerUid))
@@ -58,7 +66,13 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    const uid=p.identity();
    if(!uid||!UID.test(uid)||uid===zoneOwnerUid||!p.isForeground())
      return false;
-   actor=uid;owner=zoneOwnerUid;
+   // A consented friendship is not itself a valid device-publisher lease.
+   // Deny before asking the OS for GPS or binding a native watcher.
+   let proof:(()=>boolean)|null=null;
+   try{proof=p.captureWatchLeaseProof?.(zoneOwnerUid)??null;}
+   catch{return false;}
+   if(!leaseCurrent(proof))return false;
+   actor=uid;owner=zoneOwnerUid;watchLeaseProof=proof;
    const epoch=++generation;
    notify('starting');
    try{
