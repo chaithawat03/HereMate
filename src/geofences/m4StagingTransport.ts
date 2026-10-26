@@ -104,11 +104,13 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    // Never capture it before awaited Firebase/OS permission checks. Legacy
    // v1 stays unchanged when no approved bridge is supplied; v2 then denies.
    let payload=body;
+   let sentCapability:string|null=null;
    if(endpoint==='/v1/geofences/evaluate'&&ports.getPublisherSessionToken){
      let capability:string|null;
      try{capability=ports.getPublisherSessionToken();}catch{return unavailable();}
      if(typeof capability!=='string'||!/^[0-9a-f]{64}$/.test(capability))
        return unavailable();
+     sentCapability=capability;
      payload={...body,sessionToken:capability};
    }
    const json=JSON.stringify(payload);
@@ -131,6 +133,15 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
      try{value=await res.json();}catch{return unavailable();}
      if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
      if(requireGps&&!(await ports.foregroundPermissionGranted()))return unavailable();
+     // A same-UID account restart or a new device lease can invalidate the
+     // capability while the old HTTPS request is in flight. Never surface
+     // an event from that retired session, even if the server replied 200.
+     if(sentCapability!==null){
+       let current:string|null;
+       try{current=ports.getPublisherSessionToken?.()??null;}
+       catch{return unavailable();}
+       if(current!==sentCapability)return unavailable();
+     }
      // Do not expose the server-confirmed event if the final OS permission
      // await completed after logout, account switch or app background.
      if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
