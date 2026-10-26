@@ -316,6 +316,12 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
            point.expiresAtMs>grant.expiresAtMs||!exactKeys(point.point,pointFields))deny();
         verifyReadablePointLease(grant,publisher,point);
         validPoint(point.point,now);
+        // Apply the same v2 post-START capture boundary to viewer READ.
+        // A forged/orphan latest point cannot become visible merely because
+        // its session digest matches the current publisher's lease.
+        if(grant.sessionDigest!==undefined&&
+           (!Number.isSafeInteger(point.point.capturedAtMs)||
+            point.point.capturedAtMs<grant.expiresAtMs-GRANT_MS))deny();
         // No relationship, UID, grant, Firestore metadata, or GPS history in response.
         return {point:{...point.point},expiresAtMs:point.expiresAtMs};
       });
