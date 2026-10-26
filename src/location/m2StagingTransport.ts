@@ -259,7 +259,14 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
         ...(session?{sessionToken:session.token}:{}),
         point:fix,appInForeground:true,foregroundPermissionGranted:true
       },true);
-      if(session&&deviceSession?.token!==session.token)unavailable();
+      // The HTTP publish may have been accepted BEFORE a user pressed STOP,
+      // but a late ACK must never re-advertise active sharing in the UI.
+      // Keep v1 unchanged and let independent STOP/emergency STOP finish.
+      if(session&&(deviceSession?.token!==session.token||
+         deviceSessionStopPending||emergencyStopPending||
+         session.expiresAtMs<=Date.now()||
+         ports.currentIdentity()?.uid!==session.uid||!ports.isForeground()))
+        unavailable();
       if(!fields(result,['stored','expiresAtMs']))unavailable();
       const row=result as {stored:unknown;expiresAtMs:unknown};
       const expiresAt=row.expiresAtMs;

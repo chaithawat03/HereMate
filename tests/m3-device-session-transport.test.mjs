@@ -275,3 +275,53 @@ test('M3 v2 blocks GPS if STOP starts while native OS permission is pending',asy
  releaseStop();
  assert.deepEqual(await stopping,{enabled:false});
 });
+
+test('M3 v2 suppresses a late GPS publish ACK after local or owner-wide STOP begins',async()=>{
+ for(const stopKind of ['stop','emergencyStop']){
+   let publishEntered,releasePublish,stopEntered,releaseStop;
+   const publishGate=new Promise(resolve=>{releasePublish=resolve;});
+   const publishSeen=new Promise(resolve=>{publishEntered=resolve;});
+   const stopGate=new Promise(resolve=>{releaseStop=resolve;});
+   const stopSeen=new Promise(resolve=>{stopEntered=resolve;});
+   const sent=[];
+   const x=harness({fetchImpl:async(url)=>{
+     const path=new URL(url).pathname;
+     sent.push(path);
+     if(path.endsWith('/start'))return {ok:true,status:200,json:async()=>({
+       enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+     })};
+     if(path.endsWith('/publish')){
+       publishEntered();
+       await publishGate;
+       return {ok:true,status:200,json:async()=>({
+         stored:true,expiresAtMs:Date.now()+20_000
+       })};
+     }
+     if(path.endsWith('/stop')){
+       stopEntered();
+       await stopGate;
+       return {ok:true,status:200,json:async()=>({enabled:false})};
+     }
+     throw Error('UNEXPECTED_ENDPOINT');
+   }});
+   await x.transport.start(PEER);
+   const publishing=x.transport.publish(PEER,fix());
+   await publishSeen; // GPS was sent BEFORE STOP; no claim of undoing it.
+   const stopping=x.transport[stopKind](PEER);
+   await stopSeen;
+   assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null,
+     'M4 cannot borrow a capability while STOP is pending');
+   releasePublish();
+   await assert.rejects(publishing,/UNAVAILABLE/,
+     'late success must not turn a STOP-requested UI back to SHARING');
+   releaseStop();
+   assert.deepEqual(await stopping,{enabled:false},
+     'STOP must still obtain its own confirmed server ACK');
+   assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
+   assert.deepEqual(sent,[
+     '/v2/locations/sessions/start',
+     '/v2/locations/sessions/publish',
+     stopKind==='stop'?'/v2/locations/sessions/stop':'/v1/locations/grants/stop'
+   ]);
+ }
+});
