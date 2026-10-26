@@ -12,14 +12,26 @@ import {usePreferences} from '../ui/PreferencesProvider';
 import {createM4StagingTransport} from './m4StagingTransport';
 import {M4GeofencePanel} from './M4GeofencePanel';
 
-type Props=Readonly<{approvedCloudRunUrl:string;backendReviewedAndEnabled:boolean}>;
+type Props=Readonly<{
+ approvedCloudRunUrl:string;backendReviewedAndEnabled:boolean;
+ /** Inject ONLY from the authenticated M3 publisher of this same device.
+  * No default capability, local storage, token logging or UID-only fallback. */
+ getPublisherSessionToken?:()=>string|null;
+}>;
 
 export function M4GeofenceStagingScreens({
- approvedCloudRunUrl,backendReviewedAndEnabled
+ approvedCloudRunUrl,backendReviewedAndEnabled,getPublisherSessionToken
 }:Props){
  const {language,colors:c}=usePreferences();
  const transport=useMemo(()=>{
-   if(!backendReviewedAndEnabled||
+   // M3 v2 geofence EVALUATE is bound to the exact handset publisher
+   // capability. This UI currently has no approved M2->M4 token bridge.
+   // Never mount a superficially working M4 panel that will silently use
+   // the legacy UID-only v1 request when v2 is selected.
+   const requiresV2Capability=
+     process.env.EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true';
+   if((requiresV2Capability&&typeof getPublisherSessionToken!=='function')||
+      !backendReviewedAndEnabled||
       !['android','ios'].includes(Platform.OS)||
       process.env.EXPO_PUBLIC_ENVIRONMENT!=='staging'||
       process.env.EXPO_PUBLIC_ENABLE_FIREBASE_GUEST!=='true'||
@@ -36,10 +48,11 @@ export function M4GeofenceStagingScreens({
        foregroundPermissionGranted:async()=>AppState.currentState==='active'&&
          await Location.hasServicesEnabledAsync()&&
          (await Location.getForegroundPermissionsAsync()).granted===true,
+       ...(requiresV2Capability?{getPublisherSessionToken}:{}),
        fetchImpl:fetch
      });
    }catch{return null;}
- },[approvedCloudRunUrl,backendReviewedAndEnabled]);
+ },[approvedCloudRunUrl,backendReviewedAndEnabled,getPublisherSessionToken]);
  if(!transport)return <View>
    <Text style={{color:c.muted}}>
      {language==='th'?'Geofence ยังไม่เปิดใช้งาน':'Geofence is not enabled'}
