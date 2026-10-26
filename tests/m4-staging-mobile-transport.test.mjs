@@ -206,6 +206,9 @@ test('M4 v2 UI cannot mount without an explicit same-device publisher capability
  const iosRoot=read('M3IOSStagingApp.tsx');
  const transport=read('src/geofences/m4StagingTransport.ts');
  assert.match(wiring,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'/);
+ assert.match(wiring,/Platform.OS==='ios'&&/);
+ assert.match(wiring,/EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND==='true'/);
+ assert.match(read('src/location/M3IOSStagingScreens.tsx'),/useDeviceSessions:true/);
  assert.match(wiring,/requiresV2Capability&&typeof getPublisherSessionToken!=='function'/);
  assert.match(wiring,/requiresV2Capability\?\{getPublisherSessionToken\}:\{\}/);
  assert.match(wiring,/getPublisherSessionToken\?:\(ownerUid:string\)=>string\|null/);
