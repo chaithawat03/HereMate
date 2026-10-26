@@ -205,6 +205,9 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
             expiry>Date.now()+MAX_V2_LEASE_MS||
             !validCapability(token)||ports.currentIdentity()?.uid!==uid)
             return unavailable();
+          // A new explicit, server-confirmed START may replace a retired
+          // account/lease; a failed STOP alone cannot clear the intent latch.
+          deviceSessionStopIntent=false;
           deviceSession={uid,peerUid:viewerUid,token,expiresAtMs:expiry};
           return {enabled:true,expiresAtMs:expiry};
         } finally {
