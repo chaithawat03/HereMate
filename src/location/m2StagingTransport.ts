@@ -24,7 +24,7 @@ type LocationTransport=SharePorts['transport']&M2FriendLocationTransport&Readonl
   emergencyStop:(peerUid:string)=>Promise<{enabled:false}>;
   /** Read-only ephemeral capability for a matching authenticated M4 peer.
    * Never expose through UI text, storage or logs. */
-  getPublisherSessionToken:(peerUid:string)=>string|null;
+  getPublisherSessionToken:(actorUid:string,peerUid:string)=>string|null;
 }>;
 const CODE=/^[A-Za-z0-9_-]{12,128}$/;
 const fields=(obj:unknown,keys:readonly string[]):boolean=>{
@@ -143,7 +143,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     return peerUid;
   };
   return Object.freeze({
-    getPublisherSessionToken(peerUid:string){
+    getPublisherSessionToken(actorUid:string,peerUid:string){
       const session=deviceSession;
       // Only this transport's live owner+peer may borrow the publisher
       // capability. Never return a token from a retired lease, during STOP,
@@ -155,6 +155,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
         return null;
       }
       if(ports.useDeviceSessions!==true||!session||
+         session.uid!==actorUid||!CODE.test(actorUid)||
          session.peerUid!==peerUid||!CODE.test(peerUid)||
          !ports.isForeground()||deviceSessionStopPending||
          emergencyStopPending||deviceSessionStartPending||
