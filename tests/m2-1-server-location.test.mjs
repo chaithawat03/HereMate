@@ -146,7 +146,7 @@ test('M3 capability-fenced device sessions prevent same Firebase account cross-d
  assert.equal(JSON.stringify([...x.db.rows.values()]).includes(first.sessionToken),false);
  const share=secret=>x.svc.publishDevice({
    idToken:bearer(A),viewerUid:B,sessionToken:secret,
-   point:point(),appInForeground:true,foregroundPermissionGranted:true
+   point:{...point(),capturedAtMs:now},appInForeground:true,foregroundPermissionGranted:true
  });
  const stop=secret=>x.svc.stopDevice({
    idToken:bearer(A),viewerUid:B,sessionToken:secret
@@ -157,7 +157,7 @@ test('M3 capability-fenced device sessions prevent same Firebase account cross-d
  await fails(share('0'.repeat(64)));
  await fails(stop('0'.repeat(64)));
  await share(first.sessionToken);
- assert.deepEqual((await x.view()).point,point());
+ assert.deepEqual((await x.view()).point,{...point(),capturedAtMs:now});
  await stop(first.sessionToken);
  await fails(x.view());
  // A stale STOP from the first phone cannot erase the newer same-viewer
@@ -167,11 +167,56 @@ test('M3 capability-fenced device sessions prevent same Firebase account cross-d
  await fails(stop(first.sessionToken));
  await fails(share(first.sessionToken));
  await share(newer.sessionToken);
- assert.deepEqual((await x.view()).point,point());
+ assert.deepEqual((await x.view()).point,{...point(),capturedAtMs:now});
  // A signed-in owner can emergency revoke even without the capability.
  assert.deepEqual(await x.stop(),{enabled:false});
  await fails(x.view());
 });
+test('M3 v2 rejects same/older GPS callbacks without replacing the latest private point',async()=>{
+ const x=setup();
+ const device=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
+ const send=fix=>x.svc.publishDevice({
+   idToken:bearer(A),viewerUid:B,sessionToken:device.sessionToken,
+   point:fix,appInForeground:true,foregroundPermissionGranted:true
+ });
+ // Both accepted fixes belong to the current M3 v2 lease; the separate
+ // #117 lease-boundary guard rejects a fix captured before START.
+ const old={...point(),capturedAtMs:now},fresh={...old,latitude:13.76,capturedAtMs:now+500};
+ const key='private_latest_locations/'+pair;
+ await send(old);
+ await send(fresh);
+ assert.deepEqual((await x.view()).point,fresh);
+ const stored=structuredClone(x.db.rows.get(key));
+ await fails(send({...old,longitude:101}),LocationDenied);
+ await fails(send({...fresh,longitude:101}),LocationDenied);
+ await fails(send({...fresh,capturedAtMs:now+499.5}),LocationDenied);
+ assert.deepEqual(x.db.rows.get(key),stored,
+   'duplicate/out-of-order fixes never mutate private point or TTL');
+ // A corrupt stored baseline must not be silently discarded to accept
+ // an older or fabricated fix. No history, token or extra collection.
+ x.db.rows.set(key,{...stored,point:{...fresh,capturedAtMs:'invalid'}});
+ const corrupted=structuredClone(x.db.rows.get(key));
+ await fails(send({...fresh,capturedAtMs:now}),LocationDenied);
+ assert.deepEqual(x.db.rows.get(key),corrupted);
+ // Legacy pair IDs can collide: an authenticated actor cannot overwrite
+ // a different pair's private location record.
+ x.db.rows.set(key,{...stored,ownerUid:C});
+ const collided=structuredClone(x.db.rows.get(key));
+ await fails(send({...fresh,capturedAtMs:now}),LocationDenied);
+ assert.deepEqual(x.db.rows.get(key),collided);
+ x.db.rows.set(key,stored);
+ await x.svc.stopDevice({idToken:bearer(A),viewerUid:B,
+   sessionToken:device.sessionToken});
+ assert.equal(x.db.rows.has(key),false);
+ const next=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
+ assert.notEqual(next.sessionToken,device.sessionToken);
+ await x.svc.publishDevice({idToken:bearer(A),viewerUid:B,
+   sessionToken:next.sessionToken,point:old,
+   appInForeground:true,foregroundPermissionGranted:true});
+ assert.deepEqual((await x.view()).point,old,
+   'a fresh consented device lease starts with an empty point baseline');
+});
+
 test('M3 sequential second START is denied while first device lease is active',async()=>{
  const x=setup();
  const first=await x.svc.startDevice({idToken:bearer(A),viewerUid:B});
