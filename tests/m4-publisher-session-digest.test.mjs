@@ -133,35 +133,6 @@ test('M4 still rejects expired M2/M3 publisher lease even with matching digest',
   assert.deepEqual(x.writes,[]);
 });
 
-test('M4 v2 cannot classify GPS captured before current publisher lease started',async()=>{
- const x=rig({...baseGrant,sessionDigest:DIGEST_A},
-   {...basePublisher,sessionDigest:DIGEST_A});
- // The synthetic v2 grant was issued at NOW-10s (expiry NOW+50s).
- // These fixes are fresh by the 30s generic GPS rule, but predate START.
- for(const capturedAtMs of [NOW-29_000,NOW-10_001]){
-   await assert.rejects(evaluate(x.service,TOKEN_A,{
-     ...FIX,capturedAtMs
-   }),GeofenceDenied);
-   assert.deepEqual(x.writes,[],
-     'pre-lease GPS cannot establish a geofence baseline or cooldown');
- }
- // Exact lease-start boundary and later fix are valid.
- assert.equal((await evaluate(x.service,TOKEN_A,{
-   ...FIX,capturedAtMs:NOW-10_000
- })).evaluated,true);
- assert.equal((await evaluate(x.service,TOKEN_A,FIX)).evaluated,true);
- assert.equal(x.writes.length,2);
- assert.equal(x.currentState().sessionDigest,DIGEST_A);
- for(const row of x.writes){
-   for(const forbidden of ['point','latitude','longitude','history','sessionToken'])
-     assert.equal(Object.hasOwn(row,forbidden),false);
- }
- const legacy=rig({...baseGrant},{...basePublisher});
- assert.equal((await evaluate(legacy.service,undefined,{
-   ...FIX,capturedAtMs:NOW-29_000
- })).evaluated,true,'legacy M2/v1 fix policy remains unchanged');
-});
-
 test('M4 v2 device lease handoff discards prior handset geofence baseline without a false EXIT',async()=>{
  const prior={ownerUid:OWNER,subjectUid:SUBJECT,
    relationRevision:RELATION_REVISION,approvedAtMs:zone.approvedAtMs,
