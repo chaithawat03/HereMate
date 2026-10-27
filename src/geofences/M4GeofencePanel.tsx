@@ -44,6 +44,10 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
  const [watchPhase,setWatchPhase]=useState<M4WatchPhase>('off');
  // Session-only Android/iOS foreground alert preference: OFF on every launch/revoke/background.
  const [foregroundAlerts,setForegroundAlerts]=useState(false);
+ // A locale change must not dispose an active 60-second native GPS watch.
+ // Keep alert copy current without rebuilding the watcher controller.
+ const languageRef=useRef(language);
+ useEffect(()=>{languageRef.current=language;},[language]);
  const alertsRef=useRef(false);
  const zoneWatch=useRef<ReturnType<typeof createM4ForegroundZoneWatch>|null>(null);
  const identity=useRef<string|null>(null);
@@ -140,8 +144,8 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
        if(!alive.current||!panelUid||AppState.currentState!=='active'||
           currentUid!==panelUid)return;
        setMessage(event==='enter'?
-         (language==='th'?'ยืนยันว่าเข้าสู่พื้นที่':'Confirmed zone entry'):
-         (language==='th'?'ยืนยันว่าออกจากพื้นที่':'Confirmed zone exit'));
+         (languageRef.current==='th'?'ยืนยันว่าเข้าสู่พื้นที่':'Confirmed zone entry'):
+         (languageRef.current==='th'?'ยืนยันว่าออกจากพื้นที่':'Confirmed zone exit'));
        // A notification is NEVER generated from a stale/ambiguous fix,
        // only a server-confirmed event returned to the tracked subject.
        // This is a local foreground alert, NOT an OS push subscription.
@@ -151,10 +155,10 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
          optedIn:alertsRef.current,event
        })){
          Alert.alert(
-           language==='th'?'แจ้งเตือนพื้นที่ (HereMate)':'HereMate zone update',
+           languageRef.current==='th'?'แจ้งเตือนพื้นที่ (HereMate)':'HereMate zone update',
            event==='enter'?
-             (language==='th'?'ตรวจพบการเข้าสู่พื้นที่ที่อนุมัติแล้ว':'Entered your approved zone'):
-             (language==='th'?'ตรวจพบการออกจากพื้นที่ที่อนุมัติแล้ว':'Exited your approved zone')
+             (languageRef.current==='th'?'ตรวจพบการเข้าสู่พื้นที่ที่อนุมัติแล้ว':'Entered your approved zone'):
+             (languageRef.current==='th'?'ตรวจพบการออกจากพื้นที่ที่อนุมัติแล้ว':'Exited your approved zone')
          );
        }
      },
@@ -165,7 +169,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      controller.dispose();
      if(zoneWatch.current===controller)zoneWatch.current=null;
    };
- },[backendReviewedAndEnabled,transport,language]);
+ },[backendReviewedAndEnabled,transport]);
  const reload=useCallback(async()=>{
    if(!backendReviewedAndEnabled||AppState.currentState!=='active')return;
    await friendGate.current?.run(listOwnRequests,(rows,user)=>{
