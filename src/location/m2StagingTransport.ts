@@ -113,18 +113,18 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     if(!first)throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');
     if(!CODE.test(first.uid))unavailable();
     if(requireForeground&&(!ports.isForeground()||
-       await awaitPreflight(ports.foregroundPermissionGranted())!==true))unavailable();
+       await (preflightDeadline===null?ports.foregroundPermissionGranted():awaitPreflight(ports.foregroundPermissionGranted()))!==true))unavailable();
     // The OS permission check is async. Identity/foreground may have changed
     // silently before the Firebase auth/AppState callbacks are delivered.
     if(ports.currentIdentity()?.uid!==first.uid||
        (requireForeground&&!ports.isForeground()))unavailable();
     let jwt:string;
-    try{jwt=await awaitPreflight(first.getIdToken());}
+    try{jwt=await (preflightDeadline===null?first.getIdToken():awaitPreflight(first.getIdToken()));}
     catch{return unavailable();}
     if(typeof jwt!=='string'||jwt.length<32||jwt.length>8192)unavailable();
     if(ports.currentIdentity()?.uid!==first.uid)unavailable();
     if(requireForeground&&(!ports.isForeground()||
-       await awaitPreflight(ports.foregroundPermissionGranted())!==true))unavailable();
+       await (preflightDeadline===null?ports.foregroundPermissionGranted():awaitPreflight(ports.foregroundPermissionGranted()))!==true))unavailable();
     // Never send the captured bearer/GPS under a different live account or
     // after backgrounding while the final permission promise was pending.
     if(ports.currentIdentity()?.uid!==first.uid||
@@ -166,7 +166,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       // A permission revocation DURING an HTTPS request must not deliver
       // any coordinate response to the UI after the original permission check.
       if(requireForeground&&(!ports.isForeground()||
-         await awaitPreflight(ports.foregroundPermissionGranted())!==true))unavailable();
+         await (preflightDeadline===null?ports.foregroundPermissionGranted():awaitPreflight(ports.foregroundPermissionGranted()))!==true))unavailable();
       // A late account/background transition during the final permission
       // await must not return another user's private response to the UI.
       if(ports.currentIdentity()?.uid!==first.uid||
