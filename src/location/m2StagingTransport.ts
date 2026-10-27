@@ -96,8 +96,12 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     // native permission/JWT promise can hold owner STOP behind a remote
     // START that has not even been sent. A timed-out await cannot later
     // resume this send() and issue an unconsented START.
-    const preflightDeadline=endpoint==='/v2/locations/sessions/start'?
-      Date.now()+timeout:null;
+    // M3 v2 STOP must not hang before HTTP on a stalled Firebase JWT;
+    // its owner-wide emergency STOP intentionally uses the legacy v1 URL.
+    // Keep genuine M2/v1 callers' timing behavior unchanged.
+    const boundedEndpoint=endpoint.startsWith('/v2/')||
+      (ports.useDeviceSessions===true&&endpoint==='/v1/locations/grants/stop');
+    const preflightDeadline=boundedEndpoint?Date.now()+timeout:null;
     const awaitPreflight=async <T>(work:Promise<T>):Promise<T>=>{
       if(preflightDeadline===null)return work;
       const remaining=preflightDeadline-Date.now();
@@ -143,9 +147,10 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     if(body.length>1024)unavailable();
     const ctrl=new AbortController();
     // AbortSignal alone cannot bound a fetch polyfill or stalled response.json().
-    // Only v2 gets an explicit whole-HTTP deadline; preserve legacy v1 timing.
+    // Bound M3 v2 requests including owner-wide STOP routed through v1;
+    // preserve legacy M2/v1 request timing.
     const watchdog:{reject?:(reason:Error)=>void}={};
-    const deadline=endpoint.startsWith('/v2/')?
+    const deadline=boundedEndpoint?
       new Promise<never>((_,reject)=>{watchdog.reject=reject;}):null;
     const timer=setTimeout(()=>{
       ctrl.abort();

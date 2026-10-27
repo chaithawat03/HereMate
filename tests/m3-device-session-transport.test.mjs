@@ -642,3 +642,67 @@ test('M3 v2 whole-HTTP deadline bounds hung STOP response.json and retains STOP 
  assert.equal(stops,2);
  assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
 });
+
+test('M3 v2 local and owner-wide STOP bound hung Firebase JWT preflight without late STOP dispatch',async()=>{
+ for(const kind of ['stop','emergencyStop']){
+  let hangStop=false,releaseJwt;
+  const hungJwt=new Promise(resolve=>{releaseJwt=resolve;});
+  const x=harness({
+   timeoutMs:1000,
+   currentIdentity:()=>({uid:SELF,getIdToken:()=>hangStop?hungJwt:Promise.resolve(TOKEN)})
+  });
+  await x.transport.start(PEER);
+  hangStop=true;
+  const stopping=x.transport[kind](PEER);
+  await assert.rejects(stopping,/UNAVAILABLE/,
+   'explicit STOP must settle when Firebase JWT never resolves');
+  assert.deepEqual(x.calls.map(c=>c.path),['/v2/locations/sessions/start'],
+   'timed-out JWT must not dispatch an authenticated STOP later');
+  assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null,
+   'a failed STOP must retain withdrawal of GPS/M4 consent');
+  await assert.rejects(x.transport.publish(PEER,fix()),/UNAVAILABLE/);
+  hangStop=false;
+  releaseJwt(TOKEN);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(x.calls.length,1,'late JWT must never issue a STOP');
+  assert.deepEqual(await x.transport[kind](PEER),{enabled:false},
+   'explicit retry must obtain a real server STOP ACK');
+  assert.equal(x.calls[1].path,
+   kind==='stop'?'/v2/locations/sessions/stop':'/v1/locations/grants/stop');
+ }
+});
+
+test('M3 v2 owner-wide emergency STOP bounds abort-ignoring v1 HTTP fetch and requires confirmed retry',async()=>{
+ let releaseFetch,enteredStop,firstSignal,stops=0;
+ const gate=new Promise(resolve=>{releaseFetch=resolve;});
+ const entered=new Promise(resolve=>{enteredStop=resolve;});
+ const x=harness({timeoutMs:1000,fetchImpl:async(url,opts)=>{
+  const path=new URL(url).pathname;
+  if(path==='/v2/locations/sessions/start')return {ok:true,status:200,json:async()=>({
+   enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+  })};
+  if(path==='/v1/locations/grants/stop'){
+   stops++;
+   if(stops===1){
+    firstSignal=opts.signal;enteredStop();
+    await gate; // Native/polyfilled HTTP ignores AbortSignal.
+   }
+   return {ok:true,status:200,json:async()=>({enabled:false})};
+  }
+  throw Error('GPS_MUST_NOT_SEND_AFTER_STOP_INTENT');
+ }});
+ await x.transport.start(PEER);
+ const pending=x.transport.emergencyStop(PEER);
+ await entered;
+ await assert.rejects(pending,/UNAVAILABLE/,
+  'owner-wide STOP must not hang forever on an abort-ignoring v1 URL');
+ assert.equal(firstSignal.aborted,true);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
+ await assert.rejects(x.transport.publish(PEER,fix()),/UNAVAILABLE/);
+ releaseFetch();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null,
+  'late HTTP success cannot be reported as a confirmed owner STOP');
+ assert.deepEqual(await x.transport.emergencyStop(PEER),{enabled:false});
+ assert.equal(stops,2);
+});
