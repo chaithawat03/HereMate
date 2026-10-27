@@ -117,7 +117,15 @@ jobs:
           test "${#candidates[@]}" -gt 0
           apksigner="${candidates[${#candidates[@]}-1]}"
           "$apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/heremate-android-signature.txt"
-          node scripts/verify-android-google-oauth-signer.mjs "$RUNNER_TEMP/heremate-android-signature.txt"
+          # Google Android OAuth binds BOTH the signing SHA-1 and the actual
+          # installed package. Inspect the compiled APK, not only app.json.
+          mapfile -t aapt_candidates < <(find "$sdk_root/build-tools" -mindepth 2 -maxdepth 2 -type f -name aapt | sort -V)
+          test "${#aapt_candidates[@]}" -gt 0
+          aapt="${aapt_candidates[${#aapt_candidates[@]}-1]}"
+          "$aapt" dump badging "$apk" > "$RUNNER_TEMP/heremate-android-package.txt"
+          node scripts/verify-android-google-oauth-signer.mjs \
+            "$RUNNER_TEMP/heremate-android-signature.txt" \
+            "$RUNNER_TEMP/heremate-android-package.txt"
       - name: Retain ONE Android Staging APK + SHA-256 manifest
         uses: actions/upload-artifact@v4
         with:
