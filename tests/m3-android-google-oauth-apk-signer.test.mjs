@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {verifyAndroidGoogleOAuthSigner} from '../scripts/verify-android-google-oauth-signer.mjs';
+import {verifyAndroidGoogleOAuthSigner,verifyAndroidGoogleOAuthPackage} from '../scripts/verify-android-google-oauth-signer.mjs';
 import {googleStagingAndroidSha1} from '../src/config/googleStaging.ts';
 
 const sample=(sha1=googleStagingAndroidSha1,extra='')=>
@@ -37,11 +37,31 @@ test('rejects ambiguous, missing, malformed and multiple signers even if one mat
   rejected('a'.repeat(131073));
 });
 
+
+test('compiled APK package must match the registered Google Android OAuth application ID',()=>{
+  const good="package: name='com.chaithawat03.heremate' versionCode='1' versionName='0.1.0'\\n";
+  assert.deepEqual(verifyAndroidGoogleOAuthPackage(good),
+    {status:'MATCH',packageName:'com.chaithawat03.heremate'});
+  for(const bad of [
+    '',"package: name='com.chaithawat03.heremate.debug' versionCode='1'\\n",
+    "package: name='com.attacker.heremate' versionCode='1'\\n",
+    "package: name='com.chaithawat03.heremate'\\npackage: name='com.chaithawat03.heremate'\\n",
+    "package: name='com.chaithawat03.heremate\\n",
+    "package: name='com.chaithawat03.heremate.extra'\\n",
+    'x'.repeat(131073)
+  ]){
+    assert.throws(()=>verifyAndroidGoogleOAuthPackage(bad),
+      /ANDROID_GOOGLE_OAUTH_SIGNER_MISMATCH_OR_UNVERIFIED/);
+  }
+});
+
 test('owner-only Google-enabled M2 APK must pass signing gate BEFORE artifact upload',()=>{
   const workflow=readFileSync(new URL('../.github/workflows/android-m2-native-staging-apk.yml',import.meta.url),'utf8');
   const testScript=readFileSync(new URL('../scripts/verify-android-google-oauth-signer.mjs',import.meta.url),'utf8');
   assert.match(workflow,/EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN: 'true'/);
   assert.match(workflow,/apksigner.*verify --verbose --print-certs/);
+  assert.match(workflow,/aapt.*dump badging/);
+  assert.match(workflow,/heremate-android-package\\.txt/);
   assert.match(workflow,/node scripts\/verify-android-google-oauth-signer\.mjs/);
   const gate=workflow.indexOf('Verify signed APK Google OAuth certificate');
   const artifact=workflow.indexOf('Retain ONE Android Staging APK');
