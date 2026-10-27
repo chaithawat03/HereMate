@@ -142,8 +142,16 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     const body=JSON.stringify(payload);
     if(body.length>1024)unavailable();
     const ctrl=new AbortController();
-    const timer=setTimeout(()=>ctrl.abort(),timeout);
-    try {
+    // AbortSignal alone cannot bound a fetch polyfill or stalled response.json().
+    // Only v2 gets an explicit whole-HTTP deadline; preserve legacy v1 timing.
+    const watchdog:{reject?:(reason:Error)=>void}={};
+    const deadline=endpoint.startsWith('/v2/')?
+      new Promise<never>((_,reject)=>{watchdog.reject=reject;}):null;
+    const timer=setTimeout(()=>{
+      ctrl.abort();
+      watchdog.reject?.(Error('M2_LOCATION_TRANSPORT_UNAVAILABLE'));
+    },timeout);
+    const request=async()=>{
       const response=await ports.fetchImpl(origin+endpoint,{
         method:'POST',
         // A 307/308 redirect could forward a private GPS POST body to a
@@ -172,6 +180,11 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       if(ports.currentIdentity()?.uid!==first.uid||
          (requireForeground&&!ports.isForeground()))unavailable();
       return result;
+    };
+    try {
+      // An already-sent START may have committed remotely even when its
+      // response times out: never infer a confirmed STOP from this failure.
+      return await (deadline?Promise.race([request(),deadline]):request());
     }catch{return unavailable();}
     finally{clearTimeout(timer);}
   }
