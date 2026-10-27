@@ -130,10 +130,14 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
       controller.dispose();
       if(poller.current===controller){
         poller.current=null;
+        // A replaced transport must also retire the old in-flight read
+        // generation and any pending external Maps handoff, not just the
+        // timer/visible opt-in state.
+        clear();
         if(alive.current)setAutoRefreshing(false);
       }
     };
-  },[backendReviewedAndEnabled,refresh]);
+  },[backendReviewedAndEnabled,refresh,clear]);
 
   // Ensure expired fixes vanish automatically; no background GPS polling.
   useEffect(()=>{
