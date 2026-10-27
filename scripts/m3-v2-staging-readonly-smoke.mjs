@@ -64,8 +64,12 @@ export async function runM3V2StagingRouteSmoke({origin,approved=false,fetchImpl=
       if(response?.status!==expected)throw Error('unexpected route status');
       const cache=response.headers?.get('cache-control')||'';
       const mime=response.headers?.get('content-type')||'';
-      if(!/(?:^|,)\s*no-store\b/i.test(cache))throw Error('missing no-store');
-      if(!/^application\/json\b/i.test(mime))throw Error('non-JSON response');
+      // Match full header directives/media type, not word boundaries: a
+      // no-store-unsafe directive or application/json-unsafe MIME is NOT proof.
+      const directives=cache.split(',').map(part=>part.trim().toLowerCase());
+      if(!directives.includes('no-store'))throw Error('missing no-store');
+      if(!/^application\/json(?:\s*;|$)/i.test(mime.trim()))
+        throw Error('non-JSON response');
       if(response.headers.get('access-control-allow-origin')?.trim()==='*')
         throw Error('wildcard CORS');
       const body=await response.json();

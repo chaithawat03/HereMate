@@ -78,6 +78,25 @@ test('missing v2 route, generic gateway 405, wrong method behavior, cache, CORS,
   await denied({origin:APPROVED,approved:true,fetchImpl:async()=>response(405)}); // generic gateway 405 even for unknown path
 });
 
+test('route smoke rejects lookalike cache directives and JSON media types',async()=>{
+  for(const headers of [
+    {'cache-control':'private, no-store-unsafe'},
+    {'cache-control':'no-store=0'},
+    {'content-type':'application/json-unsafe'},
+    {'content-type':'application/json, text/html'}
+  ]){
+    let requests=0;
+    await denied({origin:APPROVED,approved:true,
+      fetchImpl:async()=>{requests++;return response(405,headers);}});
+    assert.equal(requests,1,'a spoofed header must stop at the first route');
+  }
+  // Valid case-insensitive no-store directive and JSON media type parameters.
+  const good=await runM3V2StagingRouteSmoke({origin:APPROVED,approved:true,
+    fetchImpl:async url=>response(url.endsWith('/__not_a_route__')?404:405,
+      {'cache-control':'Private, No-Store','content-type':'application/json ; charset=utf-8'})});
+  assert.equal(good.results.length,5);
+});
+
 test('read-only probe bounds an abort-ignoring HTTPS fetch and never probes a second route',async()=>{
   let requests=0;
   await denied({origin:APPROVED,approved:true,deadlineMs:25,
