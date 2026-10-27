@@ -7,7 +7,8 @@ import {
  MAX_ZONE_LIFETIME_MS,PENDING_LIFETIME_MS,validCircle,validFix,
  EMPTY_STATE,advanceState
 } from './geofence-policy.mjs';
-import {STAGING_PROJECT,UID_PATTERN} from '../location/location-service.mjs';
+import {createHash} from 'node:crypto';
+import {STAGING_PROJECT,UID_PATTERN,GRANT_MS} from '../location/location-service.mjs';
 const deny=()=>{throw new GeofenceDenied();};
 const invalid=()=>{throw new GeofenceInvalid();};
 const isNum=n=>typeof n==='number'&&Number.isFinite(n);
@@ -52,6 +53,33 @@ function activeM2Grant(grant,publisher,owner,subject,relation,now){
     grant.expiresAtMs<=now||grant.expiresAtMs>now+60_000||
     publisher.ownerUid!==subject||publisher.viewerUid!==owner||
     publisher.expiresAtMs!==grant.expiresAtMs)deny();
+ // A matching UID/viewer/expiry alone is insufficient to prove that these
+ // records belong to the same M3 device lease. Deny malformed or split
+ // lease records instead of trusting matching timestamps alone.
+ // Preserve legacy v1 (neither record has a capability); otherwise require
+ // the same well-formed server-issued SHA-256 digest on both records.
+ const grantDigest=grant.sessionDigest,publisherDigest=publisher.sessionDigest;
+ if(grantDigest!==undefined||publisherDigest!==undefined){
+   if(typeof grantDigest!=='string'||
+      !/^[0-9a-f]{64}$/.test(grantDigest)||
+      grantDigest!==publisherDigest)deny();
+ }
+}
+// The M3 publisher token belongs to one DEVICE, not merely a Firebase UID.
+// Without this proof, a second handset signed into the same account could
+// submit arbitrary foreground geofence fixes during the first handset's lease.
+// Legacy M2 v1 has no capability; keep that original contract unchanged.
+// This is dormant M4 server-only code: mobile v2 token handoff is NOT wired.
+function verifyEvaluateDeviceSession(grant,publisher,sessionToken){
+ const digest=grant.sessionDigest;
+ if(digest===undefined&&publisher.sessionDigest===undefined){
+   if(sessionToken!==undefined)deny(); // no v2-to-v1 downgrade
+   return;
+ }
+ if(typeof sessionToken!=='string'||!/^[0-9a-f]{64}$/.test(sessionToken))deny();
+ const expected=createHash('sha256')
+   .update('m3-device-session:v1:'+sessionToken).digest('hex');
+ if(expected!==digest||expected!==publisher.sessionDigest)deny();
 }
 export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.now}){
  if(adminAuth?.app?.options?.projectId!==STAGING_PROJECT||
@@ -144,7 +172,7 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        return {revoked:true};
      });
    },
-   async evaluate({idToken,ownerUid,point,appInForeground,foregroundPermissionGranted}){
+   async evaluate({idToken,ownerUid,point,sessionToken,appInForeground,foregroundPermissionGranted}){
      const subjectUid=await actor(idToken);
      if(appInForeground!==true||foregroundPermissionGranted!==true)deny();
      const now=clockNow(clock);
@@ -157,15 +185,47 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        const revision=authorizeRelation(relation,ownerUid,subjectUid);
        const active=sameZone(zone,ownerUid,subjectUid,revision,current,'active');
        activeM2Grant(grant,publisher,ownerUid,subjectUid,revision,current);
+       verifyEvaluateDeviceSession(grant,publisher,sessionToken);
        if(!validFix(point,current))deny();
+       // A v2 fix captured before the current device's consented START must
+       // never drive an Enter/Exit or overwrite private geofence state.
+       // Equally, a future-skew-tolerated fix captured AFTER lease expiry
+       // cannot update zone baseline or event cooldown.
+       // M2/v1 does not carry a session digest and remains unchanged.
+       if(grant.sessionDigest!==undefined&&
+          (point.capturedAtMs<grant.expiresAtMs-GRANT_MS||
+           point.capturedAtMs>grant.expiresAtMs))deny();
        // State is strictly zone-classification/dedupe. Never store GPS point.
-       const previous=state?.relationRevision===revision&&
+       // A new M3 device publisher may share the same Firebase UID, friend
+       // relation and approved zone as the previous handset. Its first GPS
+       // samples MUST establish a fresh baseline, not inherit a prior device's
+       // inside/outside streak or emit a fabricated Enter/Exit.
+       // v1 (no digest) retains its existing state schema and behavior.
+       const leaseDigest=grant.sessionDigest;
+       const sameApproval=state?.relationRevision===revision&&
           state?.approvedAtMs===active.approvedAtMs&&
-          state.expiresAtMs>current?state:EMPTY_STATE;
+          state.expiresAtMs>current;
+       let previous=EMPTY_STATE;
+       if(sameApproval){
+         if(state.sessionDigest===leaseDigest){
+           previous=state;
+         }else{
+           // A new handset must not inherit another device's location
+           // baseline. The 5-minute notification cooldown, however, belongs
+           // to the APPROVED ZONE, not the publisher handset. Keep it across
+           // a legitimate lease handoff to avoid rapid duplicate Enter/Exit.
+           const lastEvent=state.lastEventAtMs??null;
+           if(lastEvent!==null&&(!Number.isSafeInteger(lastEvent)||
+              lastEvent<=0||lastEvent>current))deny();
+           previous={...EMPTY_STATE,lastEventAtMs:lastEvent};
+         }
+       }
        const {next,event,quality}=advanceState(active.circle,point,current,previous);
        if(quality==='invalid')deny();
        const expiresAtMs=Math.min(active.expiresAtMs,current+MAX_ZONE_LIFETIME_MS);
        setState({...next,ownerUid,subjectUid,relationRevision:revision,
+         // Store only a purpose-hashed lease digest, NEVER its bearer capability.
+         ...(leaseDigest===undefined?{}:{sessionDigest:leaseDigest}),
          approvedAtMs:active.approvedAtMs,expiresAtMs,expireAt:new Date(expiresAtMs)});
        // Events returned ONLY to the authenticated tracked subject,
        // not stored as a location event/history, no push at this stage.

@@ -25,6 +25,13 @@ export type SharePorts={
     start:(peerUid:string)=>Promise<{enabled:boolean;expiresAtMs:number}>;
     publish:(peerUid:string,fix:ShareFix)=>Promise<{stored:boolean;expiresAtMs:number}>;
     stop:(peerUid:string)=>Promise<{enabled:boolean}>;
+    /** Optional M3 v2 local fence. Called synchronously when the owner
+     * requests STOP, before waiting for an in-flight GPS publish. */
+    signalStopIntent?:()=>void;
+    /** M3 v2 only: transactional server STOP supersedes any concurrent
+     * PUBLISH; the server checks the same grant inside the write transaction.
+     * Never enable for a legacy/non-transactional transport. */
+    stopMayOvertakePublish?:boolean;
   };
   now:()=>number;
   schedule:(fn:()=>void,delayMs:number)=>unknown;
@@ -53,8 +60,14 @@ export function freshShareFix(fix:ShareFix,now:number):boolean {
 export function createForegroundSharingController(p:SharePorts) {
   let state:SharingState=off, epoch=0, disposed=false;
   let watch:Unsubscribe|null=null, alarm:unknown=null, inStart:Promise<void>|null=null;
+  // A pending remote START can create a grant; a stalled OS permission or
+  // native watch bind cannot. STOP waits only for the remote operation.
+  let inRemoteStart:Promise<{enabled:boolean;expiresAtMs:number}>|null=null;
   let inPublish:Promise<void>|null=null, inStop:Promise<void>|null=null;
   let lastPublishAt=-Infinity,activeOwner:string|null=null;
+  // Distinguish a local-only START prompt from a request that could have
+  // created a server grant, even if the HTTP ACK was lost.
+  let remoteStartAttempted=false;
   const publishState=(next:SharingState)=>{
     state=next;
     if(!disposed)p.onState(next);
@@ -66,16 +79,44 @@ export function createForegroundSharingController(p:SharePorts) {
   async function stop():Promise<void> {
     if(inStop)return inStop;
     const peer=state.peerUid;
+    // STOP consent takes effect immediately on this handset. The remote
+    // STOP request is still serialized after pending START/PUBLISH, but M4
+    // must not borrow a v2 bearer while that earlier publish is settling.
+    // Optional method keeps all legacy M2/v1 transport contracts unchanged.
+    if(peer){
+      try{p.transport.signalStopIntent?.();}
+      catch{/* Never prevent the independent remote STOP attempt. */}
+    }
     ++epoch;activeOwner=null;cancelLocal();
     if(!peer){publishState(off);return;}
     publishState({phase:'stopping',peerUid:peer,expiresAtMs:null,error:null});
     const task=(async()=>{
-      // Stop is serialized after outstanding Start/Publish: otherwise a late
-      // network response could recreate an apparently revoked live fix.
-      await Promise.allSettled([inStart,inPublish].filter(Boolean));
+      // Serialize behind a remote START (which may still commit a grant)
+      // and an outgoing GPS publish, but never await an unbounded local OS
+      // permission prompt or native GPS watcher bind before server STOP.
+      const remoteStart=inRemoteStart;
+      if(remoteStart===null)inStart=null; // a retired local prompt must not block a new opt-in
+      if(!remoteStartAttempted){
+        // No authenticated START request was ever issued: a stalled OS
+        // permission prompt cannot create a server grant. In v2, calling
+        // STOP here would falsely report stop-unconfirmed (no bearer exists).
+        inStart=null;
+        publishState(off);
+        return;
+      }
+      // V2 PUBLISH cannot recreate a grant: its server transaction reads
+      // the same lease that STOP deletes. A stuck native permission/JWT or
+      // HTTP publish must not indefinitely delay an explicit owner STOP.
+      // Retire its local slot so a fresh, separately consented START is not
+      // blocked by an old never-settling promise. The old epoch still fences
+      // any late result. Legacy v1 retains strict publish-before-STOP order.
+      const publishToWait=p.transport.stopMayOvertakePublish===true?null:inPublish;
+      if(p.transport.stopMayOvertakePublish===true)inPublish=null;
+      await Promise.allSettled([remoteStart,publishToWait].filter(Boolean));
       try {
         const result=await p.transport.stop(peer);
         if(result.enabled!==false)throw Error('unconfirmed');
+        remoteStartAttempted=false;
         publishState(off);
       }catch{
         // Do not claim remote sharing is stopped: a 60s backend TTL limits
@@ -95,7 +136,7 @@ export function createForegroundSharingController(p:SharePorts) {
     // server STOP response. A failed/timeout request must keep the UI in
     // stop-unconfirmed; never silently switch to OFF.
     if(!disposed&&state.phase==='stop-unconfirmed'&&state.peerUid===peerUid){
-      ++epoch;activeOwner=null;cancelLocal();publishState(off);
+      ++epoch;activeOwner=null;remoteStartAttempted=false;cancelLocal();publishState(off);
     }
   }
   async function start(peerUid:string,relation:ShareRelation):Promise<void> {
@@ -108,6 +149,7 @@ export function createForegroundSharingController(p:SharePorts) {
     const active=()=>!disposed&&run===epoch&&p.ownerUid()===owner&&p.isForeground();
     lastPublishAt=-Infinity;
     activeOwner=owner;
+    remoteStartAttempted=false;
     publishState({phase:'starting',peerUid,expiresAtMs:null,error:null});
     const task=(async()=>{
       // A timed-out START may have committed a remote grant even without an
@@ -121,7 +163,12 @@ export function createForegroundSharingController(p:SharePorts) {
         }
         if(!permitted){activeOwner=null;publishState({...off,error:'permission'});return;}
         remoteGrantPossible=true;
-        const grant=await p.transport.start(peerUid);
+        remoteStartAttempted=true;
+        const remoteStart=p.transport.start(peerUid);
+        inRemoteStart=remoteStart;
+        let grant:{enabled:boolean;expiresAtMs:number};
+        try{grant=await remoteStart;}
+        finally{if(inRemoteStart===remoteStart)inRemoteStart=null;}
         if(!active()){
           // An auth/AppState callback may lag behind the actual account or
           // foreground change. Revoke a possibly committed grant even when

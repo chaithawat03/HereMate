@@ -22,6 +22,9 @@ type LocationTransportPorts=Readonly<{
 type LocationTransport=SharePorts['transport']&M2FriendLocationTransport&Readonly<{
   /** Explicit owner action, independent of this handset's session capability. */
   emergencyStop:(peerUid:string)=>Promise<{enabled:false}>;
+  /** Read-only ephemeral capability for a matching authenticated M4 peer.
+   * Never expose through UI text, storage or logs. */
+  getPublisherSessionToken:(actorUid:string,peerUid:string)=>string|null;
 }>;
 const CODE=/^[A-Za-z0-9_-]{12,128}$/;
 const fields=(obj:unknown,keys:readonly string[]):boolean=>{
@@ -31,6 +34,8 @@ const fields=(obj:unknown,keys:readonly string[]):boolean=>{
 };
 const unavailable=():never=>{throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');};
 const validNumber=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
+// M3 v2 START issues a 60-second device capability, not a renewable bearer.
+const MAX_V2_LEASE_MS=60_000;
 /** Provider-confirmed Cloud Run origins in the one approved HereMate project.
  * Reject every other *.run.app host before Firebase bearer or GPS transfer. */
 export const APPROVED_M2_STAGING_ORIGINS=Object.freeze([
@@ -65,7 +70,17 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
   const origin=validUrl(ports.approvedCloudRunUrl);
   const timeout=ports.timeoutMs??8000;
   if(!Number.isSafeInteger(timeout)||timeout<1000||timeout>10000)unavailable();
-  let deviceSession:{uid:string;peerUid:string;token:string}|null=null;
+  let deviceSession:{uid:string;peerUid:string;token:string;expiresAtMs:number}|null=null;
+  // Do not let M4 issue a new evaluation while a v2 STOP is in flight.
+  let deviceSessionStopPending=false;
+  // A failed/timeout STOP is still an explicit owner withdrawal of consent.
+  // Retain the opaque token solely for STOP retry; never resume GPS/M4 use.
+  let deviceSessionStopIntent=false;
+  // A user STOP in the sharing controller may need to await an in-flight
+  // GPS publish BEFORE calling transport.stop(). Fence M4 borrowing and
+  // further GPS synchronously at the original tap, not after that await.
+  // Track STOP generations so a late START response cannot clear the intent.
+  let deviceSessionStopGeneration=0;
   // A delayed first START must not allow another handset/session request to
   // race through this transport and overwrite its opaque publisher capability.
   let deviceSessionStartPending=false;
@@ -77,31 +92,71 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     typeof value==='string'&&/^[0-9a-f]{64}$/.test(value);
   async function send(endpoint:string,payload:Readonly<Record<string,unknown>>,
     requireForeground:boolean):Promise<unknown> {
+    // Bound v2 START pre-network OS/Firebase awaits. Otherwise a hung
+    // native permission/JWT promise can hold owner STOP behind a remote
+    // START that has not even been sent. A timed-out await cannot later
+    // resume this send() and issue an unconsented START.
+    // M3 v2 STOP must not hang before HTTP on a stalled Firebase JWT;
+    // its owner-wide emergency STOP intentionally uses the legacy v1 URL.
+    // Keep genuine M2/v1 callers' timing behavior unchanged.
+    const boundedEndpoint=endpoint.startsWith('/v2/')||
+      (ports.useDeviceSessions===true&&endpoint==='/v1/locations/grants/stop');
+    const preflightDeadline=boundedEndpoint?Date.now()+timeout:null;
+    const awaitPreflight=async <T>(work:Promise<T>):Promise<T>=>{
+      if(preflightDeadline===null)return work;
+      const remaining=preflightDeadline-Date.now();
+      if(remaining<=0)return unavailable();
+      let handle:ReturnType<typeof setTimeout>|null=null;
+      try {
+        return await Promise.race([work,new Promise<never>((_,reject)=>{
+          handle=setTimeout(()=>reject(Error('M2_LOCATION_TRANSPORT_UNAVAILABLE')),remaining);
+        })]);
+      }finally{if(handle!==null)clearTimeout(handle);}
+    };
     const first=ports.currentIdentity();
     if(!first)throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');
     if(!CODE.test(first.uid))unavailable();
     if(requireForeground&&(!ports.isForeground()||
-       await ports.foregroundPermissionGranted()!==true))unavailable();
+       await (preflightDeadline===null?ports.foregroundPermissionGranted():awaitPreflight(ports.foregroundPermissionGranted()))!==true))unavailable();
     // The OS permission check is async. Identity/foreground may have changed
     // silently before the Firebase auth/AppState callbacks are delivered.
     if(ports.currentIdentity()?.uid!==first.uid||
        (requireForeground&&!ports.isForeground()))unavailable();
     let jwt:string;
-    try{jwt=await first.getIdToken();}
+    try{jwt=await (preflightDeadline===null?first.getIdToken():awaitPreflight(first.getIdToken()));}
     catch{return unavailable();}
     if(typeof jwt!=='string'||jwt.length<32||jwt.length>8192)unavailable();
     if(ports.currentIdentity()?.uid!==first.uid)unavailable();
     if(requireForeground&&(!ports.isForeground()||
-       await ports.foregroundPermissionGranted()!==true))unavailable();
+       await (preflightDeadline===null?ports.foregroundPermissionGranted():awaitPreflight(ports.foregroundPermissionGranted()))!==true))unavailable();
     // Never send the captured bearer/GPS under a different live account or
     // after backgrounding while the final permission promise was pending.
     if(ports.currentIdentity()?.uid!==first.uid||
        (requireForeground&&!ports.isForeground()))unavailable();
+    // Foreground/OS permission and Firebase token awaits can race an explicit
+    // STOP or lease expiry. Never send a v2 GPS fix after STOP was requested,
+    // even if the backend would reject the stale capability.
+    if(endpoint==='/v2/locations/sessions/publish'){
+      const lease=deviceSession;
+      if(!lease||deviceSessionStopIntent||deviceSessionStopPending||emergencyStopPending||
+         deviceSessionStartPending||lease.expiresAtMs<=Date.now()||
+         lease.uid!==first.uid||lease.peerUid!==payload.viewerUid||
+         lease.token!==payload.sessionToken)unavailable();
+    }
     const body=JSON.stringify(payload);
     if(body.length>1024)unavailable();
     const ctrl=new AbortController();
-    const timer=setTimeout(()=>ctrl.abort(),timeout);
-    try {
+    // AbortSignal alone cannot bound a fetch polyfill or stalled response.json().
+    // Bound M3 v2 requests including owner-wide STOP routed through v1;
+    // preserve legacy M2/v1 request timing.
+    const watchdog:{reject?:(reason:Error)=>void}={};
+    const deadline=boundedEndpoint?
+      new Promise<never>((_,reject)=>{watchdog.reject=reject;}):null;
+    const timer=setTimeout(()=>{
+      ctrl.abort();
+      watchdog.reject?.(Error('M2_LOCATION_TRANSPORT_UNAVAILABLE'));
+    },timeout);
+    const request=async()=>{
       const response=await ports.fetchImpl(origin+endpoint,{
         method:'POST',
         // A 307/308 redirect could forward a private GPS POST body to a
@@ -124,12 +179,17 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       // A permission revocation DURING an HTTPS request must not deliver
       // any coordinate response to the UI after the original permission check.
       if(requireForeground&&(!ports.isForeground()||
-         await ports.foregroundPermissionGranted()!==true))unavailable();
+         await (preflightDeadline===null?ports.foregroundPermissionGranted():awaitPreflight(ports.foregroundPermissionGranted()))!==true))unavailable();
       // A late account/background transition during the final permission
       // await must not return another user's private response to the UI.
       if(ports.currentIdentity()?.uid!==first.uid||
          (requireForeground&&!ports.isForeground()))unavailable();
       return result;
+    };
+    try {
+      // An already-sent START may have committed remotely even when its
+      // response times out: never infer a confirmed STOP from this failure.
+      return await (deadline?Promise.race([request(),deadline]):request());
     }catch{return unavailable();}
     finally{clearTimeout(timer);}
   }
@@ -138,6 +198,38 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     return peerUid;
   };
   return Object.freeze({
+    // Only v2's Firestore transaction validates the live grant on every
+    // PUBLISH and atomically deletes it on STOP. Thus an already-sent late
+    // PUBLISH cannot restore sharing after STOP commits. Legacy v1 remains
+    // serialized behind in-flight publishes in the sharing controller.
+    stopMayOvertakePublish:ports.useDeviceSessions===true,
+    signalStopIntent(){
+      // This is a local, non-network consent withdrawal. M2/v1 has no
+      // publisher capability and retains its original STOP behavior.
+      if(ports.useDeviceSessions!==true)return;
+      deviceSessionStopGeneration++;
+      deviceSessionStopIntent=true;
+    },
+    getPublisherSessionToken(actorUid:string,peerUid:string){
+      const session=deviceSession;
+      // Only this transport's live owner+peer may borrow the publisher
+      // capability. Never return a token from a retired lease, during STOP,
+      // emergency STOP, or when the handset is no longer in foreground.
+      // Observing an account switch retires this in-memory lease even if
+      // the original UID later signs back in (no same-UID resurrection).
+      if(session&&session.uid!==ports.currentIdentity()?.uid){
+        deviceSession=null;
+        return null;
+      }
+      if(ports.useDeviceSessions!==true||!session||
+         session.uid!==actorUid||!CODE.test(actorUid)||
+         session.peerUid!==peerUid||!CODE.test(peerUid)||
+         !ports.isForeground()||deviceSessionStopIntent||deviceSessionStopPending||
+         emergencyStopPending||deviceSessionStartPending||
+         !Number.isSafeInteger(session.expiresAtMs)||
+         session.expiresAtMs<=Date.now())return null;
+      return session.token;
+    },
     async start(peerUid:string){
       const viewerUid=safePeer(peerUid);
       if(startSettled||emergencyStopPending)unavailable();
@@ -154,6 +246,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
         // Acquire synchronously before the first await; release on every
         // rejection, timeout or identity change without persisting a token.
         deviceSessionStartPending=true;
+        const stopGenerationAtStart=deviceSessionStopGeneration;
         try {
           const result=await send('/v2/locations/sessions/start',{viewerUid},true);
           if(!fields(result,['enabled','expiresAtMs','sessionToken']))
@@ -161,9 +254,18 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
           const row=result as {enabled:unknown;expiresAtMs:unknown;sessionToken:unknown};
           const expiry=row.expiresAtMs,token=row.sessionToken;
           if(row.enabled!==true||!validNumber(expiry)||
+            !Number.isSafeInteger(expiry)||expiry<=Date.now()||
+            expiry>Date.now()+MAX_V2_LEASE_MS||
             !validCapability(token)||ports.currentIdentity()?.uid!==uid)
             return unavailable();
-          deviceSession={uid,peerUid:viewerUid,token};
+          // A new explicit, server-confirmed START may replace a retired
+          // account/lease; a failed STOP alone cannot clear the intent latch.
+          // A STOP requested during an in-flight START must stay latched.
+          // Only a separately initiated and confirmed START may retire an
+          // older failed-STOP latch after the old lease was removed.
+          if(stopGenerationAtStart===deviceSessionStopGeneration)
+            deviceSessionStopIntent=false;
+          deviceSession={uid,peerUid:viewerUid,token,expiresAtMs:expiry};
           return {enabled:true,expiresAtMs:expiry};
         } finally {
           deviceSessionStartPending=false;
@@ -187,13 +289,23 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
         const active=deviceSession;
         if(!active||active.uid!==ports.currentIdentity()?.uid||
            active.peerUid!==viewerUid)return unavailable();
-        const result=await send('/v2/locations/sessions/stop',{
-          viewerUid,sessionToken:active.token
-        },false);
-        if(!fields(result,['enabled'])||
-           (result as {enabled:unknown}).enabled!==false)unavailable();
-        if(deviceSession?.token===active.token)deviceSession=null;
-        return {enabled:false};
+        if(deviceSessionStopPending)return unavailable();
+        // Latch before the first network await. A timeout must not re-enable
+        // sharing simply because the in-flight STOP flag was released.
+        deviceSessionStopIntent=true;
+        deviceSessionStopPending=true;
+        try {
+          const result=await send('/v2/locations/sessions/stop',{
+            viewerUid,sessionToken:active.token
+          },false);
+          if(!fields(result,['enabled'])||
+             (result as {enabled:unknown}).enabled!==false)unavailable();
+          if(deviceSession?.token===active.token)deviceSession=null;
+          deviceSessionStopIntent=false;
+          return {enabled:false};
+        } finally {
+          deviceSessionStopPending=false;
+        }
       }
       const result=await send('/v1/locations/grants/stop',{viewerUid},false);
       if(!fields(result,['enabled'])||(result as {enabled:unknown}).enabled!==false)unavailable();
@@ -205,14 +317,23 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       const session=ports.useDeviceSessions===true?deviceSession:null;
       if(ports.useDeviceSessions===true&&
         (!session||session.uid!==ports.currentIdentity()?.uid||
-          session.peerUid!==viewerUid))unavailable();
+          session.peerUid!==viewerUid||session.expiresAtMs<=Date.now()||
+          deviceSessionStopIntent||deviceSessionStopPending||emergencyStopPending||
+          deviceSessionStartPending))unavailable();
       const result=await send(ports.useDeviceSessions===true?
         '/v2/locations/sessions/publish':'/v1/locations/points/publish',{
         viewerUid,
         ...(session?{sessionToken:session.token}:{}),
         point:fix,appInForeground:true,foregroundPermissionGranted:true
       },true);
-      if(session&&deviceSession?.token!==session.token)unavailable();
+      // The HTTP publish may have been accepted BEFORE a user pressed STOP,
+      // but a late ACK must never re-advertise active sharing in the UI.
+      // Keep v1 unchanged and let independent STOP/emergency STOP finish.
+      if(session&&(deviceSession?.token!==session.token||
+         deviceSessionStopIntent||deviceSessionStopPending||emergencyStopPending||
+         session.expiresAtMs<=Date.now()||
+         ports.currentIdentity()?.uid!==session.uid||!ports.isForeground()))
+        unavailable();
       if(!fields(result,['stored','expiresAtMs']))unavailable();
       const row=result as {stored:unknown;expiresAtMs:unknown};
       const expiresAt=row.expiresAtMs;
@@ -235,13 +356,17 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       try {
         if(startSettled)await startSettled;
         if(ports.currentIdentity()?.uid!==uid)unavailable();
+        if(deviceSession?.uid===uid&&deviceSession?.peerUid===viewerUid)
+          deviceSessionStopIntent=true;
         const result=await send('/v1/locations/grants/stop',{viewerUid},false);
         if(!fields(result,['enabled'])||
            (result as {enabled:unknown}).enabled!==false||
            ports.currentIdentity()?.uid!==uid)unavailable();
         const active=deviceSession;
-        if(active!==null&&active.uid===uid&&active.peerUid===viewerUid)
+        if(active!==null&&active.uid===uid&&active.peerUid===viewerUid){
           deviceSession=null;
+          deviceSessionStopIntent=false;
+        }
         return {enabled:false as const};
       } finally {
         emergencyStopPending=false;

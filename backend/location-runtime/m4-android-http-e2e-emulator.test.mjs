@@ -81,6 +81,9 @@ test('Android M4 real JWT/HTTP/Firestore consent and event privacy (emulators on
     await once(server,'listening');
     t.after(()=>new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve())));
     const loopback='http://127.0.0.1:'+server.address().port;
+    // Isolated emulator only: capture the actual M3 v2 START response into
+    // test memory, never Firestore/logs. Production UI does NOT wire this bridge.
+    let publisherSessionToken=null;
     const fetchImpl=async(url,init)=>{
       const target=new URL(url);
       assert.equal(target.origin,APPROVED_ORIGIN);
@@ -89,7 +92,15 @@ test('Android M4 real JWT/HTTP/Firestore consent and event privacy (emulators on
       assert.ok(target.pathname.startsWith('/v1/geofences/')||
         target.pathname.startsWith('/v2/locations/')||
         target.pathname==='/v1/locations/grants/stop');
-      return fetch(loopback+target.pathname,init);
+      const response=await fetch(loopback+target.pathname,init);
+      if(target.pathname==='/v2/locations/sessions/start'&&response.ok){
+        const row=await response.clone().json();
+        assert.match(row.sessionToken,/^[0-9a-f]{64}$/);
+        publisherSessionToken=row.sessionToken;
+      }
+      if(target.pathname==='/v2/locations/sessions/stop'&&response.ok)
+        publisherSessionToken=null;
+      return response;
     };
     const ports=who=>({
       approvedCloudRunUrl:APPROVED_ORIGIN,projectId:STAGING_PROJECT,
@@ -98,7 +109,9 @@ test('Android M4 real JWT/HTTP/Firestore consent and event privacy (emulators on
       fetchImpl
     });
     const ownerM4=createM4StagingTransport(ports(owner));
-    const subjectM4=createM4StagingTransport(ports(subject));
+    const subjectM4=createM4StagingTransport({
+      ...ports(subject),getPublisherSessionToken:()=>publisherSessionToken
+    });
     const strangerM4=createM4StagingTransport(ports(stranger));
     const subjectM3=createM2StagingTransport({...ports(subject),useDeviceSessions:true});
     const relation=db.collection('friendRequests').doc(owner.uid+'__'+subject.uid);
@@ -126,11 +139,23 @@ test('Android M4 real JWT/HTTP/Firestore consent and event privacy (emulators on
       latitude:0,longitude:0,accuracyMeters:12,capturedAtMs:Date.now()-1000
     }),/M4_GEOFENCE_NOT_AVAILABLE/,'approval alone is not an M2 publisher grant');
     assert.equal((await subjectM3.start(owner.uid)).enabled,true);
+    assert.match(publisherSessionToken,/^[0-9a-f]{64}$/);
+    // A second handset with the SAME real Firebase UID but a different
+    // syntactically valid M3 capability reaches the real Auth/Firestore
+    // transaction and is denied by server lease binding, with zero writes.
+    const otherHandset=createM4StagingTransport({
+      ...ports(subject),getPublisherSessionToken:()=> '0'.repeat(64)
+    });
+    await assert.rejects(otherHandset.evaluate(owner.uid,{
+      latitude:0,longitude:0,accuracyMeters:12,capturedAtMs:Date.now()-1000
+    }),/M4_GEOFENCE_NOT_AVAILABLE/);
+    assert.equal((await state.get()).exists,false,
+      'foreign handset cannot create a geofence baseline or event');
     // Four independent synthetic samples establish outside, then Enter.
     // Captures are distinct and ordered; no physical GPS or elapsed wait.
-    const captured=Date.now()-10000;
+    const captured=Date.now(); // Only post-device-START consented fixes.
     const sample=(lat,offset)=>({
-      latitude:lat,longitude:0,accuracyMeters:12,capturedAtMs:captured+offset
+      latitude:lat,longitude:0,accuracyMeters:12,capturedAtMs:captured+offset/2
     });
     assert.equal((await subjectM4.evaluate(owner.uid,sample(0.02,0))).event,null);
     assert.equal((await subjectM4.evaluate(owner.uid,sample(0.02,2000))).event,null);
@@ -154,6 +179,7 @@ test('Android M4 real JWT/HTTP/Firestore consent and event privacy (emulators on
     assert.equal(attempted.status,404);
     assert.equal((await zone.get()).exists,true);
     assert.equal((await subjectM3.stop(owner.uid)).enabled,false);
+    assert.equal(publisherSessionToken,null,'STOP erases test-only capability');
     await assert.rejects(subjectM4.evaluate(owner.uid,sample(0,8000)),
       /M4_GEOFENCE_NOT_AVAILABLE/,'STOP removes publisher authorization');
     // Restored friendship consent cannot resurrect the old grant/zone.

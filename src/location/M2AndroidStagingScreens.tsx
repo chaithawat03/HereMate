@@ -4,7 +4,7 @@
  * Mount ONLY after owner-approved Staging Cloud Run URL, server security review
  * and positive/negative real Staging integration tests are recorded.
  */
-import React,{useMemo} from 'react';
+import React,{useEffect,useMemo} from 'react';
 import {AppState,Platform,Text,View} from 'react-native';
 import * as Location from 'expo-location';
 import {getStagingGuestAuth} from '../auth/firebaseGuest';
@@ -14,7 +14,10 @@ import {M2SharingPanel} from './M2SharingPanel';
 import {M2FriendLocationPanel} from './M2FriendLocationPanel';
 import {createM2StagingTransport} from './m2StagingTransport';
 
+type PublisherProvider=(actorUid:string,peerUid:string)=>string|null;
 type Props=Readonly<{
+  /** Read-only in-memory M3 capability handoff; never expose a token in UI/state. */
+  onPublisherProviderChange?:(provider:PublisherProvider|null)=>void;
   /** EXACT HTTPS origin from independently approved and deployed Cloud Run revision. */
   approvedCloudRunUrl:string;
   /** No caller may set true until M2.4 server + IAM + TTL security acceptance. */
@@ -22,7 +25,7 @@ type Props=Readonly<{
 }>;
 
 export function M2AndroidStagingScreens({
-  approvedCloudRunUrl,backendReviewedAndEnabled
+  approvedCloudRunUrl,backendReviewedAndEnabled,onPublisherProviderChange
 }:Props){
   const {t}=usePreferences();
   const transport=useMemo(()=>{
@@ -56,6 +59,16 @@ export function M2AndroidStagingScreens({
       return null;
     }
   },[approvedCloudRunUrl,backendReviewedAndEnabled]);
+  // The M4 panel must borrow the capability from THIS exact M3 transport,
+  // not from a second transport instance or a persisted/global token. When
+  // the authenticated child unmounts, revoke the root's callback immediately.
+  const publisherProvider:PublisherProvider|null=transport&&
+    process.env.EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'?
+    transport.getPublisherSessionToken:null;
+  useEffect(()=>{
+    onPublisherProviderChange?.(publisherProvider);
+    return ()=>onPublisherProviderChange?.(null);
+  },[onPublisherProviderChange,publisherProvider]);
   if(!transport)return <View><Text>{t('m2Unavailable')}</Text></View>;
   return <View>
     <M2SharingPanel transport={transport} backendReviewedAndEnabled={true}/>

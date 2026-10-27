@@ -3,6 +3,7 @@
  * No production credentials, no network-bound M4 route, no mobile GPS.
  */
 import test from 'node:test';
+import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {initializeApp,deleteApp} from 'firebase-admin/app';
 import {getFirestore,Timestamp} from 'firebase-admin/firestore';
@@ -217,4 +218,175 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
    d.data().expireAt instanceof Timestamp));
  // Separate real Firestore docs remain server-only and expire by finite TTL.
  assert.ok((await db.collection('private_location_grants').doc(B+'__'+A).get()).exists);
+});
+
+test('real Firestore: M4 publisher lease handoff resets old-device transition state, not GPS history',
+ {timeout:90000},async t=>{
+  assert.equal(process.env.FIRESTORE_EMULATOR_HOST,HOST);
+  assert.equal(process.env.GCLOUD_PROJECT,DEMO);
+  assert.equal(process.env.GOOGLE_APPLICATION_CREDENTIALS||'','');
+  const app=initializeApp({projectId:DEMO},'m4-device-lease-handoff-isolated');
+  const db=getFirestore(app);
+  t.after(async()=>{await db.terminate();await deleteApp(app);});
+  const projection={projectId:STAGING_PROJECT,
+    collection:name=>db.collection(name),runTransaction:fn=>db.runTransaction(fn)};
+  const owner='leasezoneowner000004',subject='leasesubject000005';
+  const now=1_800_000_000_000;
+  const relationUpdated=Timestamp.fromMillis(now-10_000);
+  const revision=relationUpdated.seconds+':'+relationUpdated.nanoseconds;
+  const tokenA='a'.repeat(64),tokenB='b'.repeat(64);
+  const digest=token=>createHash('sha256')
+    .update('m3-device-session:v1:'+token).digest('hex');
+  const pair=owner+'__'+subject,grantPair=subject+'__'+owner;
+  const zoneRef=db.collection('private_geofence_zones').doc(pair);
+  const stateRef=db.collection('private_geofence_states').doc(pair);
+  await Promise.all([
+    db.collection('friendRequests').doc(pair).set({
+      senderUid:owner,recipientUid:subject,status:'accepted',
+      senderConsent:true,recipientConsent:true,updatedAt:relationUpdated
+    }),
+    zoneRef.set({ownerUid:owner,subjectUid:subject,status:'active',
+      relationRevision:revision,createdAtMs:now-6000,approvedAtMs:now-5000,
+      expiresAtMs:now+3600_000,
+      circle:{latitude:0,longitude:0,radiusMeters:350}
+    }),
+    db.collection('private_location_grants').doc(grantPair).set({
+      ownerUid:subject,viewerUid:owner,enabled:true,
+      relationRevision:revision,expiresAtMs:now+50_000,
+      sessionDigest:digest(tokenB)
+    }),
+    db.collection('private_location_publishers').doc(subject).set({
+      ownerUid:subject,viewerUid:owner,expiresAtMs:now+50_000,
+      sessionDigest:digest(tokenB)
+    }),
+    stateRef.set({ownerUid:owner,subjectUid:subject,
+      relationRevision:revision,approvedAtMs:now-5000,
+      expiresAtMs:now+3600_000,zone:'inside',pending:null,streak:0,
+      lastEventAtMs:now-1000,lastSampleCapturedAtMs:now-4000,
+      sessionDigest:digest(tokenA)
+    })
+  ]);
+  const auth={app:{options:{projectId:STAGING_PROJECT}},
+    async verifyIdToken(value,revoked){
+      assert.equal(value,bearer(subject));
+      assert.equal(revoked,true);
+      return {uid:subject,sub:subject,aud:STAGING_PROJECT,
+        iss:'https://securetoken.google.com/'+STAGING_PROJECT};
+    }
+  };
+  const service=createGeofenceService({adminAuth:auth,
+    store:createFirestoreGeofenceStore(projection),
+    rateLimiter:{persistent:true,consume:async()=>true},clock:()=>now});
+  const evalAt=(sessionToken,capturedAtMs)=>service.evaluate({
+    idToken:bearer(subject),ownerUid:owner,sessionToken,
+    point:{latitude:0.01,longitude:0,accuracyMeters:10,capturedAtMs},
+    appInForeground:true,foregroundPermissionGranted:true
+  });
+  const before=await stateRef.get();
+  await assert.rejects(evalAt(tokenA,now-2000),GeofenceDenied);
+  assert.equal((await stateRef.get()).updateTime.toMillis(),
+    before.updateTime.toMillis(),'retired device token cannot mutate state');
+  assert.equal((await evalAt(tokenB,now-2000)).event,null);
+  let stored=(await stateRef.get()).data();
+  assert.equal(stored.zone,'unknown');
+  assert.equal(stored.pending,'outside');
+  assert.equal(stored.sessionDigest,digest(tokenB));
+  assert.equal((await evalAt(tokenB,now-500)).event,null);
+  stored=(await stateRef.get()).data();
+  assert.equal(stored.zone,'outside');
+  assert.equal(stored.sessionDigest,digest(tokenB));
+  assert.equal(stored.lastEventAtMs,now-1000,
+    'new publisher cannot reset an approved zone notification cooldown');
+  // New handset B has established its own outside baseline. Two inside
+  // fixes within handset A's 5-minute cooldown must not duplicate Enter.
+  assert.equal((await service.evaluate({
+    idToken:bearer(subject),ownerUid:owner,sessionToken:tokenB,
+    point:{latitude:0,longitude:0,accuracyMeters:10,capturedAtMs:now+700},
+    appInForeground:true,foregroundPermissionGranted:true
+  })).event,null);
+  assert.equal((await service.evaluate({
+    idToken:bearer(subject),ownerUid:owner,sessionToken:tokenB,
+    point:{latitude:0,longitude:0,accuracyMeters:10,capturedAtMs:now+2000},
+    appInForeground:true,foregroundPermissionGranted:true
+  })).event,null,'same approved-zone cooldown spans legitimate device handoff');
+  stored=(await stateRef.get()).data();
+  assert.equal(stored.zone,'inside');
+  assert.equal(stored.lastEventAtMs,now-1000);
+  for(const forbidden of ['point','latitude','longitude','fix','history','sessionToken'])
+    assert.equal(Object.hasOwn(stored,forbidden),false);
+  assert.equal(JSON.stringify(stored).includes(tokenB),false,
+    'never persist the M3 device bearer token');
+});
+
+test('real Firestore: M4 v2 post-expiry future-skew fix cannot mutate geofence state',
+ {timeout:90000},async t=>{
+  assert.equal(process.env.FIRESTORE_EMULATOR_HOST,HOST);
+  assert.equal(process.env.GCLOUD_PROJECT,DEMO);
+  assert.equal(process.env.GOOGLE_APPLICATION_CREDENTIALS||'','');
+  const app=initializeApp({projectId:DEMO},'m4-lease-end-fix-isolated');
+  const db=getFirestore(app);
+  t.after(async()=>{await db.terminate();await deleteApp(app);});
+  const projection={projectId:STAGING_PROJECT,
+    collection:name=>db.collection(name),runTransaction:fn=>db.runTransaction(fn)};
+  const owner='leaseendzoneowner000006',subject='leaseendsubject000007';
+  const now=1_800_000_000_000,expiresAtMs=now+1000;
+  const relationUpdated=Timestamp.fromMillis(now-10_000);
+  const revision=relationUpdated.seconds+':'+relationUpdated.nanoseconds;
+  const sessionToken='c'.repeat(64);
+  const sessionDigest=createHash('sha256')
+    .update('m3-device-session:v1:'+sessionToken).digest('hex');
+  const pair=owner+'__'+subject,grantPair=subject+'__'+owner;
+  const stateRef=db.collection('private_geofence_states').doc(pair);
+  await Promise.all([
+    db.collection('friendRequests').doc(pair).set({
+      senderUid:owner,recipientUid:subject,status:'accepted',
+      senderConsent:true,recipientConsent:true,updatedAt:relationUpdated
+    }),
+    db.collection('private_geofence_zones').doc(pair).set({
+      ownerUid:owner,subjectUid:subject,status:'active',
+      relationRevision:revision,createdAtMs:now-6000,approvedAtMs:now-5000,
+      expiresAtMs:now+3600_000,
+      circle:{latitude:0,longitude:0,radiusMeters:350}
+    }),
+    db.collection('private_location_grants').doc(grantPair).set({
+      ownerUid:subject,viewerUid:owner,enabled:true,
+      relationRevision:revision,expiresAtMs,sessionDigest
+    }),
+    db.collection('private_location_publishers').doc(subject).set({
+      ownerUid:subject,viewerUid:owner,expiresAtMs,sessionDigest
+    }),
+    stateRef.set({ownerUid:owner,subjectUid:subject,
+      relationRevision:revision,approvedAtMs:now-5000,
+      expiresAtMs:now+3600_000,zone:'outside',pending:null,streak:0,
+      lastEventAtMs:null,lastSampleCapturedAtMs:now-3000,sessionDigest
+    })
+  ]);
+  const auth={app:{options:{projectId:STAGING_PROJECT}},
+    async verifyIdToken(value,revoked){
+      assert.equal(value,bearer(subject));
+      assert.equal(revoked,true);
+      return {uid:subject,sub:subject,aud:STAGING_PROJECT,
+        iss:'https://securetoken.google.com/'+STAGING_PROJECT};
+    }
+  };
+  const service=createGeofenceService({adminAuth:auth,
+    store:createFirestoreGeofenceStore(projection),
+    rateLimiter:{persistent:true,consume:async()=>true},clock:()=>now});
+  const evaluateAt=capturedAtMs=>service.evaluate({
+    idToken:bearer(subject),ownerUid:owner,sessionToken,
+    point:{latitude:0,longitude:0,accuracyMeters:10,capturedAtMs},
+    appInForeground:true,foregroundPermissionGranted:true
+  });
+  const before=await stateRef.get();
+  await assert.rejects(evaluateAt(expiresAtMs+1),GeofenceDenied);
+  const after=await stateRef.get();
+  assert.deepEqual(after.data(),before.data());
+  assert.ok(after.updateTime.isEqual(before.updateTime),
+    'post-lease capture cannot advance state, event cooldown or TTL');
+  assert.equal((await evaluateAt(expiresAtMs)).evaluated,true,
+    'capture at the lease-end boundary remains valid');
+  const accepted=await stateRef.get();
+  assert.equal(accepted.data().sessionDigest,sessionDigest);
+  assert.equal(Object.hasOwn(accepted.data(),'point'),false);
+  assert.equal(Object.hasOwn(accepted.data(),'sessionToken'),false);
 });

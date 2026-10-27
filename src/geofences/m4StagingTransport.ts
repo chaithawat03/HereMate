@@ -17,6 +17,9 @@ type Identity=Readonly<{uid:string;getIdToken:()=>Promise<string>}>;
 export type M4TransportPorts=Readonly<{
  approvedCloudRunUrl:string;projectId:string;
  currentIdentity:()=>Identity|null;
+ // Optional, explicitly reviewed M3 transport bridge. Never persist or log
+ // the publisher capability. Without this bridge v2 EVALUATE fails on server.
+ getPublisherSessionToken?:(actorUid:string,ownerUid:string)=>string|null;
  isForeground:()=>boolean;
  foregroundPermissionGranted:()=>Promise<boolean>;
  fetchImpl:typeof fetch;timeoutMs?:number;
@@ -30,6 +33,8 @@ export type M4Transport=Readonly<{
   Promise<{approved:boolean;expiresAtMs?:number}>;
  revoke:(ownerUid:string,subjectUid:string)=>Promise<{revoked:true}>;
  evaluate:(ownerUid:string,point:ShareFix)=>Promise<GeofenceOutcome>;
+ /** In-memory proof only: never return a bearer to React UI/state. */
+ capturePublisherLeaseProof:(ownerUid:string)=>()=>boolean;
 }>;
 // Exact provider-observed origins for the single, owner-reviewed M2 Cloud Run
 // service. The five M4 routes are NOT deployed there today.
@@ -73,7 +78,9 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
  if(ports.projectId!=='heremate'||typeof ports.currentIdentity!=='function'||
     typeof ports.isForeground!=='function'||
     typeof ports.foregroundPermissionGranted!=='function'||
-    typeof ports.fetchImpl!=='function')return unavailable();
+    typeof ports.fetchImpl!=='function'||
+    (ports.getPublisherSessionToken!==undefined&&
+     typeof ports.getPublisherSessionToken!=='function'))return unavailable();
  const origin=exactOrigin(ports.approvedCloudRunUrl);
  const timeout=ports.timeoutMs??8000;
  if(!Number.isSafeInteger(timeout)||timeout<1000||timeout>10_000)return unavailable();
@@ -95,7 +102,24 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    if(requireGps&&!(await ports.foregroundPermissionGranted()))return unavailable();
    // Do not transmit the original subject's GPS with a stale Firebase bearer.
    if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
-   const json=JSON.stringify(body);
+   // Resolve the M3 device capability only at the LAST pre-send gate.
+   // Never capture it before awaited Firebase/OS permission checks. Legacy
+   // v1 stays unchanged when no approved bridge is supplied; v2 then denies.
+   let payload=body;
+   let sentCapability:string|null=null;
+   if(endpoint==='/v1/geofences/evaluate'&&ports.getPublisherSessionToken){
+     let capability:string|null;
+     // The provider must bind the capability to this exact geofence owner.
+     // A single Firebase UID may have different publisher leases per peer.
+     const ownerUid=body.ownerUid;
+     if(typeof ownerUid!=='string'||!CODE.test(ownerUid))return unavailable();
+     try{capability=ports.getPublisherSessionToken(actor.uid,ownerUid);}catch{return unavailable();}
+     if(typeof capability!=='string'||!/^[0-9a-f]{64}$/.test(capability))
+       return unavailable();
+     sentCapability=capability;
+     payload={...body,sessionToken:capability};
+   }
+   const json=JSON.stringify(payload);
    if(json.length>2048)return unavailable();
    const controller=new AbortController();
    const timer=setTimeout(()=>controller.abort(),timeout);
@@ -115,6 +139,19 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
      try{value=await res.json();}catch{return unavailable();}
      if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
      if(requireGps&&!(await ports.foregroundPermissionGranted()))return unavailable();
+     // A same-UID account restart or a new device lease can invalidate the
+     // capability while the old HTTPS request is in flight. Never surface
+     // an event from that retired session, even if the server replied 200.
+     if(sentCapability!==null){
+       let current:string|null;
+       try{
+         const ownerUid=body.ownerUid;
+         current=typeof ownerUid==='string'?
+           ports.getPublisherSessionToken?.(actor.uid,ownerUid)??null:null;
+       }
+       catch{return unavailable();}
+       if(current!==sentCapability)return unavailable();
+     }
      // Do not expose the server-confirmed event if the final OS permission
      // await completed after logout, account switch or app background.
      if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
@@ -123,6 +160,31 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    finally{clearTimeout(timer);}
  }
  return Object.freeze({
+   capturePublisherLeaseProof(ownerUid:string){
+     // Capture the exact device lease BEFORE an async GPS evaluation. A
+     // subsequent STOP, lease expiry, account switch or device handoff must
+     // suppress a late foreground alert even AFTER the transport returned.
+     // Only this private closure holds the token; React receives no bearer.
+     const actor=ports.currentIdentity();
+     if(!actor||!CODE.test(actor.uid)||!CODE.test(ownerUid)||
+        actor.uid===ownerUid||!ports.isForeground())return ()=>false;
+     if(!ports.getPublisherSessionToken){
+       // Preserve the existing v1 behavior when no v2 device lease exists.
+       return ()=>ports.currentIdentity()?.uid===actor.uid&&ports.isForeground();
+     }
+     let original:string|null;
+     try{original=ports.getPublisherSessionToken(actor.uid,ownerUid);}
+     catch{return ()=>false;}
+     if(typeof original!=='string'||!/^[0-9a-f]{64}$/.test(original))
+       return ()=>false;
+     return ()=>{
+       if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())
+         return false;
+       try{
+         return ports.getPublisherSessionToken?.(actor.uid,ownerUid)===original;
+       }catch{return false;}
+     };
+   },
    async propose(subjectUid,circle){
      if(!validCircle(circle))return unavailable();
      const row=await send('/v1/geofences/propose',{subjectUid:peer(subjectUid),circle},false);

@@ -3,7 +3,7 @@
  * Own Firebase Guest account, actual M1 relations, and M2 Cloud Run-backed
  * opt-in sharing only. Not a physical iPhone release or background tracking.
  */
-import React from 'react';
+import React,{useCallback,useState} from 'react';
 import {SafeAreaView,ScrollView,StatusBar,Text,View,useWindowDimensions} from 'react-native';
 import {PreferencesProvider,PreferenceControls,usePreferences} from './src/ui/PreferencesProvider';
 import {GuestAuthGate} from './src/auth/GuestAuthGate';
@@ -14,6 +14,28 @@ import {M4GeofenceStagingScreens} from './src/geofences/M4GeofenceStagingScreens
 
 export const M3_IOS_STAGING_ORIGIN=
   'https://heremate-m2-location-staging-2inhowyo2a-as.a.run.app' as const;
+
+// This component is mounted only inside GuestAuthGate. The callback is a
+// read-only reference to the current M3 transport, never a stored token.
+type PublisherProvider=(actorUid:string,peerUid:string)=>string|null;
+function StagingServices(){
+  const [publisherProvider,setPublisherProvider]=useState<PublisherProvider|null>(null);
+  const onPublisherProviderChange=useCallback((provider:PublisherProvider|null)=>{
+    // Do not let React invoke the token-provider function as a state updater.
+    setPublisherProvider(()=>provider);
+  },[]);
+  return <>
+    <M3IOSStagingScreens approvedCloudRunUrl={M3_IOS_STAGING_ORIGIN}
+      backendReviewedAndEnabled={true}
+      onPublisherProviderChange={
+        process.env.EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'?
+          onPublisherProviderChange:undefined}/>
+    {process.env.EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'?
+      <M4GeofenceStagingScreens approvedCloudRunUrl={M3_IOS_STAGING_ORIGIN}
+        backendReviewedAndEnabled={true}
+        getPublisherSessionToken={publisherProvider??undefined}/>:null}
+  </>;
+}
 
 function Content(){
   const {colors:c,theme,language}=usePreferences();
@@ -36,11 +58,7 @@ function Content(){
         </View>
         <UserProfilePanel/>
         <FriendsPanel/>
-        <M3IOSStagingScreens approvedCloudRunUrl={M3_IOS_STAGING_ORIGIN}
-          backendReviewedAndEnabled={true}/>
-        {process.env.EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'?
-          <M4GeofenceStagingScreens approvedCloudRunUrl={M3_IOS_STAGING_ORIGIN}
-            backendReviewedAndEnabled={true}/>:null}
+        <StagingServices/>
       </ScrollView>
     </GuestAuthGate>
   </SafeAreaView>;

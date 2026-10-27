@@ -129,6 +129,12 @@ test('real Admin Firestore emulator transaction, consent revocation and durable 
   await svc.stopDevice({idToken:bearer(A),viewerUid:B,sessionToken:device.sessionToken});
   assert.equal((await raw.collection('private_latest_locations').doc(A+'__'+B).get()).exists,false);
   assert.equal((await raw.collection('private_location_publishers').doc(A).get()).exists,false);
+  // M3 v2 client STOP may overtake a stalled GPS publish. A late server
+  // PUBLISH transaction must not recreate a point after STOP removed its
+  // grant; this is the server-side invariant allowing prompt owner STOP.
+  await assert.rejects(send(device.sessionToken),LocationDenied);
+  assert.equal((await raw.collection('private_latest_locations').doc(A+'__'+B).get()).exists,false);
+  assert.equal((await raw.collection('private_location_grants').doc(A+'__'+B).get()).exists,false);
 
   // Genuine Firestore optimistic concurrency: two distinct phone STARTs
   // for the same owner/viewer cannot both commit the single publisher lease.

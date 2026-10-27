@@ -68,6 +68,30 @@ test('every M4 route requires strict path/body, and authenticates by token not c
    bodyText:'x'.repeat(MAX_GEOFENCE_REQUEST_BYTES+1)
  }),svc)).status,413);
 });
+test('M4 HTTP accepts an exact optional v2 publisher token only on EVALUATE',async()=>{
+ const capability='a'.repeat(64);
+ const point={latitude:0,longitude:0,accuracyMeters:15,capturedAtMs:1800000000000};
+ const base={ownerUid:A,point,appInForeground:true,foregroundPermissionGranted:true};
+ const seen=[];
+ const svc={evaluate:async args=>{
+   seen.push(args);
+   return {evaluated:true,event:null,quality:'ok'};
+ }};
+ const valid=await handleGeofenceHttp(requestTo('/v1/geofences/evaluate',
+   {...base,sessionToken:capability}),svc);
+ assert.equal(valid.status,200);
+ assert.equal(seen.length,1);
+ assert.equal(seen[0].sessionToken,capability);
+ assert.equal(JSON.stringify(valid).includes(capability),false);
+ assert.equal((await handleGeofenceHttp(requestTo('/v1/geofences/evaluate',
+   {...base,sessionToken:capability,extra:'bad'}),svc)).status,400);
+ assert.equal((await handleGeofenceHttp(requestTo('/v1/geofences/propose',
+   {subjectUid:B,circle,sessionToken:capability}),svc)).status,400);
+ assert.equal((await handleGeofenceHttp(requestTo('/v1/geofences/revoke',
+   {ownerUid:A,subjectUid:B,sessionToken:capability}),svc)).status,400);
+ assert.equal(seen.length,1,'invalid shapes never reach service');
+});
+
 test('M4 HTTP never emits stack/UID/GPS when service denies or limiter is exhausted',async()=>{
  const base={propose:async()=>null,review:async()=>null,decide:async()=>null,
    revoke:async()=>null,evaluate:async()=>null};

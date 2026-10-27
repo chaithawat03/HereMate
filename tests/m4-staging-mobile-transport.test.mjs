@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import {createM2StagingTransport} from '../src/location/m2StagingTransport.ts';
 import {
  createM4StagingTransport,APPROVED_M4_STAGING_ORIGINS
 } from '../src/geofences/m4StagingTransport.ts';
@@ -87,6 +88,70 @@ test('consent UX APIs send exact, authenticated, no-store POST bodies only',asyn
   '/v1/geofences/decide','/v1/geofences/revoke','/v1/geofences/evaluate'
  ]);
 });
+test('M4 optional M3 device capability is scoped to EVALUATE, never to REVOKE or zone proposal',async()=>{
+ let activeToken='a'.repeat(64);
+ const x=make({getPublisherSessionToken:()=>activeToken});
+ assert.equal((await x.transport.propose(PEER,circle)).proposed,true);
+ assert.equal((await x.transport.revoke(PEER,UID)).revoked,true);
+ const fix={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
+ assert.equal((await x.transport.evaluate(PEER,fix)).event,'enter');
+ assert.equal(x.calls.length,3);
+ assert.equal(JSON.parse(x.calls[0].init.body).sessionToken,undefined);
+ assert.equal(JSON.parse(x.calls[1].init.body).sessionToken,undefined);
+ assert.equal(JSON.parse(x.calls[2].init.body).sessionToken,activeToken);
+ activeToken=null;
+ await assert.rejects(x.transport.evaluate(PEER,fix),/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(x.calls.length,3,'no private GPS request without a device capability');
+ assert.equal((await x.transport.revoke(PEER,UID)).revoked,true,
+   'independent revoke remains available without device capability');
+ assert.equal(x.calls.length,4);
+});
+
+test('M4 reads M3 device capability only after awaited identity and OS permission preflight',async()=>{
+ let activeToken='a'.repeat(64),resume;
+ let started;
+ const waiting=new Promise(resolve=>{resume=resolve;});
+ const entered=new Promise(resolve=>{started=resolve;});
+ const x=make({
+   getPublisherSessionToken:()=>activeToken,
+   currentIdentity:()=>({uid:UID,getIdToken:async()=>{started();await waiting;return SECRET;}})
+ });
+ const fix={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
+ const pending=x.transport.evaluate(PEER,fix);
+ await entered;
+ activeToken='b'.repeat(64);
+ resume();
+ assert.equal((await pending).event,'enter');
+ assert.equal(JSON.parse(x.calls[0].init.body).sessionToken,'b'.repeat(64),
+   'stale capability from before awaited Firebase token must not be sent');
+});
+
+test('M4 suppresses in-flight v2 geofence event after same-UID device capability handoff',async()=>{
+ let activeToken='a'.repeat(64),resume,entered;
+ const waiting=new Promise(resolve=>{resume=resolve;});
+ const requestEntered=new Promise(resolve=>{entered=resolve;});
+ const sent=[];
+ const x=make({
+   getPublisherSessionToken:()=>activeToken,
+   fetchImpl:async(input,init)=>{
+     sent.push({input,init});
+     entered();
+     await waiting;
+     return {status:200,ok:true,json:async()=>({
+       evaluated:true,event:'enter',quality:'ok'
+     })};
+   }
+ });
+ const fix={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
+ const pending=x.transport.evaluate(PEER,fix);
+ await requestEntered;
+ assert.equal(JSON.parse(sent[0].init.body).sessionToken,'a'.repeat(64));
+ activeToken='b'.repeat(64); // same Firebase UID, newer publisher session
+ resume();
+ await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(sent.length,1,'stale event must never trigger another request');
+});
+
 test('invalid coordinates, permission OFF or forged caller never send GPS or proposed circle',async()=>{
  const x=make();
  await assert.rejects(x.transport.propose(PEER,{...circle,radiusMeters:10}),/M4_GEOFENCE_NOT_AVAILABLE/);
@@ -135,6 +200,67 @@ test('logout or permissions revocation while HTTP response pending cannot delive
  finish2();
  await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
 });
+test('M4 v2 UI and both roots require explicit same-device publisher capability bridge',()=>{
+ const wiring=read('src/geofences/M4GeofenceStagingScreens.tsx');
+ const androidRoot=read('M2StagingApp.tsx');
+ const iosRoot=read('M3IOSStagingApp.tsx');
+ const transport=read('src/geofences/m4StagingTransport.ts');
+ assert.match(wiring,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'/);
+ assert.match(wiring,/Platform.OS==='ios'&&/);
+ assert.match(wiring,/EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND==='true'/);
+ assert.match(read('src/location/M3IOSStagingScreens.tsx'),/useDeviceSessions:true/);
+ assert.match(wiring,/requiresV2Capability&&typeof getPublisherSessionToken!=='function'/);
+ assert.match(wiring,/requiresV2Capability\?\{getPublisherSessionToken\}:\{\}/);
+ assert.match(wiring,/getPublisherSessionToken\?:\(actorUid:string,ownerUid:string\)=>string\|null/);
+ assert.match(transport,/getPublisherSessionToken\?:\(actorUid:string,ownerUid:string\)=>string\|null/);
+ // Both roots wire ONLY the current authenticated M3 transport callback.
+ // The M4 UI still fail-closes until that provider is actually registered.
+ for(const root of [androidRoot,iosRoot]){
+   assert.match(root,/getPublisherSessionToken=\{publisherProvider\?\?undefined\}/);
+   assert.match(root,/onPublisherProviderChange=/);
+   assert.match(root,/setPublisherProvider\(\(\)=>provider\)/,
+     'React must not invoke a token provider as a setState updater');
+   assert.match(root,/<GuestAuthGate>/);
+   assert.match(root,/<StagingServices\/>/);
+   assert.doesNotMatch(root,/AsyncStorage|SecureStore|setItem\(|console\.log\(.*sessionToken/);
+ }
+ assert.match(androidRoot,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'\?/);
+ assert.match(iosRoot,/EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'\?/);
+ assert.doesNotMatch(read('eas.json'),/EXPO_PUBLIC_ENABLE_M4_GEOFENCES/);
+});
+
+test('M3 Android and iOS capability provider callback lifecycle is fail-closed (static contract)',()=>{
+ // Source-only contract: no React renderer/device acceptance is claimed.
+ // The published reference must be the SAME M3 transport; all flags remain off
+ // in shipped profiles, and there is no live v2 M4 deployment.
+ const android=read('src/location/M2AndroidStagingScreens.tsx');
+ const ios=read('src/location/M3IOSStagingScreens.tsx');
+ for(const [platform,source,flag] of [
+   ['android',android,'EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS'],
+   ['ios',ios,'EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND']
+ ]){
+   assert.match(source,/onPublisherProviderChange\?:\(provider:PublisherProvider\|null\)=>void/,
+     platform+' must keep callback optional');
+   assert.match(source,/const publisherProvider:PublisherProvider\|null=transport&&/,
+     platform+' must never create a separate M4 bearer source');
+   assert.ok(source.includes("process.env."+flag+"==='true'?"),
+     platform+' must publish only under explicit v2 opt-in');
+   assert.match(source,/transport\.getPublisherSessionToken:null/,
+     platform+' must publish only the current M3 transport function');
+   assert.match(source,/useEffect\(\(\)=>\{\s*onPublisherProviderChange\?\.\(publisherProvider\);\s*return \(\)=>onPublisherProviderChange\?\.\(null\);\s*\},\[onPublisherProviderChange,publisherProvider\]\)/,
+     platform+' must withdraw the callback on unmount or provider change');
+   assert.doesNotMatch(source,/AsyncStorage|SecureStore|setItem\(|console\.log\(.*sessionToken/,
+     platform+' must not persist or log the opaque device capability');
+ }
+ const androidRoot=read('M2StagingApp.tsx'),iosRoot=read('M3IOSStagingApp.tsx');
+ assert.match(androidRoot,/onPublisherProviderChange=/);
+ assert.match(iosRoot,/onPublisherProviderChange=/);
+ assert.match(androidRoot,/onPublisherProviderChange=\{[\s\S]*?EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'\?/);
+ assert.match(iosRoot,/onPublisherProviderChange=\{[\s\S]*?EXPO_PUBLIC_ENABLE_M4_GEOFENCES==='true'\?/);
+ assert.doesNotMatch(read('eas.json'),/EXPO_PUBLIC_ENABLE_M4_GEOFENCES/,
+   'callback preparation must not activate M4 in any committed build');
+});
+
 test('M4 UI requires independent owner/subject consent, distinct revoke and explicit OS GPS tap',()=>{
  const app=read('M2StagingApp.tsx');
  const ios=read('M3IOSStagingApp.tsx');
@@ -178,4 +304,103 @@ test('M4 rejects 307/308 responses rather than exposing a consented zone to redi
    assert.equal(new URL(seen[0].input).origin,ORIGIN);
    assert.ok(!String(seen[0].input).includes('foreign.run.app'));
  }
+});
+
+
+test('M4 v2 asks the capability provider for the exact owner peer before send and after reply',async()=>{
+ const requested=[];
+ const x=make({getPublisherSessionToken:(actorUid,ownerUid)=>{
+   requested.push([actorUid,ownerUid]);
+   return ownerUid===PEER?'a'.repeat(64):null;
+ }});
+ const point={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
+ assert.equal((await x.transport.evaluate(PEER,point)).event,'enter');
+ assert.deepEqual(requested,[[UID,PEER],[UID,PEER]]);
+ const other='anotherowneruid00003';
+ await assert.rejects(x.transport.evaluate(other,point),/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.deepEqual(requested,[[UID,PEER],[UID,PEER],[UID,other]]);
+ assert.equal(x.calls.length,1,'a lease for one peer must not send GPS for another peer');
+});
+
+test('M3 and M4 transports can share only the same in-memory peer-scoped publisher capability',async()=>{
+ const token='b'.repeat(64),owner='geofencesubjectuid002';
+ const calls=[];
+ let actor=UID;
+ const m3=createM2StagingTransport({
+   approvedCloudRunUrl:ORIGIN,projectId:'heremate',useDeviceSessions:true,
+   currentIdentity:()=>actor?{uid:actor,getIdToken:async()=>SECRET}:null,
+   isForeground:()=>true,foregroundPermissionGranted:async()=>true,
+   fetchImpl:async(url,init)=>{
+     calls.push({url,body:JSON.parse(init.body)});
+     return {ok:true,status:200,json:async()=>url.endsWith('/start')?
+       {enabled:true,expiresAtMs:now()+50_000,sessionToken:token}:
+       {enabled:false}};
+   }
+ });
+ // Here M3 actor must be the same Firebase identity used by M4.
+ // The M3 lease is tied to one peer; M4 must never infer it from UID alone.
+ actor=UID;
+ const publisherPeer=PEER;
+ assert.equal(m3.getPublisherSessionToken(publisherPeer),null);
+ await m3.start(publisherPeer);
+ const m4=make({getPublisherSessionToken:(actorUid,peer)=>
+   m3.getPublisherSessionToken(actorUid,peer)});
+ const fix={latitude:13.75,longitude:100.5,accuracyMeters:10,capturedAtMs:now()-100};
+ assert.equal((await m4.transport.evaluate(publisherPeer,fix)).event,'enter');
+ assert.equal(JSON.parse(m4.calls[0].init.body).sessionToken,token);
+ await assert.rejects(m4.transport.evaluate('otherowneruid00003',fix),
+   /M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(m4.calls.length,1,'different peer cannot borrow the publisher lease');
+ const otherAccount=make({
+   currentIdentity:()=>({uid:'otherfirebaseactor00003',getIdToken:async()=>SECRET}),
+   getPublisherSessionToken:(actorUid,peer)=>
+     m3.getPublisherSessionToken(actorUid,peer)
+ });
+ await assert.rejects(otherAccount.transport.evaluate(publisherPeer,fix),
+   /M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(otherAccount.calls.length,0,
+   'a different Firebase actor cannot transmit GPS with another account lease');
+ await m3.stop(publisherPeer);
+ await assert.rejects(m4.transport.evaluate(publisherPeer,fix),
+   /M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(m4.calls.length,1,'retired lease must not send a second GPS fix');
+ assert.deepEqual(calls.map(x=>new URL(x.url).pathname),[
+   '/v2/locations/sessions/start','/v2/locations/sessions/stop'
+ ]);
+ assert.equal(calls[0].body.sessionToken,undefined,
+   'START response token is never stored in a request body');
+});
+
+test('M4 post-evaluation proof never exposes bearer and rejects STOP, device handoff, account switch or background',()=>{
+ let actor=UID,token='a'.repeat(64),foreground=true;
+ const x=make({
+   currentIdentity:()=>actor?{uid:actor,getIdToken:async()=>SECRET}:null,
+   isForeground:()=>foreground,
+   getPublisherSessionToken:(who,peer)=>
+     who===UID&&peer===PEER?token:null
+ });
+ const proof=x.transport.capturePublisherLeaseProof(PEER);
+ assert.equal(typeof proof,'function');
+ assert.equal(proof(),true);
+ assert.equal(x.transport.capturePublisherLeaseProof('otherowneruid00003')(),false);
+ token=null; // owner STOP revoked the in-memory M3 capability
+ assert.equal(proof(),false);
+ token='b'.repeat(64); // a new publisher device took over
+ assert.equal(proof(),false,'old event must not follow a new lease');
+ token='a'.repeat(64);
+ actor='otherfirebaseactor00003';
+ assert.equal(proof(),false,'wrong Firebase account cannot surface the event');
+ actor=UID;foreground=false;
+ assert.equal(proof(),false,'background cannot surface the event');
+ assert.equal(x.calls.length,0,'proof check must never transmit GPS or a token');
+});
+
+test('M4 foreground watch and one-shot recheck exact publisher lease after async permission',()=>{
+ const panel=read('src/geofences/M4GeofencePanel.tsx');
+ const watcher=read('src/geofences/m4ForegroundZoneWatch.ts');
+ assert.match(panel,/transport\.capturePublisherLeaseProof\(ownerUid\)/);
+ assert.match(panel,/isEvaluationStillAuthorized:\(\)=>evaluatedLeaseProof\(\)/);
+ assert.match(panel,/isCurrent:\(\)=>isCurrent\(\)&&leaseProof\(\)/);
+ assert.match(watcher,/!p\.isEvaluationStillAuthorized\(destination\)/);
+ assert.doesNotMatch(panel,/AsyncStorage|SecureStore|console\.log\(.*[Tt]oken/);
 });

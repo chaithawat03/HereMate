@@ -104,6 +104,8 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
  // build. It never registers a background location task or a push token.
  useEffect(()=>{
    if(!backendReviewedAndEnabled)return;
+   // Keep only an opaque proof closure, never the publisher bearer or GPS.
+   let evaluatedLeaseProof:()=>boolean=()=>false;
    const controller=createM4ForegroundZoneWatch({
      identity:()=>getStagingGuestAuth().currentUser?.uid??null,
      isForeground:()=>AppState.currentState==='active',
@@ -127,7 +129,16 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
        }),onError);
        return {remove:()=>sub.remove()};
      },
-     evaluate:async(ownerUid,fix)=>(await transport.evaluate(ownerUid,fix)).event,
+     // Bind native foreground GPS to the same exact publisher lease that
+     // authorized this opt-in, not merely to the Firebase UID/friendship.
+     captureWatchLeaseProof:ownerUid=>transport.capturePublisherLeaseProof(ownerUid),
+     evaluate:async(ownerUid,fix)=>{
+       const proof=transport.capturePublisherLeaseProof(ownerUid);
+       const event=(await transport.evaluate(ownerUid,fix)).event;
+       evaluatedLeaseProof=proof;
+       return event;
+     },
+     isEvaluationStillAuthorized:()=>evaluatedLeaseProof(),
      now:Date.now,
      schedule:(fn,ms)=>setTimeout(fn,ms),
      cancel:handle=>clearTimeout(handle as ReturnType<typeof setTimeout>),
@@ -207,11 +218,14 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
    }
  }
  async function checkCurrentLocation(ownerUid:string,isCurrent:()=>boolean){
+   // STOP/handoff/expiry after an async permission or HTTP response must
+   // suppress this one-shot event, even if the server already replied 200.
+   const leaseProof=transport.capturePublisherLeaseProof(ownerUid);
    const event=await evaluateM4OneShotForegroundFix({
      // run() captures the exact Firebase UID, foreground state and operation
      // generation. Recheck after EACH async native permission/GPS step before
      // sending a private fix to the geofence API.
-     isCurrent,
+     isCurrent:()=>isCurrent()&&leaseProof(),
      servicesEnabled:()=>Location.hasServicesEnabledAsync(),
      requestPermission:async()=>
        (await Location.requestForegroundPermissionsAsync()).granted===true,

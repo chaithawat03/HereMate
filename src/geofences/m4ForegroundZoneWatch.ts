@@ -13,6 +13,12 @@ const freshFix=(fix:ShareFix,now:number)=>
  fix.accuracyMeters<=100;
 export const M4_WATCH_MAX_MS=60_000;
 export const M4_WATCH_MIN_FIX_INTERVAL_MS=10_000;
+// A v2 publisher lease may be retired without any subsequent native GPS fix.
+// Bound native watcher teardown even when Android/iOS stops delivering fixes.
+export const M4_WATCH_LEASE_RECHECK_MS=5_000;
+// A hung native OS permission read must not suspend the silent-lease watcher
+// watchdog indefinitely. Keep this shorter than the 5s recheck cadence.
+export const M4_WATCH_PERMISSION_READ_MAX_MS=3_000;
 export type M4WatchPhase='off'|'starting'|'watching';
 export type M4WatchPorts=Readonly<{
  identity:()=>string|null;
@@ -21,6 +27,11 @@ export type M4WatchPorts=Readonly<{
  hasPermission:()=>Promise<boolean>;
  watch:(onFix:(fix:ShareFix)=>void,onError:()=>void)=>Promise<{remove:()=>void}>;
  evaluate:(zoneOwnerUid:string,fix:ShareFix)=>Promise<'enter'|'exit'|null>;
+ /** Exact M3 lease proof captured before requesting OS GPS permission or
+  * installing a native watcher. Retiring this lease cancels the watch. */
+ captureWatchLeaseProof?:(zoneOwnerUid:string)=>()=>boolean;
+ /** Optional final in-memory M3 lease proof, checked AFTER async OS permission. */
+ isEvaluationStillAuthorized?:(zoneOwnerUid:string)=>boolean;
  now:()=>number;
  schedule:(fn:()=>void,delayMs:number)=>unknown;
  cancel:(handle:unknown)=>void;
@@ -32,8 +43,13 @@ const UID=/^[A-Za-z0-9_-]{12,128}$/;
 export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  let phase:M4WatchPhase='off',generation=0,disposed=false;
  let watcher:{remove:()=>void}|null=null,timer:unknown=null;
+ let leaseRecheckTimer:unknown=null,permissionReadTimer:unknown=null;
  let processing=false,lastFixAt=-Infinity;
  let owner:string|null=null,actor:string|null=null;
+ let watchLeaseProof:(()=>boolean)|null=null;
+ const leaseCurrent=(proof:(()=>boolean)|null)=>{
+   try{return proof===null||proof()===true;}catch{return false;}
+ };
  const notify=(next:M4WatchPhase)=>{
    phase=next;
    if(!disposed)p.onPhase(next);
@@ -41,14 +57,65 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
  function stop(){
    ++generation;
    if(timer!==null){p.cancel(timer);timer=null;}
+   if(leaseRecheckTimer!==null){p.cancel(leaseRecheckTimer);leaseRecheckTimer=null;}
+   if(permissionReadTimer!==null){p.cancel(permissionReadTimer);permissionReadTimer=null;}
    watcher?.remove();watcher=null;
-   owner=null;actor=null;processing=false;
+   owner=null;actor=null;watchLeaseProof=null;processing=false;
    lastFixAt=-Infinity;
    notify('off');
  }
  function active(epoch:number){
    return !disposed&&epoch===generation&&phase!=='off'&&
-     actor!==null&&p.identity()===actor&&p.isForeground();
+     actor!==null&&p.identity()===actor&&p.isForeground()&&
+     leaseCurrent(watchLeaseProof);
+ }
+ // STOP/expiry/handoff can retire the M3 lease while native GPS is silent.
+ // Do not wait for another location fix to release the OS watcher. A stale
+ // queued recheck must never stop a newer explicitly authorized generation.
+ function scheduleLeaseRecheck(epoch:number){
+   if(watchLeaseProof===null||epoch!==generation||phase!=='watching')return;
+   leaseRecheckTimer=p.schedule(()=>{
+     if(epoch!==generation||phase!=='watching')return;
+     leaseRecheckTimer=null;
+     if(!active(epoch)){stop();return;}
+     // A user can revoke Android/iOS foreground location permission while
+     // the native watcher is silent. The publisher lease may still be valid,
+     // so lease proof alone is insufficient to release the OS subscription.
+     // Do not request permission again: only read current OS authorization.
+     // This check is v2-only, never runs on a watcher without lease proof.
+     // Android/iOS can leave a read-only OS permission promise unresolved.
+    // Race it against a bounded local deadline, or the 5s lease watcher
+    // would stop checking a retired publisher lease while GPS is silent.
+    // The deadline belongs to THIS generation; an old continuation must
+    // never cancel a replacement watcher's timer.
+    let ownDeadline:unknown=null;
+    const deadline=new Promise<boolean>(resolve=>{
+      ownDeadline=p.schedule(()=>{
+        if(permissionReadTimer===ownDeadline)permissionReadTimer=null;
+        resolve(false);
+      },M4_WATCH_PERMISSION_READ_MAX_MS);
+      permissionReadTimer=ownDeadline;
+    });
+    const cancelDeadline=()=>{
+      if(permissionReadTimer===ownDeadline){
+        p.cancel(ownDeadline);permissionReadTimer=null;
+      }
+    };
+    void Promise.race([Promise.resolve().then(()=>p.hasPermission()),deadline])
+      .then(granted=>{
+        cancelDeadline();
+        if(epoch!==generation||phase!=='watching')return;
+        if(!active(epoch)){stop();return;}
+        if(granted!==true){stop();p.onFailure();return;}
+        scheduleLeaseRecheck(epoch);
+      }).catch(()=>{
+        cancelDeadline();
+        if(epoch!==generation||phase!=='watching')return;
+        const warn=active(epoch);
+        stop();
+        if(warn)p.onFailure();
+      });
+   },M4_WATCH_LEASE_RECHECK_MS);
  }
  async function start(zoneOwnerUid:string,relationshipApproved:boolean){
    if(disposed||phase!=='off'||!relationshipApproved||!UID.test(zoneOwnerUid))
@@ -56,7 +123,13 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
    const uid=p.identity();
    if(!uid||!UID.test(uid)||uid===zoneOwnerUid||!p.isForeground())
      return false;
-   actor=uid;owner=zoneOwnerUid;
+   // A consented friendship is not itself a valid device-publisher lease.
+   // Deny before asking the OS for GPS or binding a native watcher.
+   let proof:(()=>boolean)|null=null;
+   try{proof=p.captureWatchLeaseProof?.(zoneOwnerUid)??null;}
+   catch{return false;}
+   if(!leaseCurrent(proof))return false;
+   actor=uid;owner=zoneOwnerUid;watchLeaseProof=proof;
    const epoch=++generation;
    notify('starting');
    try{
@@ -78,14 +151,22 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      const sub=await p.watch(fix=>{void observe(fix,epoch);},()=>{
        if(active(epoch)){stop();p.onFailure();}
      });
-     // Permission or Firebase identity can change while the native watcher
-     // subscription is being established. Recheck AFTER the async bind and
-     // release its native handle before returning; otherwise a late bind can
-     // strand this controller in 'starting' with an unowned GPS subscription.
+     // A late native bind must be released even if STOP retired its start.
+     // Once the bind succeeds, own the subscription BEFORE awaiting the
+     // second OS permission read. Otherwise STOP/dispose during a delayed
+     // permission read cannot remove the already-installed native watcher.
+     if(!active(epoch)){
+       sub.remove();
+       if(epoch===generation)stop();
+       return false;
+     }
+     watcher=sub;
      let stillPermitted=false;
      try{stillPermitted=await p.hasPermission();}catch{/* fail closed */}
      if(!active(epoch)||!stillPermitted){
-       sub.remove();
+       // STOP may already have removed this handle. Never remove it twice,
+       // and never touch a newer generation's native watcher.
+       if(watcher===sub){watcher=null;sub.remove();}
        if(epoch===generation){
          const warn=active(epoch)&&!stillPermitted;
          stop();
@@ -93,12 +174,12 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
        }
        return false;
      }
-     watcher=sub;
      notify('watching');
      // Android/JS may run a timeout callback already queued before cancel().
      // Only this exact opt-in watcher may expire itself: a retired timeout
      // must not terminate a newer consented foreground watcher.
      timer=p.schedule(()=>{if(epoch===generation)stop();},M4_WATCH_MAX_MS);
+     scheduleLeaseRecheck(epoch);
      return true;
    }catch{
      // Android can reject a permission prompt or native watch bind AFTER a
@@ -129,7 +210,9 @@ export function createM4ForegroundZoneWatch(p:M4WatchPorts){
      // Firebase account changes may happen while it is pending. Recheck the
      // same watcher generation AFTER the await, before any subject-only alert.
      const stillPermitted=await p.hasPermission();
-     if(!stillPermitted||!active(epoch))throw Error('revoked');
+     if(!stillPermitted||!active(epoch)||
+        (p.isEvaluationStillAuthorized!==undefined&&
+         !p.isEvaluationStillAuthorized(destination)))throw Error('revoked');
      if(event==='enter'||event==='exit')p.onEvent(event);
    }catch{
      if(!disposed&&epoch===generation){
