@@ -574,3 +574,71 @@ test('M3 v2 pre-network START preflight: hung Firebase JWT cannot send late STAR
  assert.equal((await x.transport.start(PEER)).enabled,true);
  assert.deepEqual(x.calls.map(c=>c.path),['/v2/locations/sessions/start']);
 });
+
+
+test('M3 v2 whole-HTTP deadline rejects a fetch ignoring AbortSignal and fences late START ACK',async()=>{
+ let releaseFetch,fetchEntered;
+ const gate=new Promise(resolve=>{releaseFetch=resolve;});
+ const entered=new Promise(resolve=>{fetchEntered=resolve;});
+ let sends=0,firstSignal;
+ const x=harness({timeoutMs:1000,fetchImpl:async(url,opts)=>{
+   assert.equal(new URL(url).pathname,'/v2/locations/sessions/start');
+   sends++;
+   if(sends===1){
+     firstSignal=opts.signal;
+     fetchEntered();
+     await gate; // Simulate a native/polyfilled fetch ignoring abort.
+   }
+   return {ok:true,status:200,json:async()=>({
+     enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+   })};
+ }});
+ const pending=x.transport.start(PEER);
+ await entered;
+ await assert.rejects(pending,/UNAVAILABLE/,
+   'v2 START must settle even if an already-dispatched fetch ignores abort');
+ assert.equal(firstSignal.aborted,true);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
+ releaseFetch();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null,
+   'late successful HTTP ACK must not resurrect a timed-out local capability');
+ assert.equal((await x.transport.start(PEER)).enabled,true,
+   'only a separately authorized START can acquire a fresh local capability');
+ assert.equal(sends,2);
+});
+
+test('M3 v2 whole-HTTP deadline bounds hung STOP response.json and retains STOP intent for retry',async()=>{
+ let releaseBody,bodyEntered,stops=0;
+ const bodyGate=new Promise(resolve=>{releaseBody=resolve;});
+ const entered=new Promise(resolve=>{bodyEntered=resolve;});
+ const x=harness({timeoutMs:1000,fetchImpl:async(url)=>{
+   const path=new URL(url).pathname;
+   if(path.endsWith('/start'))return {ok:true,status:200,json:async()=>({
+     enabled:true,expiresAtMs:Date.now()+50_000,sessionToken:CAP
+   })};
+   if(path.endsWith('/stop')){
+     stops++;
+     if(stops===1)return {ok:true,status:200,json:()=>{
+       bodyEntered();return bodyGate; // A response body reader ignoring abort.
+     }};
+     return {ok:true,status:200,json:async()=>({enabled:false})};
+   }
+   throw Error('GPS_MUST_NOT_RESUME_AFTER_STOP');
+ }});
+ await x.transport.start(PEER);
+ const stopping=x.transport.stop(PEER);
+ await entered;
+ await assert.rejects(stopping,/UNAVAILABLE/,
+   'hung JSON body must not prevent a confirmed retry');
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
+ await assert.rejects(x.transport.publish(PEER,fix()),/UNAVAILABLE/,
+   'failed STOP must retain the local no-GPS consent latch');
+ releaseBody({enabled:false});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null,
+   'late first STOP body cannot restore the retired capability');
+ assert.deepEqual(await x.transport.stop(PEER),{enabled:false});
+ assert.equal(stops,2);
+ assert.equal(x.transport.getPublisherSessionToken(SELF,PEER),null);
+});
