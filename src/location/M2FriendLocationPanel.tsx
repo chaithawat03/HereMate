@@ -158,7 +158,7 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
     relations:friends,reads:positions,nowMs:now}):[],[activeUid,friends,positions,now]);
 
   function requestExternalMap(peerUid:string){
-    const viewerUid=session.current;
+    const viewerUid=session.current,requestEpoch=epoch.current;
     if((Platform.OS!=='android'&&Platform.OS!=='ios')||!backendReviewedAndEnabled||
        !viewerUid||getStagingGuestAuth().currentUser?.uid!==viewerUid||
        AppState.currentState!=='active'||
@@ -175,14 +175,14 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
         {text:language==='th'?'เปิดแผนที่':'Open Maps',onPress:()=>{
           void (async()=>{
             try{
-              if(!alive.current||session.current!==viewerUid||
+              if(!alive.current||epoch.current!==requestEpoch||session.current!==viewerUid||
                  AppState.currentState!=='active'||
                  !authorizedPeers(viewerUid,friends).some(p=>p.uid===peerUid))return;
               // Re-read AFTER confirmation. Cloud Run checks current M1
               // friendship, both consents and the active M2 grant on each call.
               // A revoked/stale fix must never be passed to an external app.
               const response=await transport.read(peerUid);
-              if(!alive.current||session.current!==viewerUid||
+              if(!alive.current||epoch.current!==requestEpoch||session.current!==viewerUid||
                  getStagingGuestAuth().currentUser?.uid!==viewerUid||
                  AppState.currentState!=='active')return;
               const current=validatedRemoteFix(response,Date.now());
@@ -225,8 +225,12 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
         :'Optional foreground-only friend map updates every 30 seconds. Reads authorized friends only; does not share your GPS.'}</Text>
       <Pressable accessibilityRole="button" style={s.refresh}
         onPress={()=>{
-          if(autoRefreshing)poller.current?.stop();
-          else poller.current?.start();
+          if(autoRefreshing){
+            // Explicit Stop retires the current read generation and any
+            // pending external Maps handoff; a late HTTPS result stays hidden.
+            // This is a local viewer opt-out, not a remote sharing STOP.
+            clear();
+          }else poller.current?.start();
         }}>
         <Text style={s.refreshText}>{autoRefreshing?
           (language==='th'?'หยุดอัปเดตอัตโนมัติ':'Stop live updates'):
