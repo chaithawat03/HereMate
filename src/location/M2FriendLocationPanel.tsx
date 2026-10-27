@@ -192,8 +192,8 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
               if(!uri)throw Error('location_unavailable');
               await Linking.openURL(uri);
             }catch{
-              if(alive.current&&session.current===viewerUid&&
-                 AppState.currentState==='active')
+              if(alive.current&&epoch.current===requestEpoch&&
+                 session.current===viewerUid&&AppState.currentState==='active')
                 Alert.alert(
                   language==='th'?'ไม่สามารถเปิดแผนที่ได้':'Maps unavailable',
                   language==='th'
