@@ -201,9 +201,10 @@ test('viewer Stop retires an in-flight friend-map read and external Maps handoff
   await flush();
   assert.deepEqual(outcomes,[null],'late private result cannot repopulate map');
   const panel=readFileSync(new URL('../src/location/M2FriendLocationPanel.tsx',import.meta.url),'utf8');
-  assert.match(panel,/if\\(autoRefreshing\\)\\{[\\s\\S]*?clear\\(\\);/);
-  assert.match(panel,/const viewerUid=session\\.current,requestEpoch=epoch\\.current;/);
-  assert.equal((panel.match(/epoch\\.current!==requestEpoch/g)||[]).length,2,
+  assert.ok(panel.includes('if(autoRefreshing){'));
+  assert.ok(panel.includes('}else poller.current?.start();'));
+  assert.ok(panel.includes('const viewerUid=session.current,requestEpoch=epoch.current;'));
+  assert.equal(panel.split('epoch.current!==requestEpoch').length-1,2,
     'external Maps confirmation and late HTTPS response must both be fenced');
   assert.ok(panel.includes('const clear=useCallback'));
   assert.ok(panel.includes('++epoch.current'));
