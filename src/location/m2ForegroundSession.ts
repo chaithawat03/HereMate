@@ -61,6 +61,9 @@ export function createForegroundSharingController(p:SharePorts) {
   let inRemoteStart:Promise<{enabled:boolean;expiresAtMs:number}>|null=null;
   let inPublish:Promise<void>|null=null, inStop:Promise<void>|null=null;
   let lastPublishAt=-Infinity,activeOwner:string|null=null;
+  // Distinguish a local-only START prompt from a request that could have
+  // created a server grant, even if the HTTP ACK was lost.
+  let remoteStartAttempted=false;
   const publishState=(next:SharingState)=>{
     state=next;
     if(!disposed)p.onState(next);
@@ -89,10 +92,19 @@ export function createForegroundSharingController(p:SharePorts) {
       // permission prompt or native GPS watcher bind before server STOP.
       const remoteStart=inRemoteStart;
       if(remoteStart===null)inStart=null; // a retired local prompt must not block a new opt-in
+      if(!remoteStartAttempted){
+        // No authenticated START request was ever issued: a stalled OS
+        // permission prompt cannot create a server grant. In v2, calling
+        // STOP here would falsely report stop-unconfirmed (no bearer exists).
+        inStart=null;
+        publishState(off);
+        return;
+      }
       await Promise.allSettled([remoteStart,inPublish].filter(Boolean));
       try {
         const result=await p.transport.stop(peer);
         if(result.enabled!==false)throw Error('unconfirmed');
+        remoteStartAttempted=false;
         publishState(off);
       }catch{
         // Do not claim remote sharing is stopped: a 60s backend TTL limits
@@ -112,7 +124,7 @@ export function createForegroundSharingController(p:SharePorts) {
     // server STOP response. A failed/timeout request must keep the UI in
     // stop-unconfirmed; never silently switch to OFF.
     if(!disposed&&state.phase==='stop-unconfirmed'&&state.peerUid===peerUid){
-      ++epoch;activeOwner=null;cancelLocal();publishState(off);
+      ++epoch;activeOwner=null;remoteStartAttempted=false;cancelLocal();publishState(off);
     }
   }
   async function start(peerUid:string,relation:ShareRelation):Promise<void> {
@@ -125,6 +137,7 @@ export function createForegroundSharingController(p:SharePorts) {
     const active=()=>!disposed&&run===epoch&&p.ownerUid()===owner&&p.isForeground();
     lastPublishAt=-Infinity;
     activeOwner=owner;
+    remoteStartAttempted=false;
     publishState({phase:'starting',peerUid,expiresAtMs:null,error:null});
     const task=(async()=>{
       // A timed-out START may have committed a remote grant even without an
@@ -138,6 +151,7 @@ export function createForegroundSharingController(p:SharePorts) {
         }
         if(!permitted){activeOwner=null;publishState({...off,error:'permission'});return;}
         remoteGrantPossible=true;
+        remoteStartAttempted=true;
         const remoteStart=p.transport.start(peerUid);
         inRemoteStart=remoteStart;
         let grant:{enabled:boolean;expiresAtMs:number};
