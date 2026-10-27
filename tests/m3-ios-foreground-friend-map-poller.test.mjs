@@ -209,3 +209,26 @@ test('viewer Stop retires an in-flight friend-map read and external Maps handoff
   assert.ok(panel.includes('const clear=useCallback'));
   assert.ok(panel.includes('++epoch.current'));
 });
+
+test('viewer poller transport replacement clears opt-in UI without auto-restarting GPS or map reads',async()=>{
+  // dispose() deliberately suppresses its onActive(false) callback; the
+  // mounted panel must clear visible autoRefreshing itself on replacement.
+  const x=rig();
+  assert.equal(x.controller.start(),true);
+  await flush();
+  assert.deepEqual(x.events,[true]);
+  const oldTick=x.intervals[0].fn;
+  x.controller.dispose();
+  assert.deepEqual(x.events,[true],
+    'poller dispose does not deliver a React state reset by itself');
+  oldTick();await flush();
+  assert.equal(x.reads(),1,'retired interval cannot resume reads');
+
+  const panel=readFileSync(new URL('../src/location/M2FriendLocationPanel.tsx',import.meta.url),'utf8');
+  assert.match(panel,/if\(!backendReviewedAndEnabled\|\|\s*!\['android','ios'\]\.includes\(Platform\.OS\)\)\{\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*setAutoRefreshing\(false\)/);
+  assert.match(panel,/controller\.dispose\(\);\s*if\(poller\.current===controller\)\{\s*poller\.current=null;\s*if\(alive\.current\)setAutoRefreshing\(false\)/);
+  const replacement=rig();
+  assert.equal(replacement.controller.isActive(),false,
+    'new transport never inherits old viewer opt-in');
+  assert.equal(replacement.reads(),0);
+});
