@@ -61,7 +61,7 @@ test('owner-only Google-enabled M2 APK must pass signing gate BEFORE artifact up
   assert.match(workflow,/EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN: 'true'/);
   assert.match(workflow,/apksigner.*verify --verbose --print-certs/);
   assert.match(workflow,/aapt.*dump badging/);
-  assert.match(workflow,/heremate-android-package\\.txt/);
+  assert.match(workflow,/heremate-android-package\.txt/);
   assert.match(workflow,/node scripts\/verify-android-google-oauth-signer\.mjs/);
   const gate=workflow.indexOf('Verify signed APK Google OAuth certificate');
   const artifact=workflow.indexOf('Retain ONE Android Staging APK');
