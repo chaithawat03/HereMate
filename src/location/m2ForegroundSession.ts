@@ -56,6 +56,9 @@ export function freshShareFix(fix:ShareFix,now:number):boolean {
 export function createForegroundSharingController(p:SharePorts) {
   let state:SharingState=off, epoch=0, disposed=false;
   let watch:Unsubscribe|null=null, alarm:unknown=null, inStart:Promise<void>|null=null;
+  // A pending remote START can create a grant; a stalled OS permission or
+  // native watch bind cannot. STOP waits only for the remote operation.
+  let inRemoteStart:Promise<{enabled:boolean;expiresAtMs:number}>|null=null;
   let inPublish:Promise<void>|null=null, inStop:Promise<void>|null=null;
   let lastPublishAt=-Infinity,activeOwner:string|null=null;
   const publishState=(next:SharingState)=>{
@@ -81,9 +84,12 @@ export function createForegroundSharingController(p:SharePorts) {
     if(!peer){publishState(off);return;}
     publishState({phase:'stopping',peerUid:peer,expiresAtMs:null,error:null});
     const task=(async()=>{
-      // Stop is serialized after outstanding Start/Publish: otherwise a late
-      // network response could recreate an apparently revoked live fix.
-      await Promise.allSettled([inStart,inPublish].filter(Boolean));
+      // Serialize behind a remote START (which may still commit a grant)
+      // and an outgoing GPS publish, but never await an unbounded local OS
+      // permission prompt or native GPS watcher bind before server STOP.
+      const remoteStart=inRemoteStart;
+      if(remoteStart===null)inStart=null; // a retired local prompt must not block a new opt-in
+      await Promise.allSettled([remoteStart,inPublish].filter(Boolean));
       try {
         const result=await p.transport.stop(peer);
         if(result.enabled!==false)throw Error('unconfirmed');
@@ -132,7 +138,11 @@ export function createForegroundSharingController(p:SharePorts) {
         }
         if(!permitted){activeOwner=null;publishState({...off,error:'permission'});return;}
         remoteGrantPossible=true;
-        const grant=await p.transport.start(peerUid);
+        const remoteStart=p.transport.start(peerUid);
+        inRemoteStart=remoteStart;
+        let grant:{enabled:boolean;expiresAtMs:number};
+        try{grant=await remoteStart;}
+        finally{if(inRemoteStart===remoteStart)inRemoteStart=null;}
         if(!active()){
           // An auth/AppState callback may lag behind the actual account or
           // foreground change. Revoke a possibly committed grant even when
