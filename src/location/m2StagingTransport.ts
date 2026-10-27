@@ -163,6 +163,11 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     return peerUid;
   };
   return Object.freeze({
+    // Only v2's Firestore transaction validates the live grant on every
+    // PUBLISH and atomically deletes it on STOP. Thus an already-sent late
+    // PUBLISH cannot restore sharing after STOP commits. Legacy v1 remains
+    // serialized behind in-flight publishes in the sharing controller.
+    stopMayOvertakePublish:ports.useDeviceSessions===true,
     signalStopIntent(){
       // This is a local, non-network consent withdrawal. M2/v1 has no
       // publisher capability and retains its original STOP behavior.
