@@ -25,12 +25,13 @@ async function bounded(promise){
     })]);
   }finally{clearTimeout(timer);}
 }
-function rig({permission=async()=>true,watch=async()=>({remove(){}})}={}){
+function rig({permission=async()=>true,watch=async()=>({remove(){}}),
+  transportPermission=async()=>true}={}){
   const sent=[];
   const transport=createM2StagingTransport({
     approvedCloudRunUrl:ORIGIN,projectId:'heremate',useDeviceSessions:true,
     currentIdentity:()=>({uid:OWNER,getIdToken:async()=>TOKEN}),
-    isForeground:()=>true,foregroundPermissionGranted:async()=>true,
+    isForeground:()=>true,foregroundPermissionGranted:transportPermission,
     fetchImpl:async url=>{
       const path=new URL(url).pathname;
       sent.push(path);
@@ -96,4 +97,50 @@ test('v2 STOP during hung OS permission never sends a START or false unauthentic
   assert.deepEqual(x.sent,[
     '/v2/locations/sessions/start','/v2/locations/sessions/stop'
   ]);
+});
+
+
+test('v2 STOP overtakes a hung GPS permission read, and fresh consent is not blocked by retired publish',async()=>{
+  const permissionGate=deferred(),permissionEntered=deferred();
+  let holdPermission=false,onNativeFix;
+  const x=rig({
+    watch:async onFix=>{onNativeFix=onFix;return {remove(){}};},
+    transportPermission:async()=>{
+      if(holdPermission){
+        permissionEntered.resolve();
+        await permissionGate.promise;
+      }
+      return true;
+    }
+  });
+  await bounded(x.controller.start(PEER,relation));
+  assert.equal(x.controller.getState().phase,'sharing');
+  holdPermission=true;
+  onNativeFix({latitude:13.7,longitude:100.5,accuracyMeters:12,
+    capturedAtMs:Date.now()});
+  await bounded(permissionEntered.promise);
+  const stopping=x.controller.stop();
+  assert.equal(x.transport.getPublisherSessionToken(OWNER,PEER),null,
+    'the original STOP tap must immediately retire the M4 capability');
+  await bounded(stopping);
+  assert.equal(x.controller.getState().phase,'off');
+  assert.deepEqual(x.sent,[
+    '/v2/locations/sessions/start','/v2/locations/sessions/stop'
+  ],'server STOP must not wait for a hung pre-send native permission read');
+  holdPermission=false;
+  permissionGate.resolve();
+  await flush();
+  await flush();
+  assert.equal(x.sent.filter(path=>path.endsWith('/publish')).length,0,
+    'retired GPS cannot POST after the old native read eventually resolves');
+  await bounded(x.controller.start(PEER,relation));
+  assert.equal(x.controller.getState().phase,'sharing');
+  onNativeFix({latitude:13.7,longitude:100.5,accuracyMeters:12,
+    capturedAtMs:Date.now()});
+  await flush();
+  await flush();
+  assert.equal(x.sent.filter(path=>path.endsWith('/publish')).length,1,
+    'an abandoned old publish must not block new explicitly consented GPS');
+  await bounded(x.controller.stop());
+  assert.equal(x.controller.getState().phase,'off');
 });
