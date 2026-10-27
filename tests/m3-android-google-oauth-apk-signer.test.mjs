@@ -39,15 +39,15 @@ test('rejects ambiguous, missing, malformed and multiple signers even if one mat
 
 
 test('compiled APK package must match the registered Google Android OAuth application ID',()=>{
-  const good="package: name='com.chaithawat03.heremate' versionCode='1' versionName='0.1.0'\\n";
+  const good="package: name='com.chaithawat03.heremate' versionCode='1' versionName='0.1.0'\n";
   assert.deepEqual(verifyAndroidGoogleOAuthPackage(good),
     {status:'MATCH',packageName:'com.chaithawat03.heremate'});
   for(const bad of [
-    '',"package: name='com.chaithawat03.heremate.debug' versionCode='1'\\n",
-    "package: name='com.attacker.heremate' versionCode='1'\\n",
-    "package: name='com.chaithawat03.heremate'\\npackage: name='com.chaithawat03.heremate'\\n",
-    "package: name='com.chaithawat03.heremate\\n",
-    "package: name='com.chaithawat03.heremate.extra'\\n",
+    '',"package: name='com.chaithawat03.heremate.debug' versionCode='1'\n",
+    "package: name='com.attacker.heremate' versionCode='1'\n",
+    "package: name='com.chaithawat03.heremate'\npackage: name='com.chaithawat03.heremate'\n",
+    "package: name='com.chaithawat03.heremate\n",
+    "package: name='com.chaithawat03.heremate.extra'\n",
     'x'.repeat(131073)
   ]){
     assert.throws(()=>verifyAndroidGoogleOAuthPackage(bad),
