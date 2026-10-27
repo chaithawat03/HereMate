@@ -469,17 +469,23 @@ test('M3 owner STOP tap fences M4 capability before the sharing controller waits
  assert.equal(transport.getPublisherSessionToken(SELF,PEER),CAP);
  nativeFix(fix());
  await entered;
- // Controller STOP waits for in-flight publish, but user consent withdrawal
- // must be immediate even before the remote STOP route is dispatched.
+ // V2 Firestore PUBLISH cannot recreate a grant after transactional STOP.
+ // The remote STOP must not wait for an arbitrarily stalled GPS HTTP ACK.
  const stopping=controller.stop();
  assert.equal(transport.getPublisherSessionToken(SELF,PEER),null,
    'M4 must lose its bearer synchronously at the STOP tap');
- assert.equal(sent.filter(p=>p.endsWith('/stop')).length,0,
-   'remote STOP correctly waits for the earlier publish');
+ let stopTimer;
+ try{
+   await Promise.race([stopping,new Promise((_,reject)=>{
+     stopTimer=setTimeout(()=>reject(Error('V2_STOP_WAITED_FOR_GPS_ACK')),750);
+   })]);
+ }finally{clearTimeout(stopTimer);}
+ assert.equal(sent.filter(p=>p.endsWith('/stop')).length,1,
+   'v2 STOP overtakes the stalled publish while retaining server ordering safety');
  await assert.rejects(transport.publish(PEER,fix()),/UNAVAILABLE/,
-   'no new GPS may leave while controller waits for old publish');
+   'no new GPS may leave after explicit STOP');
  releasePublish();
- await stopping;
+ await new Promise(resolve=>setImmediate(resolve));
  assert.equal(controller.getState().phase,'off');
  assert.deepEqual(sent,[
    '/v2/locations/sessions/start',
