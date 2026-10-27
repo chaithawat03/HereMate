@@ -94,6 +94,65 @@ test('pending old iOS account HTTP batch cannot block or unlock new account',asy
   x.controller.stop();
 });
 
+test('iOS activation callback can dispose synchronously without installing a map timer',async()=>{
+  let controller,reads=0,timers=0;
+  const x=rig({
+    scheduleInterval:()=>{timers++;return {id:1};},
+    refresh:async()=>{reads++;},
+    onActive:active=>{if(active)controller.dispose();}
+  });
+  controller=x.controller;
+  assert.equal(controller.start(),false);
+  assert.equal(controller.isActive(),false);
+  assert.equal(controller.start(),false);
+  await flush();
+  assert.equal(timers,0);
+  assert.equal(reads,0);
+});
+
+test('iOS old-account activation cannot overwrite a replacement opt-in timer',async()=>{
+  let controller,uid=A,reads=0;
+  const timers=[];
+  const x=rig({
+    currentUid:()=>uid,
+    scheduleInterval:fn=>{const h={fn,cancelled:false};timers.push(h);return h;},
+    cancelInterval:h=>{h.cancelled=true;},
+    refresh:async()=>{reads++;},
+    onActive:active=>{
+      if(active&&uid===A){
+        controller.stop();
+        uid=B;
+        assert.equal(controller.start(),true);
+      }
+    }
+  });
+  controller=x.controller;
+  assert.equal(controller.start(),false);
+  await flush();
+  assert.equal(controller.isActive(),true);
+  assert.equal(timers.length,1);
+  assert.equal(timers[0].cancelled,false);
+  assert.equal(reads,1,'only the replacement account may read');
+  controller.stop();
+  assert.equal(timers[0].cancelled,true);
+});
+
+test('iOS synchronous STOP during timer bind cancels the late native handle',async()=>{
+  let controller,reads=0,cancelled=0,returned;
+  const x=rig({
+    scheduleInterval:fn=>{returned={fn};controller.stop();return returned;},
+    cancelInterval:h=>{assert.equal(h,returned);cancelled++;},
+    refresh:async()=>{reads++;},
+    onActive:()=>{}
+  });
+  controller=x.controller;
+  assert.equal(controller.start(),false);
+  assert.equal(controller.isActive(),false);
+  assert.equal(cancelled,1);
+  returned.fn();await flush();
+  assert.equal(reads,0);
+});
+
 test('iOS foreground map uses existing server ACL; no GPS/push or EAS auto-enable',()=>{
   const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
   const panel=read('src/location/M2FriendLocationPanel.tsx');
