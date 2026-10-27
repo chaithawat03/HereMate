@@ -78,6 +78,40 @@ test('missing v2 route, generic gateway 405, wrong method behavior, cache, CORS,
   await denied({origin:APPROVED,approved:true,fetchImpl:async()=>response(405)}); // generic gateway 405 even for unknown path
 });
 
+test('read-only probe bounds an abort-ignoring HTTPS fetch and never probes a second route',async()=>{
+  let requests=0;
+  await denied({origin:APPROVED,approved:true,deadlineMs:25,
+    fetchImpl:async()=>{
+      requests++;
+      return new Promise(()=>{}); // ignores AbortSignal forever
+    }});
+  assert.equal(requests,1);
+});
+
+test('read-only probe bounds stalled response.json and ignores a late valid body',async()=>{
+  let requests=0,releaseJson;
+  const probe=runM3V2StagingRouteSmoke({origin:APPROVED,approved:true,
+    deadlineMs:25,fetchImpl:async()=>{
+      requests++;
+      return {...response(),json:()=>new Promise(resolve=>{releaseJson=resolve;})};
+    }});
+  await assert.rejects(probe,/M3_V2_ROUTE_SMOKE_BLOCKED/);
+  assert.equal(requests,1);
+  assert.equal(typeof releaseJson,'function');
+  releaseJson({error:'method_not_allowed'});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(requests,1,'late response must not advance to a second route');
+});
+
+test('invalid route deadlines are denied before any network access',async()=>{
+  let requests=0;
+  for(const deadlineMs of [0,19,8001,Infinity,NaN,'8000',null]){
+    await denied({origin:APPROVED,approved:true,deadlineMs,
+      fetchImpl:async()=>{requests++;return response();}});
+  }
+  assert.equal(requests,0);
+});
+
 test('smoke is separate from app code and deploy scripts; approved origins match mobile transport',()=>{
   const script=readFileSync(new URL('../scripts/m3-v2-staging-readonly-smoke.mjs',import.meta.url),'utf8');
   const mobile=readFileSync(new URL('../src/location/m2StagingTransport.ts',import.meta.url),'utf8');
