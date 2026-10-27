@@ -79,6 +79,8 @@ jobs:
         run: node --test tests/m3-android-account-scoped-friend-map.test.mjs
       - name: M3 native transport capability memory safety (offline)
         run: node --test tests/m3-device-session-transport.test.mjs
+      - name: M3 v2 STOP during stalled native OS prompt and GPS bind (offline)
+        run: node --test tests/m3-v2-local-stop-race-integration.test.mjs
       - name: M3/M4 async Android OS permission identity and foreground race tests (offline)
         run: node --test tests/m3-m4-transport-permission-race.test.mjs
       - name: M3 publisher session V2 HTTP strict schema and identity (offline)
