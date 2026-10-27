@@ -49,3 +49,19 @@ test('iOS UI remains session-only, never registers push or background GPS',()=>{
   }
   assert.doesNotMatch(policy,/latitude|longitude|coordinate|locationHistory|console\.log|fetch\(/);
 });
+
+test('changing display language preserves the active native GPS watcher and updates alert copy',()=>{
+  const ui=read('src/geofences/M4GeofencePanel.tsx');
+  // A language-only preference change must not invoke watcher effect cleanup:
+  // dispose() would stop native GPS while the button still said "watching".
+  assert.match(ui,/const languageRef=useRef\(language\);/);
+  assert.match(ui,/useEffect\(\(\)=>\{languageRef\.current=language;\},\[language\]\);/);
+  const begin=ui.indexOf('const controller=createM4ForegroundZoneWatch({');
+  const end=ui.indexOf('},[backendReviewedAndEnabled,transport]);',begin);
+  assert.ok(begin>=0&&end>begin,'native watcher effect must not depend on language');
+  const watcherEffect=ui.slice(begin,end);
+  assert.equal((watcherEffect.match(/languageRef\.current==='th'/g)||[]).length,5,
+    'all five event and alert copy decisions use the current locale');
+  assert.doesNotMatch(watcherEffect,/language==='th'/);
+  assert.doesNotMatch(ui,/},\[backendReviewedAndEnabled,transport,language\]\);/);
+});
