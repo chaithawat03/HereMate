@@ -210,25 +210,52 @@ test('viewer Stop retires an in-flight friend-map read and external Maps handoff
   assert.ok(panel.includes('++epoch.current'));
 });
 
-test('viewer poller transport replacement clears opt-in UI without auto-restarting GPS or map reads',async()=>{
-  // dispose() deliberately suppresses its onActive(false) callback; the
-  // mounted panel must clear visible autoRefreshing itself on replacement.
-  const x=rig();
+test('viewer transport replacement invalidates pending reads, Maps handoff and visible opt-in',async()=>{
+  // dispose() intentionally suppresses onActive(false), so the panel must
+  // clear both UI state and the read epoch on a transport prop replacement.
+  let epoch=0,resolveRead,readStarted=0;
+  const pending=new Promise(resolve=>{resolveRead=resolve;});
+  const outcomes=[];
+  const x=rig({refresh:async()=>{
+    const run=epoch;
+    const snapshot=await loadAuthorizedFriendMap({
+      viewerUid:A,isCurrent:()=>run===epoch,
+      loadRelations:async()=>[{
+        id:'friend-relation',senderUid:A,recipientUid:B,
+        senderDisplayName:'Viewer',recipientDisplayName:'Friend',
+        status:'accepted',senderConsent:true,recipientConsent:true
+      }],
+      selectPeers:authorizedPeers,
+      readPeer:async()=>{readStarted++;return pending;}
+    });
+    outcomes.push(snapshot);
+  }});
   assert.equal(x.controller.start(),true);
   await flush();
+  assert.equal(readStarted,1);
   assert.deepEqual(x.events,[true]);
   const oldTick=x.intervals[0].fn;
   x.controller.dispose();
   assert.deepEqual(x.events,[true],
-    'poller dispose does not deliver a React state reset by itself');
+    'controller dispose alone cannot reset React autoRefreshing');
+  // The mounted panel cleanup calls clear(), retiring the old epoch.
+  epoch++;
+  resolveRead({point:{latitude:13,longitude:100,accuracyMeters:20,
+    capturedAtMs:1_800_000_000_000},expiresAtMs:1_800_000_020_000});
+  await flush();
+  assert.deepEqual(outcomes,[null],
+    'old transport cannot repaint private pins after replacement');
   oldTick();await flush();
-  assert.equal(x.reads(),1,'retired interval cannot resume reads');
+  assert.equal(readStarted,1,'old timer cannot resume private reads');
 
   const panel=readFileSync(new URL('../src/location/M2FriendLocationPanel.tsx',import.meta.url),'utf8');
   assert.match(panel,/if\(!backendReviewedAndEnabled\|\|\s*!\['android','ios'\]\.includes\(Platform\.OS\)\)\{\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*setAutoRefreshing\(false\)/);
-  assert.match(panel,/controller\.dispose\(\);\s*if\(poller\.current===controller\)\{\s*poller\.current=null;\s*if\(alive\.current\)setAutoRefreshing\(false\)/);
+  assert.match(panel,/controller\.dispose\(\);[\s\S]*?if\(poller\.current===controller\)\{[\s\S]*?poller\.current=null;[\s\S]*?clear\(\);\s*if\(alive\.current\)setAutoRefreshing\(false\)/);
+  assert.match(panel,/\},\[backendReviewedAndEnabled,refresh,clear\]\)/);
+  assert.ok(panel.includes('const viewerUid=session.current,requestEpoch=epoch.current;'),
+    'pending external Maps confirmation must share the retired epoch');
   const replacement=rig();
   assert.equal(replacement.controller.isActive(),false,
-    'new transport never inherits old viewer opt-in');
+    'replacement transport cannot inherit old viewer opt-in');
   assert.equal(replacement.reads(),0);
 });
