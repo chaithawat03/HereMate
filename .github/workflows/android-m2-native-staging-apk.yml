@@ -103,6 +103,29 @@ jobs:
           Path('android-m2-rc-manifest.json').write_text(json.dumps(record,indent=2)+'\n')
           print('ANDROID_M2_RC_APK_VERIFIED: sha256='+record['apkSha256'])
           PY
+      - name: Verify signed APK Google OAuth certificate before distribution
+        run: |
+          set -euo pipefail
+          if [ "$EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN" != 'true' ]; then
+            echo 'Google Sign-In disabled: no OAuth certificate claim'
+            exit 0
+          fi
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -d "$sdk_root/build-tools"
+          mapfile -t candidates < <(find "$sdk_root/build-tools" -mindepth 2 -maxdepth 2 -type f -name apksigner | sort -V)
+          test "${#candidates[@]}" -gt 0
+          apksigner="${candidates[${#candidates[@]}-1]}"
+          "$apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/heremate-android-signature.txt"
+          # Google Android OAuth binds BOTH the signing SHA-1 and the actual
+          # installed package. Inspect the compiled APK, not only app.json.
+          mapfile -t aapt_candidates < <(find "$sdk_root/build-tools" -mindepth 2 -maxdepth 2 -type f -name aapt | sort -V)
+          test "${#aapt_candidates[@]}" -gt 0
+          aapt="${aapt_candidates[${#aapt_candidates[@]}-1]}"
+          "$aapt" dump badging "$apk" > "$RUNNER_TEMP/heremate-android-package.txt"
+          node scripts/verify-android-google-oauth-signer.mjs \
+            "$RUNNER_TEMP/heremate-android-signature.txt" \
+            "$RUNNER_TEMP/heremate-android-package.txt"
       - name: Retain ONE Android Staging APK + SHA-256 manifest
         uses: actions/upload-artifact@v4
         with:
