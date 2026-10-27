@@ -37,40 +37,54 @@ export function validateM3V2StagingOrigin(input){
   return url.origin;
 }
 
-export async function runM3V2StagingRouteSmoke({origin,approved=false,fetchImpl=fetch}){
+export async function runM3V2StagingRouteSmoke({origin,approved=false,fetchImpl=fetch,deadlineMs=8000}){
   if(approved!==true)fail('explicit operator approval required');
   const base=validateM3V2StagingOrigin(origin);
   if(typeof fetchImpl!=='function')fail('invalid HTTPS client');
+  // Bound the complete GET and JSON body, even if a custom client ignores abort.
+  // Offline tests may shorten this timeout; operator calls cannot extend it.
+  if(!Number.isSafeInteger(deadlineMs)||deadlineMs<20||deadlineMs>8000)
+    fail('invalid route deadline');
   const results=[];
   // A generic gateway 405 for *every* path is not evidence of v2 routes.
   const probes=[...ROUTES.map(path=>({path,expected:405,error:'method_not_allowed'})),
     {path:NEGATIVE_CONTROL,expected:404,error:'not_found'}];
   for(const {path,expected,error} of probes){
-    let response;
-    try{
-      response=await fetchImpl(base+path,{
+    // One deadline covers fetch AND response.json(). A hung or abort-ignoring
+    // adapter must not stall route verification indefinitely. Late workers
+    // have no side effects and cannot mark a timed-out route as PASS.
+    const verify=async()=>{
+      const response=await fetchImpl(base+path,{
         method:'GET',
         redirect:'error',
         headers:{Accept:'application/json','Cache-Control':'no-store',
           Authorization:NON_CREDENTIAL_MARKER},
-        signal:AbortSignal.timeout(8000)
+        signal:AbortSignal.timeout(deadlineMs)
       });
-    }catch{fail('TLS/network/redirect failure at '+path);}
-    // Recognized POST-only route must reject GET with 405. An absent v2
-    // route returns 404, which must NOT be mistaken for successful rollout.
-    if(response?.status!==expected)fail('route presence/absence not verified at '+path);
-    const cache=response.headers?.get('cache-control')||'';
-    const mime=response.headers?.get('content-type')||'';
-    if(!/(?:^|,)\s*no-store\b/i.test(cache))fail('missing no-store at '+path);
-    if(!/^application\/json\b/i.test(mime))fail('non-JSON response at '+path);
-    if(response.headers.get('access-control-allow-origin')?.trim()==='*')
-      fail('wildcard CORS at '+path);
-    let body;
-    try{body=await response.json();}catch{fail('invalid JSON error response at '+path);}
-    if(!body||typeof body!=='object'||Array.isArray(body)||
-       Object.keys(body).length!==1||body.error!==error)
-      fail('unexpected route error contract at '+path);
-    results.push(Object.freeze({route:path,status:expected,result:'PASS'}));
+      if(response?.status!==expected)throw Error('unexpected route status');
+      const cache=response.headers?.get('cache-control')||'';
+      const mime=response.headers?.get('content-type')||'';
+      if(!/(?:^|,)\s*no-store\b/i.test(cache))throw Error('missing no-store');
+      if(!/^application\/json\b/i.test(mime))throw Error('non-JSON response');
+      if(response.headers.get('access-control-allow-origin')?.trim()==='*')
+        throw Error('wildcard CORS');
+      const body=await response.json();
+      if(!body||typeof body!=='object'||Array.isArray(body)||
+         Object.keys(body).length!==1||body.error!==error)
+        throw Error('unexpected route error contract');
+      return Object.freeze({route:path,status:expected,result:'PASS'});
+    };
+    let timer;
+    const deadline=new Promise((_,reject)=>{
+      timer=setTimeout(()=>reject(Error('route deadline exceeded')),deadlineMs);
+    });
+    try{
+      results.push(await Promise.race([verify(),deadline]));
+    }catch{
+      fail('route verification or deadline exceeded at '+path);
+    }finally{
+      clearTimeout(timer);
+    }
   }
   return Object.freeze({scope:'M3 v2 Staging route presence only — GET, invalid non-bearer marker, no real credentials/GPS',
     origin:base,verifiedRoutes:ROUTES.length,negativeControls:1,results});
