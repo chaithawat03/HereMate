@@ -5,6 +5,8 @@ import {
   createForegroundFriendMapPoller,ANDROID_FRIEND_MAP_POLL_MS,
   ANDROID_FRIEND_MAP_READ_LIMIT_PER_TICK,ANDROID_FRIEND_MAP_MAX_READS_PER_60S
 } from '../src/location/androidFriendMapPoller.ts';
+import {loadAuthorizedFriendMap} from '../src/location/accountScopedFriendMapRead.ts';
+import {authorizedPeers} from '../src/location/m2FriendLocationView.ts';
 
 const A='iosvieweraccount0001',B='iosvieweraccount0002';
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
@@ -169,4 +171,39 @@ test('iOS foreground map uses existing server ACL; no GPS/push or EAS auto-enabl
   assert.match(ios,/M2FriendLocationPanel/);
   assert.doesNotMatch(poller,/watchPositionAsync|startLocationUpdatesAsync|TaskManager|AsyncStorage|setDoc\(|addDoc\(|fetch\(/);
   assert.equal(eas.build['ios-guest-simulator'].env.EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND,undefined);
+});
+
+test('viewer Stop retires an in-flight friend-map read and external Maps handoff',async()=>{
+  let epoch=0,resolveRead,readStarted=0;
+  const pending=new Promise(resolve=>{resolveRead=resolve;});
+  const outcomes=[];
+  const x=rig({refresh:async()=>{
+    const run=epoch;
+    const result=await loadAuthorizedFriendMap({
+      viewerUid:A,isCurrent:()=>run===epoch,
+      loadRelations:async()=>[{
+        id:'friend-relation',senderUid:A,recipientUid:B,
+        senderDisplayName:'Viewer',recipientDisplayName:'Friend',
+        status:'accepted',senderConsent:true,recipientConsent:true
+      }],
+      selectPeers:authorizedPeers,
+      readPeer:async()=>{readStarted++;return pending;}
+    });
+    outcomes.push(result);
+  }});
+  assert.equal(x.controller.start(),true);
+  await flush();
+  assert.equal(readStarted,1,'authorized HTTPS read started before Stop');
+  // The mounted panel's Stop handler invokes clear(), incrementing epoch.
+  x.controller.stop();epoch++;
+  resolveRead({point:{latitude:13,longitude:100,accuracyMeters:20,
+    capturedAtMs:1_800_000_000_000},expiresAtMs:1_800_000_020_000});
+  await flush();
+  assert.deepEqual(outcomes,[null],'late private result cannot repopulate map');
+  const panel=readFileSync(new URL('../src/location/M2FriendLocationPanel.tsx',import.meta.url),'utf8');
+  assert.match(panel,/if\\(autoRefreshing\\)\\{[\\s\\S]*?clear\\(\\);/);
+  assert.match(panel,/const viewerUid=session\\.current,requestEpoch=epoch\\.current;/);
+  assert.equal((panel.match(/epoch\\.current!==requestEpoch/g)||[]).length,2,
+    'external Maps confirmation and late HTTPS response must both be fenced');
+  assert.match(panel,/const clear=useCallback\\(\\(\\)=>\\{[\\s\\S]*?\\+\\+epoch\\.current/);
 });
