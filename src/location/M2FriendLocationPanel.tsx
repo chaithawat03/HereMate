@@ -106,7 +106,12 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
   // unmount or user Stop. Never publish this viewer's GPS.
   useEffect(()=>{
     if(!backendReviewedAndEnabled||
-       !['android','ios'].includes(Platform.OS))return;
+       !['android','ios'].includes(Platform.OS)){
+      // A disabled backend or unsupported platform cannot retain an old
+      // opt-in UI state from a disposed foreground polling controller.
+      setAutoRefreshing(false);
+      return;
+    }
     const controller=createForegroundFriendMapPoller({
       isSupportedPlatform:()=>Platform.OS==='android'||Platform.OS==='ios',
       isForeground:()=>AppState.currentState==='active',
@@ -119,8 +124,14 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
     });
     poller.current=controller;
     return()=>{
+      // The poller intentionally suppresses onActive(false) during dispose
+      // to avoid reentrant teardown. React still needs its visible opt-in
+      // reset when a transport replacement retires this exact controller.
       controller.dispose();
-      if(poller.current===controller)poller.current=null;
+      if(poller.current===controller){
+        poller.current=null;
+        if(alive.current)setAutoRefreshing(false);
+      }
     };
   },[backendReviewedAndEnabled,refresh]);
 
