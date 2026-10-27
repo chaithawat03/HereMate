@@ -92,22 +92,39 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
     typeof value==='string'&&/^[0-9a-f]{64}$/.test(value);
   async function send(endpoint:string,payload:Readonly<Record<string,unknown>>,
     requireForeground:boolean):Promise<unknown> {
+    // Bound v2 START pre-network OS/Firebase awaits. Otherwise a hung
+    // native permission/JWT promise can hold owner STOP behind a remote
+    // START that has not even been sent. A timed-out await cannot later
+    // resume this send() and issue an unconsented START.
+    const preflightDeadline=endpoint==='/v2/locations/sessions/start'?
+      Date.now()+timeout:null;
+    const awaitPreflight=async <T>(work:Promise<T>):Promise<T>=>{
+      if(preflightDeadline===null)return work;
+      const remaining=preflightDeadline-Date.now();
+      if(remaining<=0)return unavailable();
+      let handle:ReturnType<typeof setTimeout>|null=null;
+      try {
+        return await Promise.race([work,new Promise<never>((_,reject)=>{
+          handle=setTimeout(()=>reject(Error('M2_LOCATION_TRANSPORT_UNAVAILABLE')),remaining);
+        })]);
+      }finally{if(handle!==null)clearTimeout(handle);}
+    };
     const first=ports.currentIdentity();
     if(!first)throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');
     if(!CODE.test(first.uid))unavailable();
     if(requireForeground&&(!ports.isForeground()||
-       await ports.foregroundPermissionGranted()!==true))unavailable();
+       await awaitPreflight(ports.foregroundPermissionGranted())!==true))unavailable();
     // The OS permission check is async. Identity/foreground may have changed
     // silently before the Firebase auth/AppState callbacks are delivered.
     if(ports.currentIdentity()?.uid!==first.uid||
        (requireForeground&&!ports.isForeground()))unavailable();
     let jwt:string;
-    try{jwt=await first.getIdToken();}
+    try{jwt=await awaitPreflight(first.getIdToken());}
     catch{return unavailable();}
     if(typeof jwt!=='string'||jwt.length<32||jwt.length>8192)unavailable();
     if(ports.currentIdentity()?.uid!==first.uid)unavailable();
     if(requireForeground&&(!ports.isForeground()||
-       await ports.foregroundPermissionGranted()!==true))unavailable();
+       await awaitPreflight(ports.foregroundPermissionGranted())!==true))unavailable();
     // Never send the captured bearer/GPS under a different live account or
     // after backgrounding while the final permission promise was pending.
     if(ports.currentIdentity()?.uid!==first.uid||
@@ -149,7 +166,7 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       // A permission revocation DURING an HTTPS request must not deliver
       // any coordinate response to the UI after the original permission check.
       if(requireForeground&&(!ports.isForeground()||
-         await ports.foregroundPermissionGranted()!==true))unavailable();
+         await awaitPreflight(ports.foregroundPermissionGranted())!==true))unavailable();
       // A late account/background transition during the final permission
       // await must not return another user's private response to the UI.
       if(ports.currentIdentity()?.uid!==first.uid||
