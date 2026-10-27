@@ -21,6 +21,7 @@ import type {Palette} from '../ui/preferencesModel';
 import type {GeofenceCircle,M4Transport} from './m4StagingTransport';
 import {createM4ForegroundZoneWatch,type M4WatchPhase} from './m4ForegroundZoneWatch';
 import {evaluateM4OneShotForegroundFix} from './m4OneShotForegroundFix';
+import {shouldPresentM4ForegroundAlert} from './m4ForegroundAlertPolicy';
 import {createAccountScopedFriendRefresh} from '../location/accountScopedFriendRefresh';
 
 type Props=Readonly<{transport:M4Transport;backendReviewedAndEnabled:boolean}>;
@@ -41,8 +42,12 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
  const [error,setError]=useState(false);
  const [message,setMessage]=useState('');
  const [watchPhase,setWatchPhase]=useState<M4WatchPhase>('off');
- // Session-only Android alert preference: OFF on every launch/revoke/background.
+ // Session-only Android/iOS foreground alert preference: OFF on every launch/revoke/background.
  const [foregroundAlerts,setForegroundAlerts]=useState(false);
+ // A locale change must not dispose an active 60-second native GPS watch.
+ // Keep alert copy current without rebuilding the watcher controller.
+ const languageRef=useRef(language);
+ useEffect(()=>{languageRef.current=language;},[language]);
  const alertsRef=useRef(false);
  const zoneWatch=useRef<ReturnType<typeof createM4ForegroundZoneWatch>|null>(null);
  const identity=useRef<string|null>(null);
@@ -133,19 +138,27 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      cancel:handle=>clearTimeout(handle as ReturnType<typeof setTimeout>),
      onPhase:phase=>{if(alive.current)setWatchPhase(phase);},
      onEvent:event=>{
-       if(!alive.current||AppState.currentState!=='active')return;
+       const panelUid=identity.current;
+       const currentUid=getStagingGuestAuth().currentUser?.uid??null;
+       // A late native callback must not show a previous account's event.
+       if(!alive.current||!panelUid||AppState.currentState!=='active'||
+          currentUid!==panelUid)return;
        setMessage(event==='enter'?
-         (language==='th'?'ยืนยันว่าเข้าสู่พื้นที่':'Confirmed zone entry'):
-         (language==='th'?'ยืนยันว่าออกจากพื้นที่':'Confirmed zone exit'));
+         (languageRef.current==='th'?'ยืนยันว่าเข้าสู่พื้นที่':'Confirmed zone entry'):
+         (languageRef.current==='th'?'ยืนยันว่าออกจากพื้นที่':'Confirmed zone exit'));
        // A notification is NEVER generated from a stale/ambiguous fix,
        // only a server-confirmed event returned to the tracked subject.
        // This is a local foreground alert, NOT an OS push subscription.
-       if(Platform.OS==='android'&&alertsRef.current){
+       if(shouldPresentM4ForegroundAlert({
+         platform:Platform.OS,currentUid,panelUid,
+         appActive:AppState.currentState==='active',
+         optedIn:alertsRef.current,event
+       })){
          Alert.alert(
-           language==='th'?'แจ้งเตือนพื้นที่ (HereMate)':'HereMate zone update',
+           languageRef.current==='th'?'แจ้งเตือนพื้นที่ (HereMate)':'HereMate zone update',
            event==='enter'?
-             (language==='th'?'ตรวจพบการเข้าสู่พื้นที่ที่อนุมัติแล้ว':'Entered your approved zone'):
-             (language==='th'?'ตรวจพบการออกจากพื้นที่ที่อนุมัติแล้ว':'Exited your approved zone')
+             (languageRef.current==='th'?'ตรวจพบการเข้าสู่พื้นที่ที่อนุมัติแล้ว':'Entered your approved zone'):
+             (languageRef.current==='th'?'ตรวจพบการออกจากพื้นที่ที่อนุมัติแล้ว':'Exited your approved zone')
          );
        }
      },
@@ -156,7 +169,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
      controller.dispose();
      if(zoneWatch.current===controller)zoneWatch.current=null;
    };
- },[backendReviewedAndEnabled,transport,language]);
+ },[backendReviewedAndEnabled,transport]);
  const reload=useCallback(async()=>{
    if(!backendReviewedAndEnabled||AppState.currentState!=='active')return;
    await friendGate.current?.run(listOwnRequests,(rows,user)=>{
@@ -365,7 +378,7 @@ export function M4GeofencePanel({transport,backendReviewedAndEnabled}:Props){
          'การเฝ้าดูพื้นที่เป็นตัวเลือก: ใช้ GPS เฉพาะตอนเปิดแอป สูงสุด 60 วินาที ต้องมี M2 sharing และพื้นที่ที่อีกฝ่ายอนุมัติแล้ว ไม่มี Push หรือการติดตามเบื้องหลัง',
          'Optional: watch the zone for up to 60 seconds while this app is open. Requires active M2 sharing and subject-approved zone. No push or background tracking'
        )}</Text>
-       {Platform.OS==='android'?<Pressable accessibilityRole="button"
+       {(Platform.OS==='android'||Platform.OS==='ios')?<Pressable accessibilityRole="button"
          accessibilityState={{checked:foregroundAlerts}}
          disabled={busy} style={s.secondary}
          onPress={()=>{
