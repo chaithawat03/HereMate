@@ -540,3 +540,37 @@ test('M3 STOP during delayed START cannot resurrect a publisher bearer from the 
    '/v2/locations/sessions/start','/v2/locations/sessions/stop'
  ]);
 });
+
+
+test('M3 v2 pre-network START preflight: hung OS permission times out with no late grant',async()=>{
+ let release,checks=0;
+ const hung=new Promise(resolve=>{release=resolve;});
+ const x=harness({
+   timeoutMs:1000,
+   foregroundPermissionGranted:()=>++checks===1?hung:Promise.resolve(true)
+ });
+ await assert.rejects(x.transport.start(PEER),/UNAVAILABLE/);
+ assert.equal(x.calls.length,0,'a hung native permission must never issue HTTP START');
+ release(true);
+ await Promise.resolve();await Promise.resolve();
+ assert.equal(x.calls.length,0,'a late native permission result cannot resume timed-out START');
+ assert.equal((await x.transport.start(PEER)).enabled,true,
+   'a new explicitly authorized START may proceed after preflight timeout');
+ assert.deepEqual(x.calls.map(c=>c.path),['/v2/locations/sessions/start']);
+});
+
+test('M3 v2 pre-network START preflight: hung Firebase JWT cannot send late START',async()=>{
+ let release,tokens=0;
+ const hung=new Promise(resolve=>{release=resolve;});
+ const x=harness({
+   timeoutMs:1000,
+   currentIdentity:()=>({uid:SELF,getIdToken:()=>++tokens===1?hung:Promise.resolve(TOKEN)})
+ });
+ await assert.rejects(x.transport.start(PEER),/UNAVAILABLE/);
+ assert.equal(x.calls.length,0,'JWT await timeout must not create a remote grant');
+ release(TOKEN);
+ await Promise.resolve();await Promise.resolve();
+ assert.equal(x.calls.length,0,'old JWT cannot cause a late HTTP START');
+ assert.equal((await x.transport.start(PEER)).enabled,true);
+ assert.deepEqual(x.calls.map(c=>c.path),['/v2/locations/sessions/start']);
+});
