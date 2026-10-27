@@ -72,12 +72,43 @@ export function createForegroundFriendMapPoller(p:ForegroundFriendMapPollPorts){
    if(!uid||!UID.test(uid))return false;
    const run=++generation;
    actor=uid;active=true;
-   p.onActive(true);
-   handle=p.scheduleInterval(()=>{void tick(run);},ANDROID_FRIEND_MAP_POLL_MS);
+   // The UI activation callback can synchronously stop/dispose or replace
+   // this account's opt-in. Never resurrect its old timer afterwards.
+   try{p.onActive(true);}
+   catch{
+     if(run===generation){++generation;actor=null;active=false;}
+     return false;
+   }
+   if(!allowed(run)){
+     if(run===generation)stop();
+     return false;
+   }
+   let scheduled:unknown;
+   try{
+     scheduled=p.scheduleInterval(()=>{void tick(run);},ANDROID_FRIEND_MAP_POLL_MS);
+   }catch{
+     if(run===generation)stop();
+     return false;
+   }
+   // A synchronous native/timer adapter can STOP before returning its handle.
+   // Cancel that handle without touching a replacement generation.
+   if(scheduled==null){
+     if(run===generation)stop();
+     return false;
+   }
+   if(!allowed(run)){
+     try{p.cancelInterval(scheduled);}catch{/* Old callback remains fenced. */}
+     if(run===generation)stop();
+     return false;
+   }
+   handle=scheduled;
    void tick(run); // An explicit user tap starts first read immediately.
    return true;
  }
- function dispose(){stop();disposed=true;}
+ function dispose(){
+   // Fence reentrant onActive(false) before unmount teardown.
+   disposed=true;stop();
+ }
  return Object.freeze({
    start,stop,dispose,isActive:()=>active
  });
