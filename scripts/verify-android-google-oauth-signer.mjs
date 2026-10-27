@@ -1,9 +1,9 @@
 /**
- * Fail-closed Android APK signer / Firebase Google OAuth certificate preflight.
+ * Fail-closed Android APK signer + installed package / Google OAuth preflight.
  *
  * Consumes ONLY the output of a successful:
  *   apksigner verify --verbose --print-certs app-release.apk
- * The calling workflow MUST check apksigner's exit code before invoking this.
+ * The calling workflow MUST check apksigner AND aapt exit codes first.
  * No keystore, signing password, Google ID token or Firebase credential is read.
  */
 import {readFileSync} from 'node:fs';
@@ -35,12 +35,27 @@ export function verifyAndroidGoogleOAuthSigner(apksignerOutput,registeredSha1=go
   return Object.freeze({status:'MATCH',signerCount:1,sha1:apkSha1});
 }
 
+
+/**
+ * Google Android OAuth identifies the app by BOTH signing SHA-1 and installed
+ * package name. Source app.json alone cannot attest the compiled APK's ID.
+ * Consume successful `aapt dump badging app-release.apk` output; reject
+ * missing, ambiguous, duplicated or unexpected package declarations.
+ */
+export function verifyAndroidGoogleOAuthPackage(aaptOutput){
+  if(typeof aaptOutput!=='string'||aaptOutput.length>131072)fail();
+  const packages=[...aaptOutput.matchAll(/^package:\s+name='([^'\r\n]+)'(?:\s|$)/gm)];
+  if(packages.length!==1||packages[0][1]!=='com.chaithawat03.heremate')fail();
+  return Object.freeze({status:'MATCH',packageName:packages[0][1]});
+}
+
 if(process.argv[1]===fileURLToPath(import.meta.url)){
   try{
-    if(process.argv.length!==3)fail();
+    if(process.argv.length!==4)fail();
     const raw=readFileSync(process.argv[2],'utf8');
     verifyAndroidGoogleOAuthSigner(raw);
-    process.stdout.write('ANDROID_GOOGLE_OAUTH_SIGNER_MATCH: PASS\n');
+    verifyAndroidGoogleOAuthPackage(readFileSync(process.argv[3],'utf8'));
+    process.stdout.write('ANDROID_GOOGLE_OAUTH_SIGNER_AND_PACKAGE_MATCH: PASS\n');
   }catch{
     // Do not leak local file paths, certificate details, tokens or stack traces.
     process.stderr.write('ANDROID_GOOGLE_OAUTH_SIGNER_MISMATCH_OR_UNVERIFIED\n');
