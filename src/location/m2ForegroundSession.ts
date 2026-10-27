@@ -28,6 +28,10 @@ export type SharePorts={
     /** Optional M3 v2 local fence. Called synchronously when the owner
      * requests STOP, before waiting for an in-flight GPS publish. */
     signalStopIntent?:()=>void;
+    /** M3 v2 only: transactional server STOP supersedes any concurrent
+     * PUBLISH; the server checks the same grant inside the write transaction.
+     * Never enable for a legacy/non-transactional transport. */
+    stopMayOvertakePublish?:boolean;
   };
   now:()=>number;
   schedule:(fn:()=>void,delayMs:number)=>unknown;
@@ -100,7 +104,15 @@ export function createForegroundSharingController(p:SharePorts) {
         publishState(off);
         return;
       }
-      await Promise.allSettled([remoteStart,inPublish].filter(Boolean));
+      // V2 PUBLISH cannot recreate a grant: its server transaction reads
+      // the same lease that STOP deletes. A stuck native permission/JWT or
+      // HTTP publish must not indefinitely delay an explicit owner STOP.
+      // Retire its local slot so a fresh, separately consented START is not
+      // blocked by an old never-settling promise. The old epoch still fences
+      // any late result. Legacy v1 retains strict publish-before-STOP order.
+      const publishToWait=p.transport.stopMayOvertakePublish===true?null:inPublish;
+      if(p.transport.stopMayOvertakePublish===true)inPublish=null;
+      await Promise.allSettled([remoteStart,publishToWait].filter(Boolean));
       try {
         const result=await p.transport.stop(peer);
         if(result.enabled!==false)throw Error('unconfirmed');
