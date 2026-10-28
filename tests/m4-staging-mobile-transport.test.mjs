@@ -15,10 +15,10 @@ const now=()=>Date.now();
 function make(extra={}){
  const calls=[];
  let active=true,permission=true,user=UID;
- const origin=()=>({uid:user,getIdToken:async()=>SECRET});
+ let identity={uid:user,getIdToken:async()=>SECRET};
  const ports={
    approvedCloudRunUrl:ORIGIN,projectId:'heremate',
-   currentIdentity:()=>origin(),isForeground:()=>active,
+   currentIdentity:()=>identity,isForeground:()=>active,
    foregroundPermissionGranted:async()=>permission,
    fetchImpl:async(input,init)=>{
      calls.push({input,init});
@@ -36,7 +36,7 @@ function make(extra={}){
    },...extra
  };
  return {transport:createM4StagingTransport(ports),calls,
-   setActive:x=>{active=x;},setPermission:x=>{permission=x;},setUser:x=>{user=x;}};
+   setActive:x=>{active=x;},setPermission:x=>{permission=x;},setUser:x=>{user=x;identity={uid:x,getIdToken:async()=>SECRET};}};
 }
 test('only exact owner-reviewed Cloud Run HTTPS origins can be used',()=>{
  assert.equal(APPROVED_M4_STAGING_ORIGINS.length,2);
@@ -244,4 +244,45 @@ test('M4 entire-request deadline bounds HTTP and JSON awaits even when fetch moc
  await assert.rejects(pendingJson,/M4_GEOFENCE_NOT_AVAILABLE/);
  releaseJson({circle,expiresAtMs:now()+10_000,proposalCreatedAtMs});
  await new Promise(resolve=>setImmediate(resolve));
+});
+
+test('M4 same-UID sign-out/sign-in fences an old Firebase JWT before private POST',async()=>{
+ let entered,releaseToken;
+ const tokenStarted=new Promise(resolve=>{entered=resolve;});
+ const delayedToken=new Promise(resolve=>{releaseToken=resolve;});
+ const oldSession={uid:UID,getIdToken:()=>{entered();return delayedToken;}};
+ let current=oldSession;
+ const sent=[];
+ const x=make({
+   currentIdentity:()=>current,
+   fetchImpl:async url=>{sent.push(url);return {
+     ok:true,status:200,json:async()=>({proposed:true,expiresAtMs:now()+30_000})
+   };}
+ });
+ const pending=x.transport.propose(PEER,circle);
+ await tokenStarted;
+ current=null; // logout
+ current={uid:UID,getIdToken:async()=>SECRET}; // same UID, different login
+ releaseToken(SECRET);
+ await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
+ assert.equal(sent.length,0,'old login must never send a private zone request');
+});
+
+test('M4 same-UID reauthentication cannot expose a late geofence response',async()=>{
+ let fetchEntered,releaseResponse;
+ const started=new Promise(resolve=>{fetchEntered=resolve;});
+ const delayed=new Promise(resolve=>{releaseResponse=resolve;});
+ let current={uid:UID,getIdToken:async()=>SECRET};
+ const x=make({
+   currentIdentity:()=>current,
+   fetchImpl:async()=>{fetchEntered();return delayed;}
+ });
+ const pending=x.transport.review(PEER);
+ await started;
+ current=null;
+ current={uid:UID,getIdToken:async()=>SECRET};
+ releaseResponse({ok:true,status:200,json:async()=>({
+   circle,expiresAtMs:now()+30_000,proposalCreatedAtMs
+ })});
+ await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
 });
