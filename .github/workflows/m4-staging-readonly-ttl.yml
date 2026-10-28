@@ -1,8 +1,9 @@
 name: M4 Staging ACTIVE TTL — owner-only read-only check
 
+# PAUSED by project owner 2026-10-28: avoid every issue comment queuing a skipped workflow.
+# Original issue_comment trigger: types [created]. Restore when resuming.
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
 
 permissions:
   contents: read
