@@ -91,12 +91,16 @@ test('Android M4 real JWT/HTTP/Firestore consent and event privacy (emulators on
         target.pathname==='/v1/locations/grants/stop');
       return fetch(loopback+target.pathname,init);
     };
-    const ports=who=>({
-      approvedCloudRunUrl:APPROVED_ORIGIN,projectId:STAGING_PROJECT,
-      currentIdentity:()=>({uid:who.uid,getIdToken:async()=>who.token}),
-      isForeground:()=>true,foregroundPermissionGranted:async()=>true,
-      fetchImpl
-    });
+    const ports=who=>{
+      // One Firebase User object per authenticated session, as on device.
+      const identity={uid:who.uid,getIdToken:async()=>who.token};
+      return {
+        approvedCloudRunUrl:APPROVED_ORIGIN,projectId:STAGING_PROJECT,
+        currentIdentity:()=>identity,
+        isForeground:()=>true,foregroundPermissionGranted:async()=>true,
+        fetchImpl
+      };
+    };
     const ownerM4=createM4StagingTransport(ports(owner));
     const subjectM4=createM4StagingTransport(ports(subject));
     const strangerM4=createM4StagingTransport(ports(stranger));
