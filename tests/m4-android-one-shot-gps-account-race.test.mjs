@@ -260,3 +260,56 @@ test('M4 one-shot rejects a future-dated GPS fix beyond the original 60s tap win
     /M4_ONE_SHOT_UNAVAILABLE/);
   assert.equal(h.counts().calls,0);
 });
+
+test('hung native one-shot GPS is bounded and late fix cannot reach HTTPS',async()=>{
+  const h=harness(),started=deferred(),gps=deferred();
+  h.ports.deadlineMs=120; // short offline deadline; production stays at 60s
+  h.ports.getCurrentFix=()=>{started.resolve();return gps.promise;};
+  const work=evaluateM4OneShotForegroundFix(h.ports);
+  await started.promise;
+  await assert.rejects(work,/M4_ONE_SHOT_UNAVAILABLE/);
+  gps.resolve(sample());
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.counts().calls,0,'retired tap cannot publish a late native fix');
+});
+
+test('hung OS permission prompt releases one-shot busy path without late GPS',async()=>{
+  const h=harness(),started=deferred(),grant=deferred();
+  let gpsCalls=0;
+  h.ports.deadlineMs=120;
+  h.ports.requestPermission=()=>{started.resolve();return grant.promise;};
+  h.ports.getCurrentFix=async()=>{gpsCalls++;return sample();};
+  const work=evaluateM4OneShotForegroundFix(h.ports);
+  await started.promise;
+  await assert.rejects(work,/M4_ONE_SHOT_UNAVAILABLE/);
+  grant.resolve(true);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(gpsCalls,0,'expired consent must not invoke native GPS');
+  assert.equal(h.counts().calls,0);
+});
+
+test('hung HTTPS evaluation is bounded; late ACK cannot present an event',async()=>{
+  const h=harness(),started=deferred(),reply=deferred();
+  h.ports.deadlineMs=120;
+  h.ports.evaluate=()=>{started.resolve();return reply.promise;};
+  const work=evaluateM4OneShotForegroundFix(h.ports);
+  await started.promise;
+  await assert.rejects(work,/M4_ONE_SHOT_UNAVAILABLE/);
+  reply.resolve('enter');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.counts().reads,1,
+    'retired HTTPS result cannot run the post-response OS permission/alert path');
+});
+
+test('invalid one-shot watchdog bounds fail closed before native permission',async()=>{
+  for(const deadlineMs of [0,19,60_001,1.5,NaN]){
+    const h=harness();
+    let prompts=0;
+    h.ports.deadlineMs=deadlineMs;
+    h.ports.requestPermission=async()=>{prompts++;return true;};
+    await assert.rejects(evaluateM4OneShotForegroundFix(h.ports),
+      /M4_ONE_SHOT_UNAVAILABLE/);
+    assert.equal(prompts,0);
+    assert.equal(h.counts().calls,0);
+  }
+});
