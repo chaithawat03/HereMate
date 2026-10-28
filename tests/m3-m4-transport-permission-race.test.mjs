@@ -28,8 +28,11 @@ function permissionGate(blockAt){
 function harness(kind,stage){
  const gate=permissionGate(stage);
  let uid=A,foreground=true;
+ // M4 now fences the actual Firebase User instance, not only its UID.
+ // Keep the same instance during a session; rotate on auth transitions.
+ let m4User={uid:A,getIdToken:async()=>TOKEN};
  const requests=[];
- const currentIdentity=()=>uid?{uid,getIdToken:async()=>TOKEN}:null;
+ const currentIdentity=()=>uid?(kind==='m4'?m4User:{uid,getIdToken:async()=>TOKEN}):null;
  const common={
   projectId:'heremate',currentIdentity,
   isForeground:()=>foreground,
@@ -52,7 +55,9 @@ function harness(kind,stage){
  const action=()=>kind==='m3'?transport.read(B):transport.evaluate(B,{
   latitude:0,longitude:0,accuracyMeters:12,capturedAtMs:Date.now()-100
  });
- return {gate,requests,action,setUid:x=>{uid=x;},
+ return {gate,requests,action,setUid:x=>{
+  uid=x;m4User=x?{uid:x,getIdToken:async()=>TOKEN}:null;
+ },
   setForeground:x=>{foreground=x;}};
 }
 for(const kind of ['m3','m4']){
