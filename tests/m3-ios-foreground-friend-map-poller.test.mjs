@@ -7,6 +7,7 @@ import {
 } from '../src/location/androidFriendMapPoller.ts';
 import {loadAuthorizedFriendMap} from '../src/location/accountScopedFriendMapRead.ts';
 import {authorizedPeers} from '../src/location/m2FriendLocationView.ts';
+import {sameViewerSession} from '../src/location/m3ViewerAuthSession.ts';
 
 const A='iosvieweraccount0001',B='iosvieweraccount0002';
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
@@ -203,7 +204,7 @@ test('viewer Stop retires an in-flight friend-map read and external Maps handoff
   const panel=readFileSync(new URL('../src/location/M2FriendLocationPanel.tsx',import.meta.url),'utf8');
   assert.ok(panel.includes('if(autoRefreshing){'));
   assert.ok(panel.includes('}else poller.current?.start();'));
-  assert.ok(panel.includes('const viewerUid=session.current,requestEpoch=epoch.current;'));
+  assert.ok(panel.includes('const viewerUid=session.current,viewerUser=authUser.current,requestEpoch=epoch.current;'));
   assert.equal(panel.split('epoch.current!==requestEpoch').length-1,2,
     'external Maps confirmation and late HTTPS response must both be fenced');
   assert.ok(panel.includes('const clear=useCallback'));
@@ -252,10 +253,39 @@ test('viewer transport replacement invalidates pending reads, Maps handoff and v
   assert.match(panel,/if\(!backendReviewedAndEnabled\|\|\s*!\['android','ios'\]\.includes\(Platform\.OS\)\)\{\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*setAutoRefreshing\(false\)/);
   assert.match(panel,/controller\.dispose\(\);[\s\S]*?if\(poller\.current===controller\)\{[\s\S]*?poller\.current=null;[\s\S]*?clear\(\);\s*if\(alive\.current\)setAutoRefreshing\(false\)/);
   assert.match(panel,/\},\[backendReviewedAndEnabled,refresh,clear\]\)/);
-  assert.ok(panel.includes('const viewerUid=session.current,requestEpoch=epoch.current;'),
+  assert.ok(panel.includes('const viewerUid=session.current,viewerUser=authUser.current,requestEpoch=epoch.current;'),
     'pending external Maps confirmation must share the retired epoch');
   const replacement=rig();
   assert.equal(replacement.controller.isActive(),false,
     'replacement transport cannot inherit old viewer opt-in');
   assert.equal(replacement.reads(),0);
+});
+
+test('same-UID Firebase reauthentication retires private viewer reads and pending Maps handoff',()=>{
+ const oldUser={uid:A},relogged={uid:A},other={uid:B};
+ assert.equal(sameViewerSession(oldUser,oldUser),true);
+ assert.equal(sameViewerSession(oldUser,relogged),false,
+   'same UID is not proof of the same Firebase User session');
+ assert.equal(sameViewerSession(oldUser,other),false);
+ assert.equal(sameViewerSession(oldUser,null),false);
+ assert.equal(sameViewerSession(null,oldUser),false);
+ const malformed={uid:'invalid uid'};
+ assert.equal(sameViewerSession(malformed,malformed),false);
+ // Simulate a pending authorized HTTPS result: the auth SDK may switch
+ // currentUser before the onAuthStateChanged callback advances the epoch.
+ let sdkUser=oldUser,epoch=1;
+ const current=()=>epoch===1&&sameViewerSession(oldUser,sdkUser);
+ assert.equal(current(),true);
+ sdkUser=relogged;
+ assert.equal(current(),false,'old read must not repaint after same-UID re-login');
+ epoch++;
+ assert.equal(current(),false);
+ const panel=readFileSync(new URL('../src/location/M2FriendLocationPanel.tsx',import.meta.url),'utf8');
+ assert.match(panel,/const authUser=useRef<User\\|null>\\(null\\)/);
+ assert.match(panel,/if\\(authUser\\.current!==u\\|\\|session\\.current!==next\\)/);
+ assert.match(panel,/authUser\\.current===user&&session\\.current===uid&&[\\s\\S]*?sameViewerSession\\(user,getStagingGuestAuth\\(\\)\\.currentUser\\)/);
+ assert.match(panel,/sameViewerSession\\(authUser\\.current,getStagingGuestAuth\\(\\)\\.currentUser\\)/);
+ assert.match(panel,/const viewerUid=session\\.current,viewerUser=authUser\\.current,requestEpoch=epoch\\.current/);
+ assert.ok(panel.split('sameViewerSession(viewerUser,getStagingGuestAuth().currentUser)').length>=5,
+   'external Maps pre-confirmation, pre-read, post-HTTPS and error path must be fenced');
 });
