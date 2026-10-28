@@ -2,6 +2,8 @@
  * Offline Android M3/M4 transport race tests. No real JWT, device GPS, GCP
  * network or permission prompt. The injected permission promise is held at
  * each of three awaits: before token, immediately before POST and after JSON.
+ * M3 tests v2 START (a GPS publisher operation), NOT the read-only friend map:
+ * viewing a consented friend must not request the viewer's own GPS permission.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,8 +39,8 @@ function harness(kind,stage){
   fetchImpl:async(url,options)=>{
    requests.push({url,options});
    const reply=kind==='m3'?
-    {point:{latitude:0,longitude:0,accuracyMeters:12,
-      capturedAtMs:Date.now()-100},expiresAtMs:Date.now()+15_000}:
+    {enabled:true,expiresAtMs:Date.now()+15_000,
+      sessionToken:'a'.repeat(64)}:
     {evaluated:true,event:'enter',quality:'ok'};
    return {ok:true,status:200,json:async()=>reply};
   }
@@ -49,7 +51,7 @@ function harness(kind,stage){
    useDeviceSessions:true}):
   createM4StagingTransport({...common,
    approvedCloudRunUrl:APPROVED_M4_STAGING_ORIGINS[1]});
- const action=()=>kind==='m3'?transport.read(B):transport.evaluate(B,{
+ const action=()=>kind==='m3'?transport.start(B):transport.evaluate(B,{
   latitude:0,longitude:0,accuracyMeters:12,capturedAtMs:Date.now()-100
  });
  return {gate,requests,action,setUid:x=>{uid=x;},
@@ -63,7 +65,7 @@ for(const kind of ['m3','m4']){
   assert.equal(x.gate.calls(),3);
   assert.equal(x.requests.length,1);
   assert.equal(x.requests[0].options.redirect,'error');
-  assert.ok(kind==='m3'?result.point.latitude===0:result.event==='enter');
+  assert.ok(kind==='m3'?result.enabled===true:result.event==='enter');
  });
  for(const stage of [1,2,3]){
   for(const incident of ['identity','background']){

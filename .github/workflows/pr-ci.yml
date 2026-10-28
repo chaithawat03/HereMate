@@ -39,6 +39,14 @@ jobs:
         run: node --test tests/m4-android-foreground-lifecycle-privacy.test.mjs
       - name: M3 iOS foreground privacy/source contract
         run: node --test tests/m3-ios-foreground-staging.test.mjs
+      - name: M3 iOS explicit foreground friend-map polling, quota and account isolation (offline)
+        run: node --test tests/m3-ios-foreground-friend-map-poller.test.mjs
+      - name: M3 iOS owner-wide emergency revoke opt-in and cross-device session safety (offline)
+        run: node --test tests/m3-ios-owner-emergency-stop.test.mjs
+      - name: M3 iOS explicit Apple Maps handoff with fresh server consent and account isolation (offline)
+        run: node --test tests/m3-ios-apple-maps-handoff.test.mjs
+      - name: M3 Android/iOS consented foreground friend READ without viewer GPS permission (offline)
+        run: node --test tests/m3-foreground-friend-read-without-gps-permission.test.mjs
       - name: Verify manually gated integrated Android M2 native test APK (offline)
         run: node --test tests/m2-integrated-android-native-rc.test.mjs
       - name: Test M2.4 dormant HTTPS transport against server HTTP handler (offline)

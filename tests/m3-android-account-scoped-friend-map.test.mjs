@@ -94,9 +94,9 @@ test('duplicate directed relations, revocation and read failure fail closed with
 test('Android mounted panel validates live Firebase identity before refresh, commit and render',()=>{
   const s=readFileSync(new URL('../src/location/M2FriendLocationPanel.tsx',import.meta.url),'utf8');
   assert.match(s,/loadAuthorizedFriendMap/);
-  assert.match(s,/getStagingGuestAuth\(\)\.currentUser\?\.uid===uid/);
-  assert.match(s,/getStagingGuestAuth\(\)\.currentUser\?\.uid!==uid/);
-  assert.match(s,/session\.current===getStagingGuestAuth\(\)\.currentUser\?\.uid/);
+  assert.match(s,/sameViewerSession\(user,getStagingGuestAuth\(\)\.currentUser\)/);
+  assert.match(s,/authUser\.current===user&&session\.current===uid/);
+  assert.match(s,/sameViewerSession\(authUser\.current,getStagingGuestAuth\(\)\.currentUser\)/);
   assert.match(s,/AppState\.currentState==='active'/);
   assert.doesNotMatch(s,/AsyncStorage|startLocationUpdatesAsync|requestBackgroundPermissionsAsync/);
 });

@@ -5,15 +5,17 @@
  */
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {Alert,AppState,Linking,Platform,Pressable,StyleSheet,Text,View} from 'react-native';
-import {onAuthStateChanged} from 'firebase/auth';
+import {onAuthStateChanged,type User} from 'firebase/auth';
 import {getStagingGuestAuth} from '../auth/firebaseGuest';
 import {listOwnRequests} from '../friends/firestoreFriends';
 import type {FriendRequest} from '../friends/friendModel';
 import {usePreferences} from '../ui/PreferencesProvider';
 import type {Palette} from '../ui/preferencesModel';
-import {createAndroidFriendMapPoller} from './androidFriendMapPoller';
+import {createForegroundFriendMapPoller} from './androidFriendMapPoller';
 import {loadAuthorizedFriendMap} from './accountScopedFriendMapRead';
 import {androidGeoUri} from './androidGeoHandoff';
+import {iosAppleMapsUri} from './iosAppleMapsHandoff';
+import {sameViewerSession} from './m3ViewerAuthSession';
 import {
   authorizedPeers,friendMapStates,plotLiveFriends,visibleFriendLocations,
   validatedRemoteFix,
@@ -36,8 +38,9 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
   const [autoRefreshing,setAutoRefreshing]=useState(false);
   const [now,setNow]=useState(Date.now());
   const session=useRef<string|null>(null);
+  const authUser=useRef<User|null>(null);
   const epoch=useRef(0),alive=useRef(true),busy=useRef(false);
-  const poller=useRef<ReturnType<typeof createAndroidFriendMapPoller>|null>(null);
+  const poller=useRef<ReturnType<typeof createForegroundFriendMapPoller>|null>(null);
 
   const clear=useCallback(()=>{
     poller.current?.stop();
@@ -51,11 +54,16 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
     if(!backendReviewedAndEnabled)return;
     alive.current=true;
     const auth=getStagingGuestAuth();
-    session.current=auth.currentUser?.uid??null;
+    authUser.current=auth.currentUser;
+    session.current=authUser.current?.uid??null;
     const sub=onAuthStateChanged(auth,u=>{
       const next=u?.uid??null;
-      if(session.current!==next){session.current=next;clear();}
-    },()=>{session.current=null;clear();});
+      // A same-UID sign-out/re-login still creates a different Firebase User
+      // session; retire its old authorized reads and external Maps prompts.
+      if(authUser.current!==u||session.current!==next){
+        authUser.current=u;session.current=next;clear();
+      }
+    },()=>{authUser.current=null;session.current=null;clear();});
     const app=AppState.addEventListener('change',state=>{
       if(state!=='active')clear();
     });
@@ -63,6 +71,7 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
       alive.current=false;
       ++epoch.current;
       sub();app.remove();
+      authUser.current=null;
       session.current=null;
       clear();
     };
@@ -70,13 +79,14 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
 
   const refresh=useCallback(async()=>{
     if(!backendReviewedAndEnabled||busy.current||AppState.currentState!=='active')return;
-    const uid=session.current;
-    if(!uid||getStagingGuestAuth().currentUser?.uid!==uid)return;
+    const user=authUser.current,uid=user?.uid??null;
+    if(!user||!uid||!sameViewerSession(user,getStagingGuestAuth().currentUser))return;
     busy.current=true;
     const run=++epoch.current;
     setLoading(true);setFailed(false);setPositions({});setFriends([]);
     const current=()=>alive.current&&run===epoch.current&&
-      session.current===uid&&getStagingGuestAuth().currentUser?.uid===uid&&
+      authUser.current===user&&session.current===uid&&
+      sameViewerSession(user,getStagingGuestAuth().currentUser)&&
       AppState.currentState==='active';
     try{
       // One account-scoped read transaction. A direct Firebase account
@@ -100,13 +110,19 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
     }
   },[backendReviewedAndEnabled,transport]);
 
-  // Android map updates are explicitly started by the viewer. This is
-  // read-only, at most eight server-authorized friend reads every 30 seconds,
-  // and stops on account switch, background, unmount or user Stop.
+  // Android/iOS friend-map updates require an explicit viewer opt-in.
+  // Each read is server-authorized; stop on account switch, background,
+  // unmount or user Stop. Never publish this viewer's GPS.
   useEffect(()=>{
-    if(!backendReviewedAndEnabled||Platform.OS!=='android')return;
-    const controller=createAndroidFriendMapPoller({
-      isAndroid:()=>Platform.OS==='android',
+    if(!backendReviewedAndEnabled||
+       !['android','ios'].includes(Platform.OS)){
+      // A disabled backend or unsupported platform cannot retain an old
+      // opt-in UI state from a disposed foreground polling controller.
+      setAutoRefreshing(false);
+      return;
+    }
+    const controller=createForegroundFriendMapPoller({
+      isSupportedPlatform:()=>Platform.OS==='android'||Platform.OS==='ios',
       isForeground:()=>AppState.currentState==='active',
       currentUid:()=>getStagingGuestAuth().currentUser?.uid??null,
       now:Date.now,
@@ -117,10 +133,20 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
     });
     poller.current=controller;
     return()=>{
+      // The poller intentionally suppresses onActive(false) during dispose
+      // to avoid reentrant teardown. React still needs its visible opt-in
+      // reset when a transport replacement retires this exact controller.
       controller.dispose();
-      if(poller.current===controller)poller.current=null;
+      if(poller.current===controller){
+        poller.current=null;
+        // A replaced transport must also retire the old in-flight read
+        // generation and any pending external Maps handoff, not just the
+        // timer/visible opt-in state.
+        clear();
+        if(alive.current)setAutoRefreshing(false);
+      }
     };
-  },[backendReviewedAndEnabled,refresh]);
+  },[backendReviewedAndEnabled,refresh,clear]);
 
   // Ensure expired fixes vanish automatically; no background GPS polling.
   useEffect(()=>{
@@ -145,7 +171,9 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
   },[backendReviewedAndEnabled]);
 
   const activeUid=backendReviewedAndEnabled&&AppState.currentState==='active'&&
-    session.current===getStagingGuestAuth().currentUser?.uid?
+    authUser.current!==null&&
+    sameViewerSession(authUser.current,getStagingGuestAuth().currentUser)&&
+    session.current===authUser.current.uid?
     session.current:null;
   const liveLocations:LiveFriend[]=useMemo(()=>
     activeUid?visibleFriendLocations({
@@ -156,9 +184,10 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
     relations:friends,reads:positions,nowMs:now}):[],[activeUid,friends,positions,now]);
 
   function requestExternalMap(peerUid:string){
-    const viewerUid=session.current;
-    if(Platform.OS!=='android'||!backendReviewedAndEnabled||
-       !viewerUid||getStagingGuestAuth().currentUser?.uid!==viewerUid||
+    const viewerUid=session.current,viewerUser=authUser.current,requestEpoch=epoch.current;
+    if((Platform.OS!=='android'&&Platform.OS!=='ios')||!backendReviewedAndEnabled||
+       !viewerUid||!viewerUser||
+       !sameViewerSession(viewerUser,getStagingGuestAuth().currentUser)||
        AppState.currentState!=='active'||
        !liveLocations.some(peer=>peer.peerUid===peerUid))return;
     // A native confirmation is required BEFORE revealing a private coordinate
@@ -173,23 +202,29 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
         {text:language==='th'?'เปิดแผนที่':'Open Maps',onPress:()=>{
           void (async()=>{
             try{
-              if(!alive.current||session.current!==viewerUid||
+              if(!alive.current||epoch.current!==requestEpoch||session.current!==viewerUid||
+                 authUser.current!==viewerUser||
+                 !sameViewerSession(viewerUser,getStagingGuestAuth().currentUser)||
                  AppState.currentState!=='active'||
                  !authorizedPeers(viewerUid,friends).some(p=>p.uid===peerUid))return;
               // Re-read AFTER confirmation. Cloud Run checks current M1
               // friendship, both consents and the active M2 grant on each call.
               // A revoked/stale fix must never be passed to an external app.
               const response=await transport.read(peerUid);
-              if(!alive.current||session.current!==viewerUid||
-                 getStagingGuestAuth().currentUser?.uid!==viewerUid||
+              if(!alive.current||epoch.current!==requestEpoch||session.current!==viewerUid||
+                 authUser.current!==viewerUser||
+                 !sameViewerSession(viewerUser,getStagingGuestAuth().currentUser)||
                  AppState.currentState!=='active')return;
               const current=validatedRemoteFix(response,Date.now());
-              const uri=current?androidGeoUri(
-                current.point.latitude,current.point.longitude):null;
+              const uri=current?(Platform.OS==='android'?androidGeoUri(
+                current.point.latitude,current.point.longitude):iosAppleMapsUri(
+                current.point.latitude,current.point.longitude)):null;
               if(!uri)throw Error('location_unavailable');
               await Linking.openURL(uri);
             }catch{
-              if(alive.current&&session.current===viewerUid&&
+              if(alive.current&&epoch.current===requestEpoch&&
+                 session.current===viewerUid&&authUser.current===viewerUser&&
+                 sameViewerSession(viewerUser,getStagingGuestAuth().currentUser)&&
                  AppState.currentState==='active')
                 Alert.alert(
                   language==='th'?'ไม่สามารถเปิดแผนที่ได้':'Maps unavailable',
@@ -216,14 +251,18 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
       onPress={()=>void refresh()}>
       <Text style={s.refreshText}>{loading?t('m2MapLoading'):t('m2MapRefresh')}</Text>
     </Pressable>
-    {Platform.OS==='android'?<View style={s.pollArea}>
+    {(Platform.OS==='android'||Platform.OS==='ios')?<View style={s.pollArea}>
       <Text style={s.note}>{language==='th'
         ?'อัปเดตตำแหน่งเพื่อนเฉพาะตอนเปิดแอป เมื่อคุณกดเริ่มเท่านั้น ตรวจซ้ำทุก 30 วินาที ไม่ส่ง GPS ของคุณ'
         :'Optional foreground-only friend map updates every 30 seconds. Reads authorized friends only; does not share your GPS.'}</Text>
       <Pressable accessibilityRole="button" style={s.refresh}
         onPress={()=>{
-          if(autoRefreshing)poller.current?.stop();
-          else poller.current?.start();
+          if(autoRefreshing){
+            // Explicit Stop retires the current read generation and any
+            // pending external Maps handoff; a late HTTPS result stays hidden.
+            // This is a local viewer opt-out, not a remote sharing STOP.
+            clear();
+          }else poller.current?.start();
         }}>
         <Text style={s.refreshText}>{autoRefreshing?
           (language==='th'?'หยุดอัปเดตอัตโนมัติ':'Stop live updates'):
@@ -251,7 +290,7 @@ export function M2FriendLocationPanel({transport,backendReviewedAndEnabled}:Prop
       <Text style={s.name}>{pin.displayName}</Text>
       <Text style={s.note}>{t('m2MapAccuracy')}: ±{Math.round(pin.accuracyMeters)} {t('meter')}</Text>
       <Text style={s.note}>{t('m2MapUpdated')}: {Math.max(0,Math.floor((now-pin.capturedAtMs)/1000))} {t('secondsUnit')}</Text>
-      {Platform.OS==='android'?<Pressable accessibilityRole="button"
+      {(Platform.OS==='android'||Platform.OS==='ios')?<Pressable accessibilityRole="button"
         style={s.refresh} onPress={()=>requestExternalMap(pin.peerUid)}>
         <Text style={s.refreshText}>{language==='th'
           ?'เปิดตำแหน่งในแอปแผนที่':'Open location in Maps'}</Text>

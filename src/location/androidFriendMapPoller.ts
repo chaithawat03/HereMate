@@ -1,12 +1,14 @@
 /**
- * Android-only, explicit opt-in polling of already-authorized friends.
+ * Android/iOS explicit opt-in foreground polling of already-authorized friends.
  * READ ONLY: never publishes device GPS, stores coordinates or runs after
  * app background/account change. All ACL decisions remain server-side.
+ * A legacy Android adapter is retained for existing callers and tests.
  */
 export const ANDROID_FRIEND_MAP_POLL_MS=30_000;
 export const ANDROID_FRIEND_MAP_READ_LIMIT_PER_TICK=8;
-// At most 2 batches x 8 peer reads within any rolling 60s = 16,
-// below the M2 server's 30-read/minute per-account quota.
+// Per-device budget: at most 2 batches x 8 peer reads in 60s = 16.
+// Multiple signed-in devices may share the server's per-account quota;
+// server authorization/rate limits remain authoritative on every read.
 export const ANDROID_FRIEND_MAP_MAX_READS_PER_60S=16;
 const WINDOW_MS=60_000;
 const MAX_WINDOW_BATCHES=2;
@@ -21,7 +23,10 @@ export type FriendMapPollPorts=Readonly<{
  refresh:()=>Promise<void>;
  onActive:(active:boolean)=>void;
 }>;
-export function createAndroidFriendMapPoller(p:FriendMapPollPorts){
+export type ForegroundFriendMapPollPorts=Omit<FriendMapPollPorts,'isAndroid'>&Readonly<{
+ isSupportedPlatform:()=>boolean;
+}>;
+export function createForegroundFriendMapPoller(p:ForegroundFriendMapPollPorts){
  let active=false,actor:string|null=null,handle:unknown=null;
  let generation=0,inFlightGeneration:number|null=null,disposed=false;
  // Account switching must not reset the rolling read budget for an account
@@ -34,7 +39,7 @@ export function createAndroidFriendMapPoller(p:FriendMapPollPorts){
    if(active){active=false;if(!disposed)p.onActive(false);}
  }
  function allowed(run:number){
-   return run===generation&&active&&!disposed&&p.isAndroid()&&p.isForeground()&&
+   return run===generation&&active&&!disposed&&p.isSupportedPlatform()&&p.isForeground()&&
      actor!==null&&p.currentUid()===actor;
  }
  async function tick(run:number){
@@ -62,18 +67,54 @@ export function createAndroidFriendMapPoller(p:FriendMapPollPorts){
    finally{if(inFlightGeneration===run)inFlightGeneration=null;}
  }
  function start(){
-   if(active||disposed||!p.isAndroid()||!p.isForeground())return false;
+   if(active||disposed||!p.isSupportedPlatform()||!p.isForeground())return false;
    const uid=p.currentUid();
    if(!uid||!UID.test(uid))return false;
    const run=++generation;
    actor=uid;active=true;
-   p.onActive(true);
-   handle=p.scheduleInterval(()=>{void tick(run);},ANDROID_FRIEND_MAP_POLL_MS);
+   // The UI activation callback can synchronously stop/dispose or replace
+   // this account's opt-in. Never resurrect its old timer afterwards.
+   try{p.onActive(true);}
+   catch{
+     if(run===generation){++generation;actor=null;active=false;}
+     return false;
+   }
+   if(!allowed(run)){
+     if(run===generation)stop();
+     return false;
+   }
+   let scheduled:unknown;
+   try{
+     scheduled=p.scheduleInterval(()=>{void tick(run);},ANDROID_FRIEND_MAP_POLL_MS);
+   }catch{
+     if(run===generation)stop();
+     return false;
+   }
+   // A synchronous native/timer adapter can STOP before returning its handle.
+   // Cancel that handle without touching a replacement generation.
+   if(scheduled==null){
+     if(run===generation)stop();
+     return false;
+   }
+   if(!allowed(run)){
+     try{p.cancelInterval(scheduled);}catch{/* Old callback remains fenced. */}
+     if(run===generation)stop();
+     return false;
+   }
+   handle=scheduled;
    void tick(run); // An explicit user tap starts first read immediately.
    return true;
  }
- function dispose(){stop();disposed=true;}
+ function dispose(){
+   // Fence reentrant onActive(false) before unmount teardown.
+   disposed=true;stop();
+ }
  return Object.freeze({
    start,stop,dispose,isActive:()=>active
  });
+}
+
+/** Keep the original Android-only API and its fail-closed platform gate. */
+export function createAndroidFriendMapPoller(p:FriendMapPollPorts){
+ return createForegroundFriendMapPoller({...p,isSupportedPlatform:p.isAndroid});
 }

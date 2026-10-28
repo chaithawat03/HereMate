@@ -88,16 +88,52 @@ test('M3 transport drops delayed network results after Firebase account change',
  await assert.rejects(pending,/UNAVAILABLE/);
  await assert.rejects(x.transport.publish(PEER,fix()),/UNAVAILABLE/);
 });
-test('v1 Android remains unchanged while iOS M3 and opt-in Android use v2',()=>{
+test('Android and iOS foreground default to deployed v1 until independently approved v2 flag',()=>{
  const android=read('src/location/M2AndroidStagingScreens.tsx');
  const ios=read('src/location/M3IOSStagingScreens.tsx');
  const build=read('.github/workflows/android-m2-native-staging-apk.yml');
  const eas=read('eas.json');
  assert.match(android,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'/);
- assert.match(ios,/useDeviceSessions:true/);
+ assert.match(ios,/useDeviceSessions:process\.env\.EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS==='true'/);
  assert.doesNotMatch(build,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS/);
  assert.doesNotMatch(eas,/EXPO_PUBLIC_ENABLE_M3_DEVICE_SESSIONS/);
+ assert.match(ios,/EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND!=='true'/);
+ assert.match(ios,/!backendReviewedAndEnabled/);
  assert.match(read('src/location/m2StagingTransport.ts'),/deviceSession/);
+});
+
+test('iOS foreground v1 compatibility uses deployed endpoints without unapproved v2 session',async()=>{
+ const paths=[];
+ const transport=createM2StagingTransport({
+  approvedCloudRunUrl:ORIGIN,projectId:'heremate',
+  // Deliberately no useDeviceSessions opt-in: v2 has not been live-approved.
+  currentIdentity:()=>({uid:SELF,getIdToken:async()=>TOKEN}),
+  isForeground:()=>true,foregroundPermissionGranted:async()=>true,
+  fetchImpl:async(url,options)=>{
+   const endpoint=new URL(url).pathname;
+   paths.push(endpoint);
+   assert.equal(options.redirect,'error');
+   assert.equal(options.headers.Authorization,'Bearer '+TOKEN);
+   const payload=endpoint.endsWith('/start')?
+    {enabled:true,expiresAtMs:Date.now()+50_000}:
+    endpoint.endsWith('/publish')?
+    {stored:true,expiresAtMs:Date.now()+20_000}:
+    endpoint.endsWith('/read')?
+    {point:fix(),expiresAtMs:Date.now()+20_000}:
+    {enabled:false};
+   return {ok:true,status:200,json:async()=>payload};
+  }
+ });
+ assert.equal((await transport.start(PEER)).enabled,true);
+ assert.equal((await transport.publish(PEER,fix())).stored,true);
+ assert.equal((await transport.read(PEER)).point.accuracyMeters,17);
+ assert.deepEqual(await transport.emergencyStop(PEER),{enabled:false});
+ assert.deepEqual(paths,[
+  '/v1/locations/grants/start',
+  '/v1/locations/points/publish',
+  '/v1/locations/points/read',
+  '/v1/locations/grants/stop'
+ ]);
 });
 
 test('M3 concurrent START is single-flight and cannot overwrite the device capability',async()=>{
