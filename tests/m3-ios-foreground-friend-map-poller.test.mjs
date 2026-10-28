@@ -281,11 +281,11 @@ test('same-UID Firebase reauthentication retires private viewer reads and pendin
  epoch++;
  assert.equal(current(),false);
  const panel=readFileSync(new URL('../src/location/M2FriendLocationPanel.tsx',import.meta.url),'utf8');
- assert.match(panel,/const authUser=useRef<User\\|null>\\(null\\)/);
- assert.match(panel,/if\\(authUser\\.current!==u\\|\\|session\\.current!==next\\)/);
- assert.match(panel,/authUser\\.current===user&&session\\.current===uid&&[\\s\\S]*?sameViewerSession\\(user,getStagingGuestAuth\\(\\)\\.currentUser\\)/);
- assert.match(panel,/sameViewerSession\\(authUser\\.current,getStagingGuestAuth\\(\\)\\.currentUser\\)/);
- assert.match(panel,/const viewerUid=session\\.current,viewerUser=authUser\\.current,requestEpoch=epoch\\.current/);
+ assert.match(panel,/const authUser=useRef<User\|null>\(null\)/);
+ assert.match(panel,/if\(authUser\.current!==u\|\|session\.current!==next\)/);
+ assert.match(panel,/authUser\.current===user&&session\.current===uid&&[\s\S]*?sameViewerSession\(user,getStagingGuestAuth\(\)\.currentUser\)/);
+ assert.match(panel,/sameViewerSession\(authUser\.current,getStagingGuestAuth\(\)\.currentUser\)/);
+ assert.match(panel,/const viewerUid=session\.current,viewerUser=authUser\.current,requestEpoch=epoch\.current/);
  assert.ok(panel.split('sameViewerSession(viewerUser,getStagingGuestAuth().currentUser)').length>=5,
    'external Maps pre-confirmation, pre-read, post-HTTPS and error path must be fenced');
 });
