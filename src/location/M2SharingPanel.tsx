@@ -12,6 +12,7 @@ import {listOwnRequests} from '../friends/firestoreFriends';
 import {otherParticipant,type FriendRequest} from '../friends/friendModel';
 import {createAccountScopedFriendRefresh} from './accountScopedFriendRefresh';
 import {bindVerifiedForegroundWatch} from './androidForegroundWatchBind';
+import {sameEmergencyAuthSession} from './m3EmergencyAuthSession';
 import {usePreferences} from '../ui/PreferencesProvider';
 import type {Palette} from '../ui/preferencesModel';
 import {
@@ -41,6 +42,7 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
   const emergencyLock=useRef(false);
   const controller=useRef<ReturnType<typeof createForegroundSharingController>|null>(null);
   const account=useRef<string|null>(null);
+  const authSession=useRef<{uid:string}|null>(null);
   const refreshGate=useRef<ReturnType<typeof createAccountScopedFriendRefresh>|null>(null);
 
   useEffect(()=>{
@@ -48,6 +50,7 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
     let live=true;
     const auth=getStagingGuestAuth();
     account.current=auth.currentUser?.uid??null;
+    authSession.current=auth.currentUser;
     const gate=createAccountScopedFriendRefresh({
       currentUid:()=>{
         const uid=auth.currentUser?.uid??null;
@@ -138,9 +141,12 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
     });
     const authUnsub=onAuthStateChanged(auth,u=>{
       const uid=u?.uid??null;
-      if(account.current!==uid){
+      // Same UID after sign-out/sign-in is a NEW Firebase User session.
+      // Retire old friend data, controller and emergency STOP UI state.
+      if(account.current!==uid||authSession.current!==u){
         gate.invalidate();
         account.current=uid;
+        authSession.current=u;
         ctrl.accountChanged();setEmergencyState(null);
         if(live){
           setFriends([]);setSelectedUid(null);setLoadError(false);
@@ -150,6 +156,7 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
     },()=>{
       gate.invalidate();
       account.current=null;
+      authSession.current=null;
       ctrl.accountChanged();setEmergencyState(null);
       if(live){
         setFriends([]);setSelectedUid(null);setLoadError(true);
@@ -164,6 +171,7 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
       ctrl.dispose();
       controller.current=null;
       account.current=null;
+      authSession.current=null;
     };
   },[backendReviewedAndEnabled,transport]);
 
@@ -202,6 +210,9 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
   };
   async function emergencyRevoke(peerUid:string){
     const actor=account.current;
+    const startingSession=getStagingGuestAuth().currentUser;
+    if(!startingSession||startingSession.uid!==actor||
+       authSession.current!==startingSession)return;
     if(!emergencyAvailable||!actor||!backendReviewedAndEnabled||
        emergencyLock.current||AppState.currentState!=='active'||
        !safeToEmergency())return;
@@ -216,15 +227,15 @@ export function M2SharingPanel({transport,backendReviewedAndEnabled}:Props){
     try{
       const result=await transport.emergencyStop!(peerUid);
       if(result.enabled!==false)throw Error('not_confirmed');
-      if(account.current!==actor||
-         getStagingGuestAuth().currentUser?.uid!==actor||
-         AppState.currentState!=='active')return;
+      if(!sameEmergencyAuthSession(startingSession,
+         getStagingGuestAuth().currentUser,authSession.current,
+         account.current,AppState.currentState==='active'))return;
       controller.current?.acknowledgeEmergencyStop(peerUid);
       setEmergencyState({peerUid,status:'confirmed'});
     }catch{
-      if(account.current===actor&&
-         getStagingGuestAuth().currentUser?.uid===actor&&
-         AppState.currentState==='active')
+      if(sameEmergencyAuthSession(startingSession,
+         getStagingGuestAuth().currentUser,authSession.current,
+         account.current,AppState.currentState==='active'))
         setEmergencyState({peerUid,status:'failed'});
     }finally{
       emergencyLock.current=false;
