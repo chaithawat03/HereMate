@@ -7,6 +7,7 @@
  */
 import type {ShareFix} from '../location/m2ForegroundSession';
 
+export const M4_ONE_SHOT_MAX_MS=60_000;
 export type M4OneShotPorts=Readonly<{
   isCurrent:()=>boolean;
   servicesEnabled:()=>Promise<boolean>;
@@ -17,6 +18,8 @@ export type M4OneShotPorts=Readonly<{
   now:()=>number;
   // Monotonic time independently bounds a delayed OS prompt/GPS response.
   monotonicNow:()=>number;
+  // A shorter deadline may be injected by offline tests; never exceed consent.
+  deadlineMs?:number;
 }>;
 
 const validFix=(fix:ShareFix,now:number):boolean=>
@@ -39,8 +42,15 @@ export async function evaluateM4OneShotForegroundFix(
   if(!Number.isSafeInteger(consentStartedAtMs)||
      !Number.isFinite(consentStartedMonoMs))
     throw Error('M4_ONE_SHOT_UNAVAILABLE');
-  let lastObservedMonoMs=consentStartedMonoMs;
+  const deadlineMs=p.deadlineMs??M4_ONE_SHOT_MAX_MS;
+  if(!Number.isSafeInteger(deadlineMs)||deadlineMs<20||
+     deadlineMs>M4_ONE_SHOT_MAX_MS)
+    throw Error('M4_ONE_SHOT_UNAVAILABLE');
+  let lastObservedMonoMs=consentStartedMonoMs,expired=false;
   const current=()=>{
+    // Promise.race alone cannot cancel a hung native promise's continuation.
+    // Retire the exact tap before any late OS/GPS/HTTPS result can progress.
+    if(expired)throw Error('M4_ONE_SHOT_UNAVAILABLE');
     if(p.isCurrent()!==true)throw Error('M4_ONE_SHOT_CANCELLED');
     const wall=p.now(),mono=p.monotonicNow();
     if(!Number.isSafeInteger(wall)||!Number.isFinite(mono)||
@@ -50,32 +60,49 @@ export async function evaluateM4OneShotForegroundFix(
       throw Error('M4_ONE_SHOT_UNAVAILABLE');
     lastObservedMonoMs=mono;
   };
-  // A native one-shot GPS API may return a cached location predating the tap.
-  // Consent is captured BEFORE any asynchronous permission or GPS work.
-  const services=await p.servicesEnabled();
-  current();
-  if(services!==true)throw Error('M4_ONE_SHOT_UNAVAILABLE');
-  const granted=await p.requestPermission();
-  current();
-  if(granted!==true)throw Error('M4_ONE_SHOT_UNAVAILABLE');
-  // A native GPS fix may return long after a Firebase account/OS transition.
-  const fix=await p.getCurrentFix();
-  current();
-  const permitted=await p.hasPermission();
-  current();
-  if(permitted!==true||!validFix(fix,p.now())||
-     fix.capturedAtMs<consentStartedAtMs||
-     fix.capturedAtMs>=consentStartedAtMs+60_000)
-    throw Error('M4_ONE_SHOT_UNAVAILABLE');
-  current(); // no stale-account coordinate may enter the HTTPS transport
-  const event=await p.evaluate(fix);
-  current();
-  // An OS Settings revoke while the network call was pending suppresses the
-  // result even when the server had already accepted the point.
-  const stillPermitted=await p.hasPermission();
-  current();
-  if(stillPermitted!==true)throw Error('M4_ONE_SHOT_UNAVAILABLE');
-  if(event!==null&&event!=='enter'&&event!=='exit')
-    throw Error('M4_ONE_SHOT_UNAVAILABLE');
-  return event;
+  // A hung OS permission, native GPS or HTTPS response must not hold the
+  // panel's busy/revoke controls indefinitely. This foreground JS watchdog
+  // does NOT assert execution while the operating system suspends the app.
+  const work=async():Promise<'enter'|'exit'|null>=>{
+    // A native one-shot GPS API may return a cached location predating the tap.
+    // Consent is captured BEFORE any asynchronous permission or GPS work.
+    const services=await p.servicesEnabled();
+    current();
+    if(services!==true)throw Error('M4_ONE_SHOT_UNAVAILABLE');
+    const granted=await p.requestPermission();
+    current();
+    if(granted!==true)throw Error('M4_ONE_SHOT_UNAVAILABLE');
+    // A native GPS fix may return long after a Firebase account/OS transition.
+    const fix=await p.getCurrentFix();
+    current();
+    const permitted=await p.hasPermission();
+    current();
+    if(permitted!==true||!validFix(fix,p.now())||
+       fix.capturedAtMs<consentStartedAtMs||
+       fix.capturedAtMs>=consentStartedAtMs+60_000)
+      throw Error('M4_ONE_SHOT_UNAVAILABLE');
+    current(); // no stale-account coordinate may enter the HTTPS transport
+    const event=await p.evaluate(fix);
+    current();
+    // An OS Settings revoke while the network call was pending suppresses the
+    // result even when the server had already accepted the point.
+    const stillPermitted=await p.hasPermission();
+    current();
+    if(stillPermitted!==true)throw Error('M4_ONE_SHOT_UNAVAILABLE');
+    if(event!==null&&event!=='enter'&&event!=='exit')
+      throw Error('M4_ONE_SHOT_UNAVAILABLE');
+    return event;
+  };
+  let timer:ReturnType<typeof setTimeout>|null=null;
+  const deadline=new Promise<never>((_,reject)=>{
+    timer=setTimeout(()=>{
+      expired=true;
+      reject(Error('M4_ONE_SHOT_UNAVAILABLE'));
+    },deadlineMs);
+  });
+  try{return await Promise.race([work(),deadline]);}
+  finally{
+    expired=true;
+    if(timer!==null)clearTimeout(timer);
+  }
 }
