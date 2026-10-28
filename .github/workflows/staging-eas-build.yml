@@ -1,11 +1,8 @@
 name: Staging Android EAS Build (gated)
 
+# PAUSED by project owner 2026-10-28: no daily Staging preflight runs.
+# The former schedule was 17 7 * * * UTC. Restore explicitly on resumption.
 on:
-  # Only scheduled read-only preflight or explicit manual build;
-  # do not consume any EAS quota on code-only PR merges.
-  # Daily read-only OAuth/WIF health check. NEVER creates an EAS build.
-  schedule:
-    - cron: '17 7 * * *'
   workflow_dispatch:
     inputs:
       run_mode:
