@@ -10,7 +10,7 @@ const SECRET='T'.repeat(72);
 const ORIGIN=APPROVED_M4_STAGING_ORIGINS[1];
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const circle={latitude:13.7563,longitude:100.5018,radiusMeters:350};
-const proposalCreatedAtMs=1_800_000_000_000;
+const proposalCreatedAtMs=Date.now()-5_000;
 const now=()=>Date.now();
 function make(extra={}){
  const calls=[];
@@ -135,6 +135,61 @@ test('logout or permissions revocation while HTTP response pending cannot delive
  finish2();
  await assert.rejects(pending,/M4_GEOFENCE_NOT_AVAILABLE/);
 });
+test('M4 consent responses fail closed for expired, impossible or future-dated TTLs',async()=>{
+ const pending=86_400_000,active=7*pending;
+ const cases=[
+   ['propose',{proposed:true,expiresAtMs:Date.now()-1}],
+   ['propose',{proposed:true,expiresAtMs:Date.now()+pending+60_000}],
+   ['propose',{proposed:true,expiresAtMs:Date.now()+0.5}],
+   ['review',{circle,expiresAtMs:Date.now()-1,
+     proposalCreatedAtMs:Date.now()-5_000}],
+   ['review',{circle,expiresAtMs:Date.now()+pending+60_000,
+     proposalCreatedAtMs:Date.now()-5_000}],
+   ['review',{circle,expiresAtMs:Date.now()+90_000,
+     proposalCreatedAtMs:Date.now()+60_000}],
+   ['review',{circle,expiresAtMs:Date.now()+30_000,
+     proposalCreatedAtMs:Date.now()+40_000}],
+   ['decide',{approved:true,expiresAtMs:Date.now()-1}],
+   ['decide',{approved:true,expiresAtMs:Date.now()+active+60_000}],
+   ['decide',{approved:true,expiresAtMs:Infinity}]
+ ];
+ for(const [route,reply] of cases){
+   const x=make({fetchImpl:async()=>({status:200,ok:true,json:async()=>reply})});
+   const call=route==='propose'?x.transport.propose(PEER,circle):
+     route==='review'?x.transport.review(PEER):
+       x.transport.decide(PEER,true,proposalCreatedAtMs);
+   await assert.rejects(call,/M4_GEOFENCE_NOT_AVAILABLE/,
+     route+' must not show expired or impossible server consent');
+ }
+ // Boundary-positive cases: pending/active consent within the backend's
+ // explicit lifetime remains available. Denial needs no TTL field.
+ const valid=make();
+ assert.equal((await valid.transport.propose(PEER,circle)).proposed,true);
+ assert.deepEqual((await valid.transport.review(PEER)).circle,circle);
+ assert.equal((await valid.transport.decide(PEER,true,proposalCreatedAtMs)).approved,true);
+ assert.deepEqual(await valid.transport.decide(PEER,false,proposalCreatedAtMs),
+   {approved:false});
+});
+
+test('M4 REVIEW expiry is anchored to proposal creation, not only to device now',async()=>{
+ const start=Date.now(),pending=86_400_000;
+ // These replies have plausible future expiries and valid individual fields,
+ // but exceed the server's creation-to-expiry maximum of 24 hours.
+ const invalid=[
+   {circle,proposalCreatedAtMs:start-pending-1,expiresAtMs:start+30_000},
+   {circle,proposalCreatedAtMs:start-20_000,expiresAtMs:start+pending-10_000}
+ ];
+ for(const reply of invalid){
+   const x=make({fetchImpl:async()=>({status:200,ok:true,json:async()=>reply})});
+   await assert.rejects(x.transport.review(PEER),/M4_GEOFENCE_NOT_AVAILABLE/);
+ }
+ // The exact 24-hour creation-relative boundary remains valid.
+ const valid={circle,proposalCreatedAtMs:start-20_000,
+   expiresAtMs:start+pending-20_000};
+ const x=make({fetchImpl:async()=>({status:200,ok:true,json:async()=>valid})});
+ assert.deepEqual(await x.transport.review(PEER),valid);
+});
+
 test('M4 UI requires independent owner/subject consent, distinct revoke and explicit OS GPS tap',()=>{
  const app=read('M2StagingApp.tsx');
  const ios=read('M3IOSStagingApp.tsx');
