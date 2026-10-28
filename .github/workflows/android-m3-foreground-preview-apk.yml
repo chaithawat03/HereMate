@@ -1,9 +1,9 @@
 name: HereMate M3 Android FOREGROUND PREVIEW APK (unreleased test branch)
 
+# PAUSED by owner 2026-10-28: disable preview push builds while HereMate is shelved.
+# Restore branch push trigger only after explicit request to resume.
 on:
-  push:
-    branches:
-      - release/m3-android-preview-20261024
+  workflow_dispatch:
 
 permissions:
   contents: read
