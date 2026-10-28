@@ -100,14 +100,14 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
    if(requireGps&&!(await within(ports.foregroundPermissionGranted())))return unavailable();
    // An OS permission promise can settle after a silent auth/background
    // change, before Firebase/AppState listeners invalidate the UI.
-   if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
+   if(ports.currentIdentity()!==actor||!ports.isForeground())return unavailable();
    let jwt:string;
    try{jwt=await within(actor.getIdToken());}catch{return unavailable();}
    if(typeof jwt!=='string'||jwt.length<32||jwt.length>8192||jwt.includes('\n')||
-      ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
+      ports.currentIdentity()!==actor||!ports.isForeground())return unavailable();
    if(requireGps&&!(await within(ports.foregroundPermissionGranted())))return unavailable();
    // Do not transmit the original subject's GPS with a stale Firebase bearer.
-   if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
+   if(ports.currentIdentity()!==actor||!ports.isForeground())return unavailable();
    const json=JSON.stringify(body);
    if(json.length>2048)return unavailable();
    try{
@@ -120,15 +120,15 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
          Accept:'application/json','Cache-Control':'no-store'},
        body:json,signal:controller.signal
      }));
-     if(res.status!==200||!res.ok||ports.currentIdentity()?.uid!==actor.uid||
+     if(res.status!==200||!res.ok||ports.currentIdentity()!==actor||
         !ports.isForeground())return unavailable();
      let value:unknown;
      try{value=await within(res.json());}catch{return unavailable();}
-     if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
+     if(ports.currentIdentity()!==actor||!ports.isForeground())return unavailable();
      if(requireGps&&!(await within(ports.foregroundPermissionGranted())))return unavailable();
      // Do not expose the server-confirmed event if the final OS permission
      // await completed after logout, account switch or app background.
-     if(ports.currentIdentity()?.uid!==actor.uid||!ports.isForeground())return unavailable();
+     if(ports.currentIdentity()!==actor||!ports.isForeground())return unavailable();
      return value;
    }catch{return unavailable();}
    }catch{
