@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createM2StagingTransport} from '../src/location/m2StagingTransport.ts';
 import {createForegroundSharingController} from '../src/location/m2ForegroundSession.ts';
+import {sameEmergencyAuthSession} from '../src/location/m3EmergencyAuthSession.ts';
 import {handleLocationHttp} from '../backend/location/http.mjs';
 
 const SELF='ownerdeviceuid000001',PEER='viewerdeviceuid000002';
@@ -131,7 +132,10 @@ test('Android M2 and opt-in iOS M3 expose per-known-friend emergency revoke with
  assert.match(screen,/Platform\.OS==='android'\|\|Platform\.OS==='ios'/);
  assert.match(screen,/backendReviewedAndEnabled&&/);
  assert.match(screen,/transport\.emergencyStop!/);
- assert.match(screen,/account\.current!==actor/);
+ assert.match(screen,/authSession\.current!==u/);
+ assert.match(screen,/authSession\.current!==startingSession/);
+ assert.equal([...screen.matchAll(/sameEmergencyAuthSession\(startingSession,/g)].length,2,
+   'both success ACK and failed-response UI must fence the exact auth session');
  assert.match(screen,/r\.senderUid===actor&&r\.recipientUid===peerUid/);
  assert.match(screen,/acknowledgeEmergencyStop\(peerUid\)/);
  assert.match(screen,/status:'confirmed'/);
@@ -214,4 +218,20 @@ test('failed pending START cannot suppress an independent owner STOP',async()=>{
  assert.deepEqual(paths,[
    '/v2/locations/sessions/start','/v1/locations/grants/stop'
  ]);
+});
+
+
+test('same-UID Firebase reauthentication cannot ACK old owner emergency STOP or show its failure',()=>{
+ const first={uid:SELF},newLogin={uid:SELF},different={uid:PEER};
+ assert.equal(sameEmergencyAuthSession(first,first,first,SELF,true),true);
+ assert.equal(sameEmergencyAuthSession(first,newLogin,newLogin,SELF,true),false,
+   'same UID is not the same Firebase User object after reauthentication');
+ assert.equal(sameEmergencyAuthSession(first,first,newLogin,SELF,true),false,
+   'auth listener must retire the old session even if currentUser lags');
+ assert.equal(sameEmergencyAuthSession(first,newLogin,first,SELF,true),false);
+ assert.equal(sameEmergencyAuthSession(first,different,different,PEER,true),false);
+ assert.equal(sameEmergencyAuthSession(first,first,first,SELF,false),false,
+   'backgrounding cannot surface a delayed STOP result');
+ assert.equal(sameEmergencyAuthSession(first,first,first,PEER,true),false);
+ assert.equal(sameEmergencyAuthSession(null,null,null,null,true),false);
 });
