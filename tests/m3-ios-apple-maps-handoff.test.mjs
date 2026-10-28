@@ -56,7 +56,8 @@ test('iOS external map disclosure needs user confirmation, live identity and fre
   assert.match(panel,/style:'cancel'/);
   assert.match(panel,/authorizedPeers\(viewerUid,friends\)/);
   assert.match(panel,/const response=await transport\.read\(peerUid\)/);
-  assert.match(panel,/getStagingGuestAuth\(\)\.currentUser\?\.uid!==viewerUid/);
+  assert.match(panel,/authUser\.current!==viewerUser/);
+  assert.match(panel,/sameViewerSession\(viewerUser,getStagingGuestAuth\(\)\.currentUser\)/);
   assert.match(panel,/validatedRemoteFix\(response,Date\.now\(\)\)/);
   assert.match(panel,/iosAppleMapsUri\(/);
   assert.match(panel,/await Linking\.openURL\(uri\)/);
