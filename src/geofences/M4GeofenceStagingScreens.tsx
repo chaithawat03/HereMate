@@ -28,10 +28,9 @@ export function M4GeofenceStagingScreens({
      return createM4StagingTransport({
        approvedCloudRunUrl,
        projectId:firebaseStagingIdentity.projectId,
-       currentIdentity:()=>{
-         const user=getStagingGuestAuth().currentUser;
-         return user?{uid:user.uid,getIdToken:()=>user.getIdToken()}:null;
-       },
+       // Preserve the Firebase User object identity across async checks.
+       // A new login of the same UID must not inherit an old in-flight request.
+       currentIdentity:()=>getStagingGuestAuth().currentUser,
        isForeground:()=>AppState.currentState==='active',
        foregroundPermissionGranted:async()=>AppState.currentState==='active'&&
          await Location.hasServicesEnabledAsync()&&
