@@ -169,6 +169,10 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        const current=clockNow(clock);
        const revision=authorizeRelation(relation,ownerUid,subjectUid);
        const active=sameZone(zone,ownerUid,subjectUid,revision,current,'active');
+       // A GPS sample captured before this exact subject approval cannot
+       // establish an M4 zone baseline, even if still fresh under M2 rules.
+       // Consent for this circle starts at the trusted approval timestamp.
+       if(point.capturedAtMs<active.approvedAtMs)deny();
        activeM2Grant(grant,publisher,ownerUid,subjectUid,revision,current);
        if(!validFix(point,current))deny();
        // State is strictly zone-classification/dedupe. Never store GPS point.
