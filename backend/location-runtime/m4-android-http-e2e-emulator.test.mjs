@@ -126,17 +126,27 @@ test('Android M4 real JWT/HTTP/Firestore consent and event privacy (emulators on
       latitude:0,longitude:0,accuracyMeters:12,capturedAtMs:Date.now()-1000
     }),/M4_GEOFENCE_NOT_AVAILABLE/,'approval alone is not an M2 publisher grant');
     assert.equal((await subjectM3.start(owner.uid)).enabled,true);
-    // Four independent synthetic samples establish outside, then Enter.
-    // Captures are distinct and ordered; no physical GPS or elapsed wait.
-    const captured=Date.now()-10000;
+    // The exact M4 zone was approved only moments ago. A still-fresh
+    // pre-approval GPS fix cannot establish a zone baseline after M2 START.
+    const approvedAtMs=(await zone.get()).data().approvedAtMs;
+    await assert.rejects(subjectM4.evaluate(owner.uid,{
+      latitude:0.02,longitude:0,accuracyMeters:12,
+      capturedAtMs:approvedAtMs-1
+    }),/M4_GEOFENCE_NOT_AVAILABLE/);
+    assert.equal((await state.get()).exists,false,
+      'pre-approval GPS must not create a geofence transition');
+    // Four distinct synthetic POST-approval samples establish outside,
+    // then Enter. 1s spacing satisfies policy within the existing 5s
+    // GPS clock-skew bound, without any real phone/GPS wait.
+    const captured=Date.now();
     const sample=(lat,offset)=>({
       latitude:lat,longitude:0,accuracyMeters:12,capturedAtMs:captured+offset
     });
     assert.equal((await subjectM4.evaluate(owner.uid,sample(0.02,0))).event,null);
-    assert.equal((await subjectM4.evaluate(owner.uid,sample(0.02,2000))).event,null);
-    assert.equal((await subjectM4.evaluate(owner.uid,sample(0,4000))).event,null);
-    assert.equal((await subjectM4.evaluate(owner.uid,sample(0,6000))).event,'enter');
-    assert.equal((await subjectM4.evaluate(owner.uid,sample(0,6000))).event,null,
+    assert.equal((await subjectM4.evaluate(owner.uid,sample(0.02,1000))).event,null);
+    assert.equal((await subjectM4.evaluate(owner.uid,sample(0,2000))).event,null);
+    assert.equal((await subjectM4.evaluate(owner.uid,sample(0,3000))).event,'enter');
+    assert.equal((await subjectM4.evaluate(owner.uid,sample(0,3000))).event,null,
       'replayed fix cannot emit another Enter');
     const saved=(await state.get()).data();
     assert.equal(saved.zone,'inside');
@@ -154,14 +164,14 @@ test('Android M4 real JWT/HTTP/Firestore consent and event privacy (emulators on
     assert.equal(attempted.status,404);
     assert.equal((await zone.get()).exists,true);
     assert.equal((await subjectM3.stop(owner.uid)).enabled,false);
-    await assert.rejects(subjectM4.evaluate(owner.uid,sample(0,8000)),
+    await assert.rejects(subjectM4.evaluate(owner.uid,sample(0,4000)),
       /M4_GEOFENCE_NOT_AVAILABLE/,'STOP removes publisher authorization');
     // Restored friendship consent cannot resurrect the old grant/zone.
     await relation.update({recipientConsent:false,updatedAt:Timestamp.now()});
-    await assert.rejects(subjectM4.evaluate(owner.uid,sample(0,8000)),
+    await assert.rejects(subjectM4.evaluate(owner.uid,sample(0,4000)),
       /M4_GEOFENCE_NOT_AVAILABLE/);
     await relation.update({recipientConsent:true,updatedAt:Timestamp.now()});
-    await assert.rejects(subjectM4.evaluate(owner.uid,sample(0,8000)),
+    await assert.rejects(subjectM4.evaluate(owner.uid,sample(0,4000)),
       /M4_GEOFENCE_NOT_AVAILABLE/);
     await relation.update({status:'removed',senderConsent:false,
       recipientConsent:false,updatedAt:Timestamp.now()});
