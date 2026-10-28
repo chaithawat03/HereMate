@@ -1,8 +1,9 @@
 name: PR CI
 
+# PAUSED by project owner 2026-10-28: manual-only; no automatic PR CI emails.
+# Restore pull_request trigger when HereMate development resumes.
 on:
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
