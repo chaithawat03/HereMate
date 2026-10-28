@@ -163,6 +163,17 @@ test('real isolated transactions: informed subject opt-in, active M2 lease, ente
    approve:true,proposalCreatedAtMs:secondReview.proposalCreatedAtMs}),GeofenceDenied);
  await assert.rejects(sample(),GeofenceDenied,'requires M2 publisher/grant');
  await location.start({idToken:bearer(B),viewerUid:A});
+ // The M2 lease is now valid, but the native fix was captured 200ms BEFORE
+ // the subject approved this exact M4 zone. It must not establish a baseline.
+ await assert.rejects(geofence.evaluate({
+   idToken:bearer(B),ownerUid:A,point:fix(0.02),
+   appInForeground:true,foregroundPermissionGranted:true
+ }),GeofenceDenied);
+ assert.equal((await stateRef.get()).exists,false,
+   'pre-approval GPS must not write a Firestore transition state');
+ // A distinct post-approval sample is allowed. Keep the normal 200ms GPS
+ // capture lag and existing M2 lease / 12-per-minute abuse policy unchanged.
+ now+=250;
  const out=()=>geofence.evaluate({
    idToken:bearer(B),ownerUid:A,point:fix(0.02),
    appInForeground:true,foregroundPermissionGranted:true
