@@ -50,7 +50,7 @@ function harness(zone){
  return {service,writes};
 }
 const review=s=>s.review({idToken:TOKEN,ownerUid:OWNER});
-const evaluate=s=>s.evaluate({idToken:TOKEN,ownerUid:OWNER,point:FIX,
+const evaluate=(s,point=FIX)=>s.evaluate({idToken:TOKEN,ownerUid:OWNER,point,
   appInForeground:true,foregroundPermissionGranted:true});
 
 test('legitimate pending review and active evaluation preserve the consent path',async()=>{
@@ -66,6 +66,29 @@ test('legitimate pending review and active evaluation preserve the consent path'
  assert.equal(a.writes[0][0],'setState');
  assert.equal(Object.hasOwn(a.writes[0][1],'latitude'),false);
  assert.equal(Object.hasOwn(a.writes[0][1],'point'),false);
+});
+
+test('GPS captured before exact subject zone approval is never evaluated',async()=>{
+ // All samples remain inside the normal 30-second GPS freshness window.
+ // The approval boundary is distinct from M3 device-lease START and from
+ // OS foreground permission. No GPS coordinate is persisted by these tests.
+ const approvedAtMs=NOW-10_000;
+ const approvedZone={...active,approvedAtMs,
+   expiresAtMs:approvedAtMs+MAX_ZONE_LIFETIME_MS};
+ const oldFix={...FIX,capturedAtMs:approvedAtMs-1};
+ const denied=harness(approvedZone);
+ await assert.rejects(evaluate(denied.service,oldFix),GeofenceDenied);
+ assert.deepEqual(denied.writes,[],
+   'pre-approval GPS must not establish a baseline or alter dedupe state');
+ for(const capturedAtMs of [approvedAtMs,approvedAtMs+1]){
+   const permitted=harness(approvedZone);
+   const response=await evaluate(permitted.service,{...FIX,capturedAtMs});
+   assert.equal(response.evaluated,true);
+   assert.equal(response.event,null);
+   assert.deepEqual(permitted.writes.map(row=>row[0]),['setState']);
+   for(const forbidden of ['latitude','longitude','point','fix','history'])
+     assert.equal(Object.hasOwn(permitted.writes[0][1],forbidden),false);
+ }
 });
 
 test('invalid pending creation/expiry timeline cannot expose a review',async()=>{
