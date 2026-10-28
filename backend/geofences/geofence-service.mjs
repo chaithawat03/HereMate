@@ -40,6 +40,19 @@ function sameZone(zone,owner,subject,relation,now,status){
     zone.status!==status||zone.relationRevision!==relation||
     !Number.isSafeInteger(zone.expiresAtMs)||zone.expiresAtMs<=now||
     !validCircle(zone.circle))deny();
+ // Server-created approval chronology is part of the consent boundary.
+ // A malformed/migrated zone must never be treated as subject-approved
+ // solely because status was persisted as "active". REVOKE remains usable.
+ const created=zone.createdAtMs;
+ if(!Number.isSafeInteger(created)||created<=0||created>now)deny();
+ if(status==='pending'){
+   if(zone.expiresAtMs>created+PENDING_LIFETIME_MS)deny();
+ }else{
+   const approved=zone.approvedAtMs;
+   if(!Number.isSafeInteger(approved)||approved<created||approved>now||
+      approved>=created+PENDING_LIFETIME_MS||
+      zone.expiresAtMs>approved+MAX_ZONE_LIFETIME_MS)deny();
+ }
  return zone;
 }
 function activeM2Grant(grant,publisher,owner,subject,relation,now){
@@ -156,6 +169,10 @@ export function createGeofenceService({adminAuth,store,rateLimiter,clock=Date.no
        const current=clockNow(clock);
        const revision=authorizeRelation(relation,ownerUid,subjectUid);
        const active=sameZone(zone,ownerUid,subjectUid,revision,current,'active');
+       // A GPS sample captured before this exact subject approval cannot
+       // establish an M4 zone baseline, even if still fresh under M2 rules.
+       // Consent for this circle starts at the trusted approval timestamp.
+       if(point.capturedAtMs<active.approvedAtMs)deny();
        activeM2Grant(grant,publisher,ownerUid,subjectUid,revision,current);
        if(!validFix(point,current))deny();
        // State is strictly zone-classification/dedupe. Never store GPS point.
