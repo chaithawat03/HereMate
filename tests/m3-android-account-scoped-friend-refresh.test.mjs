@@ -88,7 +88,8 @@ test('Android sharing UI invalidates names, selected friend and emergency result
  assert.match(s,/gate\.invalidate\(\)/);
  assert.match(s,/gate\.dispose\(\)/);
  assert.match(s,/setFriends\(\[\]\);setSelectedUid\(null\)/);
- assert.match(s,/getStagingGuestAuth\(\)\.currentUser\?\.uid!==actor/);
+ assert.match(s,/authSession\.current!==u/);
+ assert.match(s,/sameEmergencyAuthSession\(startingSession,/);
  assert.match(s,/const own=entries\.filter\(r=>r\.senderUid===uid\|\|r\.recipientUid===uid\)/);
  assert.match(s,/controller\.current\?\.consentChanged/);
 });
