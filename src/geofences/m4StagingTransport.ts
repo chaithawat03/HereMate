@@ -154,7 +154,14 @@ export function createM4StagingTransport(ports:M4TransportPorts):M4Transport{
        (row as {proposalCreatedAtMs:number}).proposalCreatedAtMs>
          Date.now()+MAX_CLOCK_SKEW_MS||
        (row as {proposalCreatedAtMs:number}).proposalCreatedAtMs>=
-         (row as {expiresAtMs:number}).expiresAtMs)return unavailable();
+         (row as {expiresAtMs:number}).expiresAtMs||
+       // A REVIEW response must also bind expiry to this exact proposal's
+       // creation, not merely be within 24h of the handset's current clock.
+       // Otherwise an old/migrated proposal with a fabricated future expiry
+       // could be shown for approval despite violating server chronology.
+       (row as {expiresAtMs:number}).expiresAtMs>
+         (row as {proposalCreatedAtMs:number}).proposalCreatedAtMs+
+           PENDING_LIFETIME_MS)return unavailable();
      return row as {circle:GeofenceCircle;expiresAtMs:number;proposalCreatedAtMs:number};
    },
    async decide(ownerUid,approve,proposalCreatedAtMs){

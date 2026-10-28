@@ -171,6 +171,25 @@ test('M4 consent responses fail closed for expired, impossible or future-dated T
    {approved:false});
 });
 
+test('M4 REVIEW expiry is anchored to proposal creation, not only to device now',async()=>{
+ const start=Date.now(),pending=86_400_000;
+ // These replies have plausible future expiries and valid individual fields,
+ // but exceed the server's creation-to-expiry maximum of 24 hours.
+ const invalid=[
+   {circle,proposalCreatedAtMs:start-pending-1,expiresAtMs:start+30_000},
+   {circle,proposalCreatedAtMs:start-20_000,expiresAtMs:start+pending-10_000}
+ ];
+ for(const reply of invalid){
+   const x=make({fetchImpl:async()=>({status:200,ok:true,json:async()=>reply})});
+   await assert.rejects(x.transport.review(PEER),/M4_GEOFENCE_NOT_AVAILABLE/);
+ }
+ // The exact 24-hour creation-relative boundary remains valid.
+ const valid={circle,proposalCreatedAtMs:start-20_000,
+   expiresAtMs:start+pending-20_000};
+ const x=make({fetchImpl:async()=>({status:200,ok:true,json:async()=>valid})});
+ assert.deepEqual(await x.transport.review(PEER),valid);
+});
+
 test('M4 UI requires independent owner/subject consent, distinct revoke and explicit OS GPS tap',()=>{
  const app=read('M2StagingApp.tsx');
  const ios=read('M3IOSStagingApp.tsx');
