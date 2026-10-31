@@ -34,7 +34,7 @@ Tokens: light map base `#EEF1F4`, ink `#1D2228`, secondary `#6B7680`, accent blu
 ## 4. Architecture
 
 ```
-App shell (React Navigation: auth stack → bottom tabs [Friends, Places, Me] + bottom sheet)
+App shell (small in-house nav state: auth gate → tabs [Friends, Places, Me] + bottom sheet; no React Navigation/Reanimated to limit native deps)
    │  uses only
    ▼
 HereMateDataSource  (interface, src/data/types.ts)
