@@ -44,6 +44,8 @@ export type LivePorts = {
     start: (peerUid: string, hours: BackgroundHours) => Promise<unknown>;
     stop: (reason: 'user' | 'mode' | 'signout') => Promise<unknown>;
     current: () => { withId: string; deadlineMs: number } | null;
+    /** Fires when background sharing changes on its own (deadline, revoked, task resume). */
+    subscribe?: (fn: () => void) => Unsub;
   };
   /** Geofence transport when deployed; null keeps Places "coming soon". */
   places: null | {
@@ -132,6 +134,7 @@ export function createLiveDataSource(p: LivePorts): HereMateDataSource {
   function stopPolling() { if (stopMap) { stopMap(); stopMap = null; } }
 
   p.sharing.subscribe(peer => { foregroundWith = peer; emitSharing(); });
+  p.background.subscribe?.(emitSharing);
 
   return {
     mode: 'live',

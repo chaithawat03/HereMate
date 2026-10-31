@@ -24,9 +24,11 @@ const locationOptions=cfg=>cfg.plugins.find(p=>Array.isArray(p)&&p[0]==='expo-lo
 
 test('index routes to the v2 root only on Android with the v2 flag', () => {
   const index=read('index.ts');
-  assert.match(index,/import HereMateApp from '\.\/HereMateApp'/);
+  // Lazy: older builds must never load v2 modules (Firebase/background task side effects).
+  assert.doesNotMatch(index,/import HereMateApp/);
+  assert.match(index,/heremateV2 \? require\('\.\/HereMateApp'\)\.default/);
   assert.match(index,/Platform\.OS === 'android' &&\s*process\.env\.EXPO_PUBLIC_ENABLE_HEREMATE_V2 === 'true'/);
-  assert.match(index,/heremateV2\s*\?\s*HereMateApp\s*:\s*m2AndroidStaging\s*\?\s*M2StagingApp/);
+  assert.match(index,/registerRootComponent\(heremateV2 \? require\('\.\/HereMateApp'\)\.default : m2AndroidStaging\s*\?\s*M2StagingApp/);
 });
 
 test('static app.json keeps background location off for every existing build', () => {

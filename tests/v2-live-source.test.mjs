@@ -131,6 +131,15 @@ test('background start validates hours and delegates; sharing state reflects for
   assert.equal(state.background,null);
 });
 
+test('background ending on its own (deadline/revoked) updates the sharing state', async () => {
+  let bg={withId:A,deadlineMs:NOW+3_600_000};let fire=null;
+  const r=rig({background:{start:async()=>{},stop:async()=>{bg=null;},current:()=>bg,subscribe:fn=>{fire=fn;return ()=>{};}}});
+  let state=null;r.source.location.subscribeSharing(s=>{state=s;});
+  assert.deepEqual(state.background,{withId:A,deadlineMs:NOW+3_600_000});
+  bg=null;fire();
+  assert.equal(state.background,null);
+});
+
 test('places without the geofence capability reject NOT_AVAILABLE and list nothing', async () => {
   const r=rig();
   let zones=null;r.source.places.subscribe(z=>{zones=z;});

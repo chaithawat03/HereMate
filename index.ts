@@ -3,7 +3,6 @@ import { Platform } from 'react-native';
 import App from './App';
 import M2StagingApp from './M2StagingApp';
 import M3IOSStagingApp from './M3IOSStagingApp';
-import HereMateApp from './HereMateApp';
 
 // HereMate v2 (Demo/Live redesign) Android preview: explicit bundle-time opt-in.
 const heremateV2 =
@@ -29,6 +28,8 @@ const m3IOSForegroundStaging =
   process.env.EXPO_PUBLIC_ENABLE_M1_FRIENDS === 'true' &&
   process.env.EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND === 'true';
 
-registerRootComponent(heremateV2 ? HereMateApp : m2AndroidStaging
+// Lazy require: other builds never load v2 modules (Firebase, background task).
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+registerRootComponent(heremateV2 ? require('./HereMateApp').default : m2AndroidStaging
   ? M2StagingApp
   : m3IOSForegroundStaging ? M3IOSStagingApp : App);
