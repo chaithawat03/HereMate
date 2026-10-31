@@ -74,7 +74,7 @@ export function createDemoDataSource(ports: DemoPorts): HereMateDataSource {
     for (const zone of zones) {
       if (zone.state !== 'active') continue;
       const p = current.find(x => x.friendId === zone.subjectId && x.status === 'LIVE');
-      if (!p) continue;
+      if (!p || !p.at) continue;
       const inside = distanceM(p.at, zone.center) <= zone.radiusM;
       const was = insideZone.get(zone.id);
       insideZone.set(zone.id, inside);

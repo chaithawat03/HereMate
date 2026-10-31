@@ -10,7 +10,12 @@ export type Friend = Readonly<{
   id: string; name: string; initials: string; consentMine: boolean; consentTheirs: boolean;
 }>;
 export type FriendPoint = Readonly<{
-  friendId: string; at: LatLng; capturedAtMs: number; status: FriendStatus; placeLabel?: string;
+  friendId: string;
+  /** null = no coordinates may be shown (Live: expired/unavailable points are never plotted). */
+  at: LatLng | null;
+  /** null when no trustworthy capture time exists. */
+  capturedAtMs: number | null;
+  status: FriendStatus; placeLabel?: string;
 }>;
 export type FriendRequestView = Readonly<{ id: string; direction: 'incoming' | 'outgoing'; name: string }>;
 export type Zone = Readonly<{
