@@ -4,7 +4,7 @@ export type Route =
   | { screen: 'friend'; id: string }
   | { screen: 'addFriend' }
   | { screen: 'newPlace'; friendId?: string }
-  | { screen: 'primer'; kind: 'foreground' | 'background' | 'notifications'; friendId?: string }
+  | { screen: 'primer'; kind: 'foreground' | 'background' | 'notifications'; friendId?: string; denied?: boolean }
   | { screen: 'backgroundConsent'; friendId: string };
 export type NavState = Readonly<{ tab: Tab; stack: readonly Route[] }>;
 export type NavAction =
