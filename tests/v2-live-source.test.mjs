@@ -120,7 +120,7 @@ test('map polling starts with the first subscriber and stops with the last; stop
 
 test('background start validates hours and delegates; sharing state reflects foreground + background', async () => {
   let bg=null;
-  const r=rig({background:{start:async(p,h)=>{bg={withId:p,deadlineMs:NOW+h*3_600_000};},stop:async()=>{bg=null;},current:()=>bg}});
+  const r=rig({background:{start:async(p,h,opts)=>{await opts?.beforeGrant?.();bg={withId:p,deadlineMs:NOW+h*3_600_000};},stop:async()=>{bg=null;},current:()=>bg}});
   let state=null;r.source.location.subscribeSharing(s=>{state=s;});
   await r.source.location.startForeground(A);
   assert.deepEqual(state,{foregroundWith:A,background:null,lastBackgroundStop:null});
@@ -134,7 +134,7 @@ test('background start validates hours and delegates; sharing state reflects for
 
 test('starting background sharing first ends foreground sharing (its app-close STOP would kill the grant)', async () => {
   let bg=null;
-  const r=rig({background:{start:async(p,h)=>{r.calls.push('bg:'+p);bg={withId:p,deadlineMs:NOW+h*3_600_000};},stop:async()=>{bg=null;},current:()=>bg}});
+  const r=rig({background:{start:async(p,h,opts)=>{await opts?.beforeGrant?.();r.calls.push('bg:'+p);bg={withId:p,deadlineMs:NOW+h*3_600_000};},stop:async()=>{bg=null;},current:()=>bg}});
   await r.source.location.startForeground(A);
   await r.source.location.startBackground(A,1);
   const i=r.calls.indexOf('fg-stop'),j=r.calls.indexOf('bg:'+A);
@@ -214,4 +214,17 @@ test('C1: a failed relation load or network error is a connection error; a stale
   await refreshFriendMap({...base,isCurrent:()=>false,load:async()=>{throw Error('offline');}});
   await refreshFriendMap({...base,isCurrent:()=>true,load:async()=>null});
   assert.deepEqual(got,['err']);
+});
+
+test('I4: "Allow all the time" denied keeps foreground sharing running', async () => {
+  const r=rig({background:{
+    start:async(p,h,opts)=>{throw Error('BACKGROUND_PERMISSION_DENIED');},
+    stop:async()=>{},current:()=>null}});
+  await r.source.location.startForeground(A);
+  await assert.rejects(r.source.location.startBackground(A,1),/BACKGROUND_PERMISSION_DENIED/);
+  assert.ok(!r.calls.includes('fg-stop'),r.calls.join(','));
+  const r2=rig({background:{start:async(p,h,opts)=>{await opts.beforeGrant();},stop:async()=>{},current:()=>null}});
+  await r2.source.location.startForeground(A);
+  await r2.source.location.startBackground(A,1);
+  assert.ok(r2.calls.includes('fg-stop'),'foreground handed over once permission is granted');
 });

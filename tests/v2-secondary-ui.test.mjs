@@ -60,3 +60,10 @@ test('shell routes every stack screen', () => {
   for(const s of ['AddFriend','NewPlace','PermissionPrimer','BackgroundConsent','PlacesSheet','MeScreen'])
     assert.match(src,new RegExp('<'+s+'\\b'),s);
 });
+
+test('I5: Me explains when closed-app sharing stopped by itself, with battery guidance', () => {
+  const src=read('src/app/screens/Me.tsx');
+  assert.match(src,/sharing\.lastBackgroundStop/);
+  assert.match(src,/t\('bgStoppedAt'/);
+  assert.match(src,/t\('bgBatteryHint'\)/);
+});

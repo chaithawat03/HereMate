@@ -41,7 +41,8 @@ export type LivePorts = {
     subscribe: (fn: (peerUid: string | null) => void) => Unsub;
   };
   background: {
-    start: (peerUid: string, hours: BackgroundHours) => Promise<unknown>;
+    /** `beforeGrant` runs only after OS permissions are granted, right before the server share starts. */
+    start: (peerUid: string, hours: BackgroundHours, opts?: { beforeGrant?: () => Promise<unknown> }) => Promise<unknown>;
     stop: (reason: 'user' | 'mode' | 'signout') => Promise<unknown>;
     current: () => { withId: string; deadlineMs: number } | null;
     /** Fires when background sharing changes on its own (deadline, revoked, task resume). */
@@ -195,10 +196,12 @@ export function createLiveDataSource(p: LivePorts): HereMateDataSource {
       },
       startBackground: async (friendId, hours) => {
         if (!BACKGROUND_HOURS.includes(hours)) throw Error('INVALID_BACKGROUND_HOURS');
-        // The foreground controller sends STOP when the app closes, which would delete
-        // the grant the background task relies on, so foreground sharing ends first.
-        if (foregroundWith !== null) await p.sharing.stop();
-        await p.background.start(friendId, hours);
+        // The foreground controller sends STOP when the app closes, which would delete the
+        // grant the background task relies on, so foreground sharing is handed over — but only
+        // once "Allow all the time" is granted, so a denial keeps foreground sharing running.
+        await p.background.start(friendId, hours, {
+          beforeGrant: async () => { if (foregroundWith !== null) await p.sharing.stop(); },
+        });
         emitSharing();
       },
       stopBackground: async () => { await p.background.stop('user'); emitSharing(); },

@@ -9,7 +9,7 @@ import { getStagingGuestAuth } from '../../auth/firebaseGuest';
 import { firebaseStagingIdentity } from '../../config/firebaseStaging';
 import { APPROVED_M2_STAGING_ORIGINS, createM2StagingTransport } from '../m2StagingTransport';
 import {
-  BACKGROUND_STATE_KEY, BACKGROUND_TASK, LOCATION_TASK_OPTIONS, type BackgroundState,
+  BACKGROUND_STATE_KEY, BACKGROUND_STOP_KEY, BACKGROUND_TASK, LOCATION_TASK_OPTIONS, type BackgroundState, type StopRecord,
 } from './backgroundPolicy';
 import { createBackgroundSharing, type BgFix } from './backgroundSharing';
 
@@ -43,6 +43,18 @@ export const backgroundSharing = createBackgroundSharing({
     save: async s => {
       if (s) await AsyncStorage.setItem(BACKGROUND_STATE_KEY, JSON.stringify(s));
       else await AsyncStorage.removeItem(BACKGROUND_STATE_KEY);
+    },
+    loadStop: async () => {
+      const raw = await AsyncStorage.getItem(BACKGROUND_STOP_KEY);
+      if (!raw) return null;
+      try {
+        const v = JSON.parse(raw) as StopRecord;
+        return Number.isFinite(v?.atMs) && typeof v?.reason === 'string' ? v : null;
+      } catch { return null; }
+    },
+    saveStop: async r => {
+      if (r) await AsyncStorage.setItem(BACKGROUND_STOP_KEY, JSON.stringify(r));
+      else await AsyncStorage.removeItem(BACKGROUND_STOP_KEY);
     },
   },
   location: {
@@ -84,10 +96,12 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(BACKGROUND_TASK
 
 /** LivePorts['background'] implementation. */
 export const backgroundPort = {
-  start: (peerId: string, hours: 1 | 4 | 8) => backgroundSharing.start({ peerId, hours }),
+  start: (peerId: string, hours: 1 | 4 | 8, opts?: { beforeGrant?: () => Promise<unknown> }) =>
+    backgroundSharing.start({ peerId, hours, beforeGrant: opts?.beforeGrant }),
   stop: (reason: 'user' | 'mode' | 'signout') => backgroundSharing.stop(reason),
   current: () => backgroundSharing.current(),
   subscribe: (fn: () => void) => backgroundSharing.subscribe(fn),
+  lastStopped: () => backgroundSharing.lastStopped(),
 };
 
 export async function resumeBackgroundOnLaunch() {

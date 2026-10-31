@@ -84,8 +84,18 @@ export function MeScreen({ caps, sharing, friends, onMode, onPickFriendToShare, 
         <ToggleRow label={t('shareMyLocation')} value={sharingWith !== null} onChange={toggleShare}
           hint={sharingWith ? nameOf(sharingWith) : undefined} />
         {caps.backgroundSharing ? (
-          <ToggleRow label={t('shareWhenClosed')} value={bg !== null} onChange={toggleBackground}
-            hint={bg ? t('shareWhenClosedOn', { name: nameOf(bg.withId), time: timeOf(bg.deadlineMs) }) : undefined} />
+          <>
+            <ToggleRow label={t('shareWhenClosed')} value={bg !== null} onChange={toggleBackground}
+              hint={bg ? t('shareWhenClosedOn', { name: nameOf(bg.withId), time: timeOf(bg.deadlineMs) }) : undefined} />
+            {!bg && sharing.lastBackgroundStop && sharing.lastBackgroundStop.reason !== 'user' ? (
+              <View style={{ paddingVertical: 10 }}>
+                <Text style={{ fontSize: 13, color: c.ink }}>{t('bgStoppedAt', { time: timeOf(sharing.lastBackgroundStop.atMs) })}</Text>
+                {sharing.lastBackgroundStop.reason !== 'deadline' ? (
+                  <Text style={{ fontSize: 12, color: c.secondary, marginTop: 2 }}>{t('bgBatteryHint')}</Text>
+                ) : null}
+              </View>
+            ) : null}
+          </>
         ) : (
           <View style={{ paddingVertical: 10 }}>
             <Text style={{ fontSize: 15, color: c.ink, marginBottom: 8 }}>{t('shareWhenClosed')}</Text>

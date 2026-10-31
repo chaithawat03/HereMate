@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createLocationService,LocationDenied,LocationInvalid,STAGING_PROJECT,GRANT_MS,BACKGROUND_MAX_MS,
+  createLocationService,LocationDenied,LocationInvalid,STAGING_PROJECT,GRANT_MS,BACKGROUND_MAX_MS,BACKGROUND_GRANT_MS,
 } from '../backend/location/location-service.mjs';
 import {createFirestoreLocationStore,createFirestoreLocationRateLimiter} from '../backend/location/firestore-location-adapters.mjs';
 import {handleLocationHttp} from '../backend/location/http.mjs';
@@ -53,8 +53,9 @@ function setup(){
 }
 const fails=(p,T=LocationDenied)=>assert.rejects(p,T);
 
-test('max background window is exactly 8 hours', () => {
+test('max background window is exactly 8 hours; background renewal window is 2 minutes', () => {
   assert.equal(BACKGROUND_MAX_MS,8*H);
+  assert.equal(BACKGROUND_GRANT_MS,120_000);
 });
 
 test('background publish is denied without an explicit background start', async () => {
@@ -74,19 +75,30 @@ test('background start requires an active grant and a deadline within 8 h', asyn
   assert.deepEqual(x.grant().background,{consentedAtMs:now,deadlineMs:now+8*H});
 });
 
-test('background publish stores the point and renews grant + lease to min(now+60 s, deadline)', async () => {
+test('C3: background start opens a 2-minute window; each publish renews grant + lease to min(now+2 min, deadline)', async () => {
   const x=setup();
   await x.start();
   await x.startBg(now+H);
-  now+=45_000;
+  assert.equal(x.grant().expiresAtMs,now+BACKGROUND_GRANT_MS);
+  assert.equal(x.publisher().expiresAtMs,now+BACKGROUND_GRANT_MS);
+  now+=90_000; // longer than the 60 s foreground grant: still fine in background
   const r=await x.bgPublish();
   assert.equal(r.stored,true);
-  assert.equal(x.grant().expiresAtMs,now+GRANT_MS);
-  assert.equal(x.publisher().expiresAtMs,now+GRANT_MS);
+  assert.equal(x.grant().expiresAtMs,now+BACKGROUND_GRANT_MS);
+  assert.equal(x.publisher().expiresAtMs,now+BACKGROUND_GRANT_MS);
   assert.deepEqual((await x.read()).point,point());
-  // keep renewing past the original 60 s grant
-  for(let i=0;i<4;i++){now+=30_000;await x.bgPublish();}
-  assert.equal(x.grant().expiresAtMs,now+GRANT_MS);
+  for(let i=0;i<4;i++){now+=100_000;await x.bgPublish();}
+  assert.equal(x.grant().expiresAtMs,now+BACKGROUND_GRANT_MS);
+});
+
+test('C3: a re-consent after the grant lapsed needs a fresh START (no silent resurrection)', async () => {
+  const x=setup();
+  await x.start();
+  await x.startBg(now+H);
+  now+=BACKGROUND_GRANT_MS+1;
+  await fails(x.startBg(now+H));
+  await x.start();
+  assert.deepEqual(await x.startBg(now+H),{background:true,deadlineMs:now+H});
 });
 
 test('renewal never extends beyond the deadline, and publishing after it is denied', async () => {
@@ -107,7 +119,7 @@ test('a missed renewal lets the grant lapse (no silent resurrection)', async () 
   const x=setup();
   await x.start();
   await x.startBg(now+H);
-  now+=GRANT_MS+1;
+  now+=BACKGROUND_GRANT_MS+1;
   await fails(x.bgPublish());
 });
 

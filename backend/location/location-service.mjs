@@ -9,6 +9,8 @@ export const UID_PATTERN = /^[A-Za-z0-9_-]{12,128}$/;
 export const GRANT_MS = 60_000;
 /** v2: longest closed-app (background) sharing window an owner may consent to. */
 export const BACKGROUND_MAX_MS = 8*3_600_000;
+/** v2: background grants are renewed by each publish to this window (tolerates a missed/deferred publish). */
+export const BACKGROUND_GRANT_MS = 120_000;
 export const FIX_MAX_AGE_MS = 30_000;
 export const FIX_FUTURE_SKEW_MS = 5_000;
 export const ACCURACY_MAX_M = 200;
@@ -202,7 +204,7 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         validPoint(point,now);
         if(background){
           // Renew the short grant + owner lease, never past the consented deadline.
-          grantExpiresAtMs=Math.min(now+GRANT_MS,grant.background.deadlineMs);
+          grantExpiresAtMs=Math.min(now+BACKGROUND_GRANT_MS,grant.background.deadlineMs);
           setGrant({...grant,expiresAtMs:grantExpiresAtMs,expireAt:new Date(grantExpiresAtMs)});
           setPublisher({...publisher,expiresAtMs:grantExpiresAtMs,expireAt:new Date(grantExpiresAtMs)});
         }
@@ -220,14 +222,17 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       if(ownerUid===viewerUid)deny();
       if(!Number.isSafeInteger(deadlineMs))invalid();
       await limit(ownerUid,'start');
-      return tx(ownerUid,viewerUid,async ({relation,grant,publisher,setGrant})=>{
+      return tx(ownerUid,viewerUid,async ({relation,grant,publisher,setGrant,setPublisher})=>{
         const now=time(clock);
         verifiedPair(relation,ownerUid,viewerUid);
         validGrant(grant,ownerUid,viewerUid,now,relation);
         validPublisher(publisher,ownerUid,viewerUid,now,grant);
         if(grant.sessionDigest||publisher.sessionDigest)deny();
         if(deadlineMs<=now||deadlineMs>now+BACKGROUND_MAX_MS)invalid();
-        setGrant({...grant,background:{consentedAtMs:now,deadlineMs}});
+        // Open the first background window immediately (never past the deadline).
+        const expiresAtMs=Math.min(now+BACKGROUND_GRANT_MS,deadlineMs);
+        setGrant({...grant,expiresAtMs,expireAt:new Date(expiresAtMs),background:{consentedAtMs:now,deadlineMs}});
+        setPublisher({...publisher,expiresAtMs,expireAt:new Date(expiresAtMs)});
         return {background:true,deadlineMs};
       });
     },
