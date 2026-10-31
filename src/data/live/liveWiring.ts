@@ -19,6 +19,7 @@ import { loadAuthorizedFriendMap } from '../../location/accountScopedFriendMapRe
 import { authorizedPeers } from '../../location/m2FriendLocationView';
 import { createM4StagingTransport, APPROVED_M4_STAGING_ORIGINS } from '../../geofences/m4StagingTransport';
 import { probeCapabilities, PROBE_TIMEOUT_MS } from './capabilities';
+import { refreshFriendMap } from './friendMapRefresh';
 import type { LivePorts } from './liveDataSource';
 import type { BackgroundHours, LatLng } from '../types';
 
@@ -172,17 +173,13 @@ export function createLivePorts(background: BackgroundPort): LivePorts {
             const uid = auth.currentUser?.uid;
             if (!uid) return;
             const isCurrent = () => run === generation && auth.currentUser?.uid === uid && foreground();
-            try {
-              const snap = await loadAuthorizedFriendMap({
+            await refreshFriendMap({
+              viewerUid: uid, now: Date.now, isCurrent, onSnapshot, onError,
+              load: () => loadAuthorizedFriendMap({
                 viewerUid: uid, isCurrent, loadRelations: listOwnRequests, selectPeers: authorizedPeers,
                 readPeer: peer => transport.read(peer),
-              });
-              if (!snap || !isCurrent()) return;
-              if (snap.partialFailure) onError();
-              else onSnapshot({ viewerUid: uid, relations: snap.relations, reads: snap.reads, nowMs: Date.now() });
-            } catch {
-              if (isCurrent()) onError();
-            }
+              }),
+            });
           },
         });
         poller.start();

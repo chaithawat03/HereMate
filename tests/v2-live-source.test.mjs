@@ -187,3 +187,31 @@ test('C2/I6: ModeProvider unmount disposes instead of stopping all, and keys chi
   assert.match(src,/controller\.dispose\(\)/);
   assert.match(src,/key=\{sourceKey\}/);
 });
+
+test('C1: one non-sharing friend (partial read failure) still delivers the sharing friends, connected', async () => {
+  const {refreshFriendMap}=await import('../src/data/live/friendMapRefresh.ts');
+  const got=[];
+  await refreshFriendMap({
+    load:async()=>({relations:[rel(A),rel(B)],reads:{[A]:fresh()},partialFailure:true}),
+    viewerUid:ME,now:()=>NOW,isCurrent:()=>true,
+    onSnapshot:s=>got.push(['snap',s]),onError:()=>got.push(['err']),
+  });
+  assert.equal(got.length,1);
+  assert.equal(got[0][0],'snap');
+  assert.deepEqual(Object.keys(got[0][1].reads),[A]);
+  const {source,snapshot}=rig();
+  let last=null;source.location.subscribeFriendPoints((p,c)=>{last={p,c};});
+  snapshot(got[0][1]);
+  assert.equal(last.c,true);
+  assert.equal(last.p.find(p=>p.friendId===A).status,'LIVE');
+});
+
+test('C1: a failed relation load or network error is a connection error; a stale generation is ignored', async () => {
+  const {refreshFriendMap}=await import('../src/data/live/friendMapRefresh.ts');
+  const got=[];
+  const base={viewerUid:ME,now:()=>NOW,onSnapshot:()=>got.push('snap'),onError:()=>got.push('err')};
+  await refreshFriendMap({...base,isCurrent:()=>true,load:async()=>{throw Error('offline');}});
+  await refreshFriendMap({...base,isCurrent:()=>false,load:async()=>{throw Error('offline');}});
+  await refreshFriendMap({...base,isCurrent:()=>true,load:async()=>null});
+  assert.deepEqual(got,['err']);
+});
