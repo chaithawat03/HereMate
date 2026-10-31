@@ -20,6 +20,7 @@ const endpoints=Object.freeze({
   '/v1/locations/grants/stop':{method:'stop',keys:['viewerUid']},
   '/v1/locations/points/publish':{method:'publish',keys:['viewerUid','point','appInForeground','foregroundPermissionGranted']},
   '/v1/locations/points/read':{method:'read',keys:['ownerUid']},
+  '/v1/locations/background/start':{method:'startBackground',keys:['viewerUid','deadlineMs']},
   '/v2/locations/sessions/start':{method:'startDevice',keys:['viewerUid']},
   '/v2/locations/sessions/publish':{method:'publishDevice',keys:[
     'viewerUid','sessionToken','point','appInForeground','foregroundPermissionGranted'

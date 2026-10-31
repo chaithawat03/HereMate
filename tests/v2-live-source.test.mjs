@@ -125,10 +125,28 @@ test('background start validates hours and delegates; sharing state reflects for
   await r.source.location.startForeground(A);
   assert.deepEqual(state,{foregroundWith:A,background:null});
   await r.source.location.startBackground(A,8);
-  assert.deepEqual(state,{foregroundWith:A,background:{withId:A,deadlineMs:NOW+8*3_600_000}});
+  assert.deepEqual(state,{foregroundWith:null,background:{withId:A,deadlineMs:NOW+8*3_600_000}},
+    'background replaces foreground sharing for the friend');
   await assert.rejects(r.source.location.startBackground(A,3),/INVALID_BACKGROUND_HOURS/);
   await r.source.location.stopBackground();
   assert.equal(state.background,null);
+});
+
+test('starting background sharing first ends foreground sharing (its app-close STOP would kill the grant)', async () => {
+  let bg=null;
+  const r=rig({background:{start:async(p,h)=>{r.calls.push('bg:'+p);bg={withId:p,deadlineMs:NOW+h*3_600_000};},stop:async()=>{bg=null;},current:()=>bg}});
+  await r.source.location.startForeground(A);
+  await r.source.location.startBackground(A,1);
+  const i=r.calls.indexOf('fg-stop'),j=r.calls.indexOf('bg:'+A);
+  assert.ok(i>=0&&j>i,'foreground stopped before background start: '+r.calls.join(','));
+});
+
+test('while background sharing is active, foreground start for the same friend is a no-op and others are refused', async () => {
+  const bg={withId:A,deadlineMs:NOW+3_600_000};
+  const r=rig({background:{start:async()=>{},stop:async()=>{},current:()=>bg}});
+  await r.source.location.startForeground(A);
+  assert.ok(!r.calls.includes('fg:'+A));
+  await assert.rejects(r.source.location.startForeground(B),/BACKGROUND_ACTIVE/);
 });
 
 test('background ending on its own (deadline/revoked) updates the sharing state', async () => {

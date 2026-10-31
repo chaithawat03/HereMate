@@ -181,9 +181,17 @@ export function createLiveDataSource(p: LivePorts): HereMateDataSource {
         };
       },
       subscribeSharing: fn => { sharingListeners.add(fn); fn(sharingState()); return () => { sharingListeners.delete(fn); }; },
-      startForeground: async friendId => { await p.sharing.start(friendId); },
+      startForeground: async friendId => {
+        // Background sharing already covers this friend; another friend would hit the owner lease.
+        const bg = p.background.current();
+        if (bg) { if (bg.withId === friendId) return; throw Error('BACKGROUND_ACTIVE'); }
+        await p.sharing.start(friendId);
+      },
       startBackground: async (friendId, hours) => {
         if (!BACKGROUND_HOURS.includes(hours)) throw Error('INVALID_BACKGROUND_HOURS');
+        // The foreground controller sends STOP when the app closes, which would delete
+        // the grant the background task relies on, so foreground sharing ends first.
+        if (foregroundWith !== null) await p.sharing.stop();
         await p.background.start(friendId, hours);
         emitSharing();
       },
