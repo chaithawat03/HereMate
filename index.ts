@@ -3,6 +3,12 @@ import { Platform } from 'react-native';
 import App from './App';
 import M2StagingApp from './M2StagingApp';
 import M3IOSStagingApp from './M3IOSStagingApp';
+import HereMateApp from './HereMateApp';
+
+// HereMate v2 (Demo/Live redesign) Android preview: explicit bundle-time opt-in.
+const heremateV2 =
+  Platform.OS === 'android' &&
+  process.env.EXPO_PUBLIC_ENABLE_HEREMATE_V2 === 'true';
 
 // A dedicated manual Android native APK sets this opt-in at BUNDLE time.
 // Existing Demo / Guest EAS profiles, iOS, and Production remain unchanged.
@@ -23,6 +29,6 @@ const m3IOSForegroundStaging =
   process.env.EXPO_PUBLIC_ENABLE_M1_FRIENDS === 'true' &&
   process.env.EXPO_PUBLIC_ENABLE_M3_IOS_FOREGROUND === 'true';
 
-registerRootComponent(m2AndroidStaging
+registerRootComponent(heremateV2 ? HereMateApp : m2AndroidStaging
   ? M2StagingApp
   : m3IOSForegroundStaging ? M3IOSStagingApp : App);

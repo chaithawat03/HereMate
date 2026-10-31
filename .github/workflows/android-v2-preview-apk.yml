@@ -1,0 +1,104 @@
+name: HereMate v2 Android preview APK — manual owner dispatch
+
+# Owner-dispatched ONLY. Builds the HereMate v2 (Demo/Live redesign) Android
+# test APK from the selected branch for owner-device demos. Not Production,
+# not Play Store. Uses the local debug signing config like the M2 test APK.
+# No cloud credentials, no Drive upload: one 7-day Actions artifact + SHA-256.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_target:
+        description: "Confirm v2 preview test APK (not Production): heremate/android-v2-preview"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heremate-android-v2-preview
+  cancel-in-progress: false
+
+jobs:
+  build-v2-preview-apk:
+    if: >-
+      github.repository == 'chaithawat03/HereMate' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.confirm_target == 'heremate/android-v2-preview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      contents: read
+    env:
+      EXPO_PUBLIC_ENVIRONMENT: staging
+      EXPO_PUBLIC_ENABLE_HEREMATE_V2: 'true'
+      EXPO_PUBLIC_ENABLE_FIREBASE_GUEST: 'true'
+      EXPO_PUBLIC_ENABLE_LOCAL_GPS: 'true'
+      EXPO_PUBLIC_ENABLE_M1_PROFILE: 'true'
+      EXPO_PUBLIC_ENABLE_M1_FRIENDS: 'true'
+      EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN: 'true'
+      EXPO_PUBLIC_ENABLE_M2_SHARING: 'true'
+      CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: 'package-lock.json'
+      - name: Install locked Expo dependencies (no Expo billing)
+        run: npm ci --no-audit --no-fund
+      - name: Validate v2 config and TypeScript
+        run: |
+          node --test tests/v2-*.test.mjs
+          npm run typecheck
+      - name: Generate Android native Gradle project locally
+        run: npx expo prebuild --platform android --non-interactive --clean
+      - name: Compile standalone Android release APK with bundled JS
+        run: |
+          set -euo pipefail
+          cd android
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+      - name: Verify installable release APK and record immutable SHA-256
+        run: |
+          set -euo pipefail
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          test -s "$apk"
+          python3 - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+          from zipfile import ZipFile
+          import json,os
+          apk=Path('android/app/build/outputs/apk/release/app-release.apk')
+          with ZipFile(apk) as contents:
+            if not any(name.endswith('index.android.bundle') for name in contents.namelist()):
+              raise SystemExit('V2_PREVIEW_BLOCKED: JavaScript bundle missing from release APK')
+          record={
+            'sourceSha':os.environ['GITHUB_SHA'],
+            'sourceRef':os.environ['GITHUB_REF'],
+            'project':'heremate',
+            'platform':'android',
+            'scope':'v2-preview-owner-device-demo-only',
+            'apkSha256':sha256(apk.read_bytes()).hexdigest(),
+            'apkBytes':apk.stat().st_size,
+          }
+          Path('android-v2-preview-manifest.json').write_text(json.dumps(record,indent=2)+'\n')
+          print('ANDROID_V2_PREVIEW_APK_VERIFIED: sha256='+record['apkSha256'])
+          PY
+      - name: Retain ONE v2 preview APK + SHA-256 manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: HereMate-v2-Android-Preview-APK
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android-v2-preview-manifest.json
+          if-no-files-found: error
+          retention-days: 7
