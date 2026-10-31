@@ -81,3 +81,12 @@ test('v2 preview workflow is dispatch-only, read-only and secret-free', () => {
   assert.match(wf,/retention-days: 7/);
   assert.match(wf,/apkSha256/);
 });
+
+test('PR CI runs every v2 test file and the typecheck', async () => {
+  const {readdirSync}=await import('node:fs');
+  const ci=read('.github/workflows/pr-ci.yml');
+  const files=readdirSync(new URL('../tests/',import.meta.url)).filter(f=>/^v2-.*\.test\.mjs$/.test(f));
+  assert.ok(files.length>=10,'v2 test files found: '+files.length);
+  for(const f of files)assert.match(ci,new RegExp('node --test tests/'+f.replace(/\./g,'\\.')),f);
+  assert.match(ci,/npm run typecheck/);
+});
