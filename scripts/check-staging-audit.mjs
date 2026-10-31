@@ -83,7 +83,7 @@ function run() {
     raw = e.stdout;
   }
   const result=guest ? evaluateGuestAudit(JSON.parse(raw),guestPolicy,new Date(),app,eas) : evaluateAudit(JSON.parse(raw),policy,new Date(),app,eas);
-  const summary = 'STAGING ONLY '+(guest?'ANONYMOUS GUEST TRIAL':'SYNTHETIC DEMO')+': '+(guest?result.highAffectedPackages:result.highPackages)+' High-affected dependency records. Accepted root advisories: '+((guest?result.rootAdvisories:result.advisories).join(', ')||'none')+'. Expires: '+result.expiresOn+'. NOT PATCHED; PHONE/REMOTE GPS SHARING/BACKGROUND TRACKING/PRODUCTION NOT AUTHORIZED.';
+  const summary = 'STAGING ONLY '+(guest?'ANONYMOUS GUEST TRIAL':'SYNTHETIC DEMO')+': '+(guest?result.highAffectedPackages:result.highPackages)+' High-affected dependency records. Accepted root advisories: '+((guest?result.rootAdvisories:result.advisories).join(', ')||'none')+'. Expires: '+result.expiresOn+'. NOT PATCHED; STAGING ONLY (owner re-approved 2026-10-31 for consented sharing incl. v2 deadline-bound background sharing); PRODUCTION NOT AUTHORIZED.';
   console.log(summary);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,'\n### Staging-only Security Exception\n'+summary+'\n');
 }

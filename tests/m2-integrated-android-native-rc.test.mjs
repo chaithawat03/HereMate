@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import {ownerPaused} from './helpers-workflow-pause.mjs';
 const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
 const workflow=read('.github/workflows/android-m2-native-staging-apk.yml');
 const index=read('index.ts');
@@ -27,8 +28,11 @@ test('M2 root is opt-in Android Staging; original EAS/Demo flows unchanged',()=>
 
 test('native Android release build is ONE owner-gated APK, without EAS usage or app secrets',()=>{
  assert.match(workflow,/^  workflow_dispatch:/m);
- assert.match(workflow,/^  issue_comment:/m);
- assert.match(workflow,/^    types: \[created\]/m);
+ // Paused by owner: the Issue #43 comment hook is removed; job guards below still apply.
+ if(!ownerPaused(workflow)){
+   assert.match(workflow,/^  issue_comment:/m);
+   assert.match(workflow,/^    types: \[created\]/m);
+ }
  assert.doesNotMatch(workflow,/^  push:|^  schedule:|^  pull_request:|^  pull_request_target:/m);
  assert.match(workflow,/github\.ref == 'refs\/heads\/main'/);
  assert.match(workflow,/inputs\.confirm_target == 'heremate\/android-m2-staging'/);

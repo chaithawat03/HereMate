@@ -1,6 +1,7 @@
 /**
- * Owner-approved, time-limited HereMate Android Anonymous Guest TEST exception.
- * Only local foreground GPS initiated by the user is allowed; no credentials, sharing, background or Production.
+ * Owner-approved, time-limited HereMate Android Staging TEST exception (approved 2026-10-22,
+ * re-approved by the owner 2026-10-31 for HereMate v2: consented M2 sharing and the v2 Live
+ * deadline-bound background sharing on Staging only). No Production.
  * Original M0.1 synthetic-only snapshot remains independently unchanged.
  */
 import {createHash} from 'node:crypto';
@@ -9,7 +10,14 @@ import {readFileSync} from 'node:fs';
 const error=message=>{throw Error('GUEST STAGING AUDIT BLOCKED: '+message);};
 const approvedRoot=new Map([
   ['GHSA-vfj7-8cjw-p6xm','braces'],
-  ['GHSA-86w9-cpqp-85rv','node-forge']
+  ['GHSA-86w9-cpqp-85rv','node-forge'],
+  // Owner re-approval 2026-10-31: Expo build tooling (@expo/cli), present before and after v2.
+  ['GHSA-7wch-p9px-956x','node-forge'],
+  ['GHSA-jc66-7q78-782g','node-forge'],
+  ['GHSA-8hrf-8g6f-7xwp','node-forge'],
+  ['GHSA-hqq3-7jhf-c5jx','node-forge'],
+  ['GHSA-5x38-2vff-x55p','node-forge'],
+  ['GHSA-mrhx-c7xc-m3w5','zod']
 ]);
 const requiredFiles=[
   'App.tsx','app.json','.gitignore','.easignore','eas.json','package.json','package-lock.json',

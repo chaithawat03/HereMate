@@ -74,3 +74,21 @@ test('rejects expired approval, forged allowlist or missing audit data',()=>{
   assert.throws(()=>evaluate(report(),{...policy,allowed:[]}),/policy/);
   assert.throws(()=>evaluate({auditReportVersion:2,vulnerabilities:{}}),/unavailable/);
 });
+
+test('owner re-approval 2026-10-31 covers the current Expo build-tool advisories only',()=>{
+  assert.equal(policy.reapprovedOn,'2026-10-31');
+  assert.match(policy.reapprovalNote,/HereMate v2/);
+  const r=report();
+  r.vulnerabilities['node-forge'].via.push(
+    ...['GHSA-7wch-p9px-956x','GHSA-jc66-7q78-782g','GHSA-8hrf-8g6f-7xwp','GHSA-hqq3-7jhf-c5jx','GHSA-5x38-2vff-x55p']
+      .map(id=>({name:'node-forge',severity:'high',url:'https://github.com/advisories/'+id})));
+  r.vulnerabilities.zod={severity:'high',via:[{name:'zod',severity:'high',url:'https://github.com/advisories/GHSA-mrhx-c7xc-m3w5'}]};
+  r.metadata.vulnerabilities.high++;
+  const result=evaluate(r);
+  assert.deepEqual(result.rootAdvisories,['GHSA-5x38-2vff-x55p','GHSA-7wch-p9px-956x','GHSA-86w9-cpqp-85rv','GHSA-8hrf-8g6f-7xwp',
+    'GHSA-hqq3-7jhf-c5jx','GHSA-jc66-7q78-782g','GHSA-mrhx-c7xc-m3w5','GHSA-vfj7-8cjw-p6xm']);
+  // An approved ID attributed to a different package is still rejected.
+  const wrong=report();
+  wrong.vulnerabilities.braces.via=[{name:'braces',severity:'high',url:'https://github.com/advisories/GHSA-mrhx-c7xc-m3w5'}];
+  assert.throws(()=>evaluate(wrong),/unapproved HIGH/);
+});
