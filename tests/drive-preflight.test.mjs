@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { preflightPrivateDrive } from '../scripts/preflight-private-drive.mjs';
+import {ownerPaused} from './helpers-workflow-pause.mjs';
 
 const folderId='1Q0zgRbKdt9l6ZeEU4KILSf_1vUjQ2gmo';
 const email='owner@example.org';
@@ -66,7 +67,9 @@ test('workflow_dispatch preflight cannot enter EAS build or Drive publishing',()
 
 test('scheduled OAuth health job is read-only and never triggers EAS build/upload',()=>{
  const w=readFileSync(new URL('../.github/workflows/staging-eas-build.yml',import.meta.url),'utf8');
- assert.match(w,/schedule:\s*\n\s*-\s*cron:\s*'17 7 \* \* \*'/);
+ // Paused by owner: no schedule at all; otherwise the exact daily cron.
+ if(ownerPaused(w))assert.match(w,/former schedule was 17 7 \* \* \* UTC/);
+ else assert.match(w,/schedule:\s*\n\s*-\s*cron:\s*'17 7 \* \* \*'/);
  const check=w.split('  preflight-private-drive:')[1]?.split('  verify-reviewed-merge:')[0];
  const verify=w.split('  verify-reviewed-merge:')[1]?.split('  build-android-staging:')[0];
  const build=w.split('  build-android-staging:')[1]?.split('  publish-android-to-private-drive:')[0];

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import {ownerPaused} from './helpers-workflow-pause.mjs';
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 
 test('M4 live TTL audit is bound to a single owner Issue #54 exact command',()=>{
@@ -25,7 +26,11 @@ test('M4 live TTL audit is bound to a single owner Issue #54 exact command',()=>
 });
 test('M4 owner-command audit cannot mutate Cloud Run, Firestore TTL, IAM or billing',()=>{
  const wf=read('.github/workflows/m4-staging-readonly-ttl.yml');
- assert.doesNotMatch(wf,/workflow_dispatch|pull_request:\s*\n/);
+ // Paused by owner: a bare workflow_dispatch trigger exists but the job still requires
+ // github.event_name == 'issue_comment', so a dispatch can never run the audit.
+ if(ownerPaused(wf))assert.match(wf,/github\.event_name == 'issue_comment' &&/);
+ else assert.doesNotMatch(wf,/workflow_dispatch/);
+ assert.doesNotMatch(wf,/pull_request:\s*\n/);
  assert.doesNotMatch(wf,/google-github-actions\/deploy-cloudrun|gcloud run deploy|gcloud builds submit|gcloud firestore fields ttls update|gcloud projects add-iam-policy-binding|gcloud services enable|firebase deploy/);
  assert.doesNotMatch(wf,/\$\{\{\s*secrets\./);
  assert.doesNotMatch(wf,/HEREMATE_M4_ENABLE_SERVER=true|EXPO_PUBLIC_ENABLE_M4_GEOFENCES=true/);

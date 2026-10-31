@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
+import {ownerPaused} from './helpers-workflow-pause.mjs';
 
 const read = (path) => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 const eas = JSON.parse(read('eas.json'));
@@ -21,7 +22,9 @@ test('M0 excludes production build profile', () => {
 
 test('PR CI is isolated from cloud credentials and automatic deployment', () => {
   const ci = read('.github/workflows/pr-ci.yml');
-  assert.match(ci, /pull_request:/);
+  // Paused by owner: manual dispatch only (never pull_request_target); otherwise pull_request.
+  if (!ownerPaused(ci)) assert.match(ci, /pull_request:/);
+  assert.doesNotMatch(ci, /pull_request_target:/);
   assert.doesNotMatch(ci, /EXPO_TOKEN|GOOGLE_DRIVE_REFRESH_TOKEN|id-token: write|eas build|firebase deploy/);
 });
 
