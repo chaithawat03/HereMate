@@ -26,9 +26,12 @@ export type Capabilities = Readonly<{
   phoneLogin: boolean; geofences: boolean; backgroundSharing: boolean; wave: boolean;
 }>;
 export type BackgroundHours = 1 | 4 | 8;
+export type BackgroundStopReason = 'user' | 'deadline' | 'revoked' | 'signout' | 'mode';
 export type SharingState = Readonly<{
   foregroundWith: string | null;
   background: null | Readonly<{ withId: string; deadlineMs: number }>;
+  /** Last time closed-app sharing ended (persisted across restarts in Live), so the UI can explain it. */
+  lastBackgroundStop?: null | Readonly<{ atMs: number; reason: BackgroundStopReason }>;
 }>;
 export type Unsub = () => void;
 
@@ -70,6 +73,11 @@ export interface HereMateDataSource {
     remove(zoneId: string): Promise<void>;
   };
   wave(friendId: string): Promise<void>;
+  /**
+   * Release timers, polling, listeners and foreground sharing of a source that is no longer shown
+   * (mode switch after stopAll, or app UI unmount). NEVER stops closed-app (background) sharing.
+   */
+  dispose(): void;
 }
 
 export const BACKGROUND_HOURS: readonly BackgroundHours[] = Object.freeze([1, 4, 8] as const);

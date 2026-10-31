@@ -30,15 +30,19 @@ export function ModeProvider({ makeDemo, makeLive, children, fallback = null }: 
     save: async mode => { try { await AsyncStorage.setItem(MODE_STORAGE_KEY, mode); } catch { /* best effort */ } },
   }), [makeDemo, makeLive]);
   const [source, setSource] = useState<HereMateDataSource | null>(null);
+  // A new key per source remounts the UI, so no state from the previous mode is painted.
+  const [sourceKey, setSourceKey] = useState(0);
 
   useEffect(() => {
     let alive = true;
-    const unsub = controller.subscribe(s => { if (alive) setSource(s); });
+    const unsub = controller.subscribe(s => { if (alive) { setSource(s); setSourceKey(k => k + 1); } });
     controller.init().then(() => { if (alive) setSource(controller.active()); });
     return () => {
       alive = false;
       unsub();
-      try { void controller.active().location.stopAll(); } catch { /* not initialised */ }
+      // Activity destroyed / UI unmounted: release timers and polling only.
+      // Background (closed-app) sharing must keep running until its deadline or an explicit stop.
+      controller.dispose();
     };
   }, [controller]);
 
@@ -47,7 +51,7 @@ export function ModeProvider({ makeDemo, makeLive, children, fallback = null }: 
     : null), [source, controller]);
 
   if (!value) return <>{fallback}</>;
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={value}><React.Fragment key={sourceKey}>{children}</React.Fragment></Ctx.Provider>;
 }
 
 export function useHereMate(): HereMateContext {

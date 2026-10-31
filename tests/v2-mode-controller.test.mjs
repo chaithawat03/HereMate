@@ -8,6 +8,7 @@ function fakeSource(mode,{signedIn=true,stopAll}={}){
     mode,log,
     session:{current:()=>signedIn?{uid:'u_'+mode,displayName:mode}:null},
     location:{stopAll:stopAll??(async()=>{log.push('stopAll');})},
+    dispose:()=>log.push('dispose'),
   };
 }
 function rig({saved=null,live=fakeSource('live'),demo=fakeSource('demo'),timers}={}){
@@ -95,4 +96,20 @@ test('concurrent switches are serialised', async () => {
   const [a,b]=await Promise.all([c.switchTo('live'),c.switchTo('demo')]);
   assert.equal(a.mode,'live');assert.equal(b.mode,'demo');
   assert.equal(c.active().mode,'demo');
+});
+
+test('C2/I7: the old source is disposed after stopAll on every switch, even when stop times out', async () => {
+  const {c,demo,live}=rig();
+  await c.init();
+  await c.switchTo('live');
+  assert.deepEqual(demo.log,['stopAll','dispose']);
+  await c.switchTo('demo');
+  assert.deepEqual(live.log,['stopAll','dispose']);
+});
+
+test('C2: dispose() on the active source never stops sharing', async () => {
+  const {c,demo}=rig();
+  await c.init();
+  c.dispose();
+  assert.deepEqual(demo.log,['dispose']);
 });

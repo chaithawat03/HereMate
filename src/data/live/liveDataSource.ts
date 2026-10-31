@@ -46,12 +46,16 @@ export type LivePorts = {
     current: () => { withId: string; deadlineMs: number } | null;
     /** Fires when background sharing changes on its own (deadline, revoked, task resume). */
     subscribe?: (fn: () => void) => Unsub;
+    /** Last automatic/manual end of background sharing (persisted by the task). */
+    lastStopped?: () => { atMs: number; reason: 'user' | 'deadline' | 'revoked' | 'signout' | 'mode' } | null;
   };
   /** Geofence transport when deployed; null keeps Places "coming soon". */
   places: null | {
     propose: (subjectUid: string, center: LatLng, radiusM: number) => Promise<unknown>;
   };
   myPosition: () => Promise<LatLng | null>;
+  /** Remove wiring-level listeners (AppState/auth) when this source is released. */
+  dispose?: () => void;
 };
 
 const notAvailable = () => Promise.reject(Error('NOT_AVAILABLE'));
@@ -93,7 +97,9 @@ export function createLiveDataSource(p: LivePorts): HereMateDataSource {
   const placeListeners = new Set<(z: Zone[], a: []) => void>();
 
   const me = () => p.auth.current()?.uid ?? null;
-  const sharingState = (): SharingState => ({ foregroundWith, background: p.background.current() });
+  const sharingState = (): SharingState => ({
+    foregroundWith, background: p.background.current(), lastBackgroundStop: p.background.lastStopped?.() ?? null,
+  });
   const emitSharing = () => { const s = sharingState(); sharingListeners.forEach(fn => fn(s)); };
   const emitPlaces = () => placeListeners.forEach(fn => fn([...localZones], []));
 
@@ -133,8 +139,8 @@ export function createLiveDataSource(p: LivePorts): HereMateDataSource {
   }
   function stopPolling() { if (stopMap) { stopMap(); stopMap = null; } }
 
-  p.sharing.subscribe(peer => { foregroundWith = peer; emitSharing(); });
-  p.background.subscribe?.(emitSharing);
+  const unsubSharing = p.sharing.subscribe(peer => { foregroundWith = peer; emitSharing(); });
+  const unsubBackground = p.background.subscribe?.(emitSharing);
 
   return {
     mode: 'live',
@@ -217,5 +223,14 @@ export function createLiveDataSource(p: LivePorts): HereMateDataSource {
       remove: () => notAvailable(),
     },
     wave: () => notAvailable(),
+    // Never touches background sharing: closing the app UI must not end a closed-app share.
+    dispose: () => {
+      stopPolling();
+      void p.sharing.stop().catch(() => {});
+      unsubSharing();
+      unsubBackground?.();
+      p.dispose?.();
+      pointListeners.clear(); friendListeners.clear(); sharingListeners.clear(); placeListeners.clear();
+    },
   };
 }

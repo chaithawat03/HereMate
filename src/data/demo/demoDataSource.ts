@@ -36,7 +36,7 @@ export function createDemoDataSource(ports: DemoPorts): HereMateDataSource {
   let alerts: ZoneAlert[] = [];
   const proposedAtTick = new Map<string, number>();
   const insideZone = new Map<string, boolean>();
-  let sharing: SharingState = { foregroundWith: null, background: null };
+  let sharing: SharingState = { foregroundWith: null, background: null, lastBackgroundStop: null };
   let nextId = 1;
 
   const pointListeners = new Set<Listener<[FriendPoint[], boolean]>>();
@@ -87,7 +87,9 @@ export function createDemoDataSource(ports: DemoPorts): HereMateDataSource {
   function step() {
     tick++;
     const now = ports.now();
-    if (sharing.background && now >= sharing.background.deadlineMs) setSharing({ ...sharing, background: null });
+    if (sharing.background && now >= sharing.background.deadlineMs) {
+      setSharing({ ...sharing, background: null, lastBackgroundStop: { atMs: sharing.background.deadlineMs, reason: 'deadline' } });
+    }
     zones = zones.map(z => {
       const at = proposedAtTick.get(z.id);
       return at !== undefined && z.state === 'pending' && tick - at >= AUTO_APPROVE_TICKS ? { ...z, state: 'active' } : z;
@@ -157,7 +159,7 @@ export function createDemoDataSource(ports: DemoPorts): HereMateDataSource {
       remove: async friendId => {
         friends = friends.filter(f => f.id !== friendId);
         if (sharing.foregroundWith === friendId || sharing.background?.withId === friendId) {
-          setSharing({ foregroundWith: null, background: null });
+          setSharing({ ...sharing, foregroundWith: null, background: null });
         }
         emitFriends(); emitPoints();
       },
@@ -171,11 +173,11 @@ export function createDemoDataSource(ports: DemoPorts): HereMateDataSource {
         ensureRunning();
         setSharing({ ...sharing, background: { withId: friendId, deadlineMs: ports.now() + hours * HOUR_MS } });
       },
-      stopBackground: async () => setSharing({ ...sharing, background: null }),
+      stopBackground: async () => setSharing({ ...sharing, background: null, lastBackgroundStop: sharing.background ? { atMs: ports.now(), reason: 'user' } : sharing.lastBackgroundStop }),
       stop: async () => setSharing({ ...sharing, foregroundWith: null }),
+      // Stops MY sharing only; the simulated world keeps moving (it is not my location).
       stopAll: async () => {
-        if (timer !== null) { ports.clearInterval(timer); timer = null; }
-        setSharing({ foregroundWith: null, background: null });
+        setSharing({ ...sharing, foregroundWith: null, background: null });
       },
       myPosition: async () => (ports.myGps ? (await ports.myGps()) ?? DEMO_FALLBACK_POSITION : DEMO_FALLBACK_POSITION),
     },
@@ -195,5 +197,9 @@ export function createDemoDataSource(ports: DemoPorts): HereMateDataSource {
       remove: async zoneId => { zones = zones.filter(z => z.id !== zoneId); emitPlaces(); },
     },
     wave: async () => {},
+    dispose: () => {
+      if (timer !== null) { ports.clearInterval(timer); timer = null; }
+      pointListeners.clear(); friendListeners.clear(); placeListeners.clear(); sharingListeners.clear();
+    },
   };
 }

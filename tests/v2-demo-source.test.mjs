@@ -123,17 +123,32 @@ test('background sharing uses the exact deadline and ends on its own', async () 
   assert.equal(sharing.background,null);
 });
 
-test('stopAll clears the timer and all of my sharing', async () => {
+test('I7: stopAll clears my sharing but keeps the demo world moving; dispose stops the timer', async () => {
+  const r=rig();
+  let sharing=null;r.source.location.subscribeSharing(s=>{sharing=s;});
+  let pts=null;r.source.location.subscribeFriendPoints(p=>{pts=p;});
+  await r.source.location.startForeground('ton');
+  await r.source.location.startBackground('mint',1);
+  await r.source.location.stopAll();
+  assert.deepEqual({...sharing,lastBackgroundStop:null},{foregroundWith:null,background:null,lastBackgroundStop:null});
+  assert.ok(r.state().handle,'simulator still running');
+  r.tick();
+  assert.equal(pts.find(p=>p.friendId==='mint').capturedAtMs,r.now(),'LIVE pins keep updating');
+  r.source.dispose();
+  assert.equal(r.state().handle,null);
+  assert.equal(r.state().cleared,1);
+});
+
+test('I5: demo deadline expiry leaves a stop record', async () => {
   const r=rig();
   let sharing=null;r.source.location.subscribeSharing(s=>{sharing=s;});
   r.source.location.subscribeFriendPoints(()=>{});
-  await r.source.location.startForeground('ton');
+  const t0=r.now();
   await r.source.location.startBackground('mint',1);
-  assert.ok(r.state().handle);
-  await r.source.location.stopAll();
-  assert.equal(r.state().handle,null);
-  assert.equal(r.state().cleared,1);
-  assert.deepEqual(sharing,{foregroundWith:null,background:null});
+  r.advance(3_600_000);r.tick();
+  assert.equal(sharing.background,null);
+  assert.equal(sharing.lastBackgroundStop.reason,'deadline');
+  assert.equal(sharing.lastBackgroundStop.atMs,t0+3_600_000);
 });
 
 test('my position: device GPS when available, otherwise the Siam fallback', async () => {

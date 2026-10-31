@@ -123,9 +123,9 @@ test('background start validates hours and delegates; sharing state reflects for
   const r=rig({background:{start:async(p,h)=>{bg={withId:p,deadlineMs:NOW+h*3_600_000};},stop:async()=>{bg=null;},current:()=>bg}});
   let state=null;r.source.location.subscribeSharing(s=>{state=s;});
   await r.source.location.startForeground(A);
-  assert.deepEqual(state,{foregroundWith:A,background:null});
+  assert.deepEqual(state,{foregroundWith:A,background:null,lastBackgroundStop:null});
   await r.source.location.startBackground(A,8);
-  assert.deepEqual(state,{foregroundWith:null,background:{withId:A,deadlineMs:NOW+8*3_600_000}},
+  assert.deepEqual(state,{foregroundWith:null,background:{withId:A,deadlineMs:NOW+8*3_600_000},lastBackgroundStop:null},
     'background replaces foreground sharing for the friend');
   await assert.rejects(r.source.location.startBackground(A,3),/INVALID_BACKGROUND_HOURS/);
   await r.source.location.stopBackground();
@@ -168,4 +168,22 @@ test('places without the geofence capability reject NOT_AVAILABLE and list nothi
 test('the live source never imports demo code', () => {
   for(const f of ['src/data/live/liveDataSource.ts','src/data/live/capabilities.ts','src/data/live/liveWiring.ts'])
     assert.doesNotMatch(read(f),/data\/demo|demoDataSource|demoWorld/,f);
+});
+
+test('C2: dispose stops polling and foreground sharing but never background sharing', async () => {
+  const r=rig();
+  r.source.location.subscribeFriendPoints(()=>{});
+  await r.source.location.startForeground(A);
+  r.source.dispose();
+  await new Promise(res=>setImmediate(res));
+  assert.equal(r.stops(),1,'polling stopped');
+  assert.ok(r.calls.includes('fg-stop'));
+  assert.ok(!r.calls.some(c=>c.startsWith('bg-stop')),r.calls.join(','));
+});
+
+test('C2/I6: ModeProvider unmount disposes instead of stopping all, and keys children by source', () => {
+  const src=read('src/data/ModeProvider.tsx');
+  assert.doesNotMatch(src,/stopAll\(\)/);
+  assert.match(src,/controller\.dispose\(\)/);
+  assert.match(src,/key=\{sourceKey\}/);
 });

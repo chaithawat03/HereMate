@@ -5,7 +5,7 @@ import type { HereMateDataSource, Mode } from './types.ts';
 
 export const MODE_STOP_TIMEOUT_MS = 5000;
 
-type StoppableSource = Pick<HereMateDataSource, 'mode'> & {
+type StoppableSource = Pick<HereMateDataSource, 'mode' | 'dispose'> & {
   session: Pick<HereMateDataSource['session'], 'current'>;
   location: Pick<HereMateDataSource['location'], 'stopAll'>;
 };
@@ -46,7 +46,9 @@ export function createModeController<S extends StoppableSource>(ports: ModePorts
     if (source.mode === mode) {
       return { mode, needsSignIn: mode === 'live' && source.session.current() === null, stopTimedOut: false };
     }
-    const stoppedInTime = await stopWithin(source);
+    const old = source;
+    const stoppedInTime = await stopWithin(old);
+    try { old.dispose(); } catch { /* best effort */ }
     source = make(mode);
     await ports.save(mode).catch(() => {});
     listeners.forEach(fn => fn(source as S));
@@ -68,6 +70,10 @@ export function createModeController<S extends StoppableSource>(ports: ModePorts
       const run = queue.then(() => doSwitch(mode));
       queue = run.catch(() => {});
       return run;
+    },
+    /** UI unmount: release the active source without stopping (background) sharing. */
+    dispose(): void {
+      try { source?.dispose(); } catch { /* best effort */ }
     },
     subscribe(fn: (s: S) => void): () => void {
       listeners.add(fn);
