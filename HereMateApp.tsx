@@ -1,14 +1,34 @@
-import React from 'react';
-import { StatusBar, View } from 'react-native';
-import { HereMap } from './src/map/HereMap';
+import React, { useCallback } from 'react';
+import { ActivityIndicator, View } from 'react-native';
+import * as Location from 'expo-location';
+import { PreferencesProvider } from './src/ui/PreferencesProvider';
+import { ModeProvider } from './src/data/ModeProvider';
+import { createDemoDataSource } from './src/data/demo/demoDataSource';
+import { createLiveDataSource } from './src/data/live/liveDataSource';
+import { backgroundNotAvailable, createLivePorts } from './src/data/live/liveWiring';
+import { Shell } from './src/app/Shell';
 
-// HereMate v2 root (Android preview). Task 1: map-only spike; the shell,
-// Demo/Live modes and screens are added by later tasks of the v2 plan.
+// HereMate v2 root (Android preview): Demo/Live modes over one data interface.
 export default function HereMateApp() {
+  const makeDemo = useCallback(() => createDemoDataSource({
+    now: Date.now,
+    setInterval: (fn, ms) => setInterval(fn, ms),
+    clearInterval: h => clearInterval(h as ReturnType<typeof setInterval>),
+    myGps: async () => {
+      try {
+        if (!(await Location.getForegroundPermissionsAsync()).granted) return null;
+        const last = await Location.getLastKnownPositionAsync();
+        return last ? { lat: last.coords.latitude, lng: last.coords.longitude } : null;
+      } catch { return null; }
+    },
+  }), []);
+  const makeLive = useCallback(() => createLiveDataSource(createLivePorts(backgroundNotAvailable)), []);
   return (
-    <View style={{ flex: 1, backgroundColor: '#EEF1F4' }}>
-      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
-      <HereMap theme="light" center={{ lat: 13.7462, lng: 100.5347 }} />
-    </View>
+    <PreferencesProvider>
+      <ModeProvider makeDemo={makeDemo} makeLive={makeLive}
+        fallback={<View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EEF1F4' }}><ActivityIndicator /></View>}>
+        <Shell />
+      </ModeProvider>
+    </PreferencesProvider>
   );
 }
