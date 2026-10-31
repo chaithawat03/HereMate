@@ -7,6 +7,10 @@ import {createHash,randomBytes} from 'node:crypto';
 export const STAGING_PROJECT = 'heremate';
 export const UID_PATTERN = /^[A-Za-z0-9_-]{12,128}$/;
 export const GRANT_MS = 60_000;
+/** v2: longest closed-app (background) sharing window an owner may consent to. */
+export const BACKGROUND_MAX_MS = 8*3_600_000;
+/** v2: background grants are renewed by each publish to this window (tolerates a missed/deferred publish). */
+export const BACKGROUND_GRANT_MS = 120_000;
 export const FIX_MAX_AGE_MS = 30_000;
 export const FIX_FUTURE_SKEW_MS = 5_000;
 export const ACCURACY_MAX_M = 200;
@@ -177,9 +181,13 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
       await limit(ownerUid,'publish');
       // Mobile foreground/permission statements cannot be proven by server:
       // they are additional local gates, never substitutes for server consent.
-      if(appInForeground!==true||foregroundPermissionGranted!==true)deny();
+      if(foregroundPermissionGranted!==true)deny();
+      // v2: appInForeground=false is accepted ONLY under an explicit,
+      // unexpired background block that the owner started (startBackground).
+      const background=appInForeground===false;
+      if(appInForeground!==true&&!background)deny();
       if(!exactKeys(point,pointFields))invalid();
-      return tx(ownerUid,viewerUid,async ({relation,grant,publisher,setPoint})=>{
+      return tx(ownerUid,viewerUid,async ({relation,grant,publisher,setPoint,setGrant,setPublisher})=>{
         const now=time(clock);
         verifiedPair(relation,ownerUid,viewerUid);
         validGrant(grant,ownerUid,viewerUid,now,relation);
@@ -187,11 +195,45 @@ export function createLocationService({adminAuth,store,rateLimiter,clock=Date.no
         // Legacy v1 publishers may not inject fixes into a newer
         // device-fenced M3 lease, even when Firebase UID/viewer matches.
         if(grant.sessionDigest||publisher.sessionDigest)deny();
+        let grantExpiresAtMs=grant.expiresAtMs;
+        if(background){
+          const block=grant.background;
+          if(!block||!num(block.deadlineMs)||block.deadlineMs<=now||
+             block.deadlineMs>block.consentedAtMs+BACKGROUND_MAX_MS)deny();
+        }
         validPoint(point,now);
-        const expiresAtMs=Math.min(grant.expiresAtMs,now+FIX_MAX_AGE_MS);
+        if(background){
+          // Renew the short grant + owner lease, never past the consented deadline.
+          grantExpiresAtMs=Math.min(now+BACKGROUND_GRANT_MS,grant.background.deadlineMs);
+          setGrant({...grant,expiresAtMs:grantExpiresAtMs,expireAt:new Date(grantExpiresAtMs)});
+          setPublisher({...publisher,expiresAtMs:grantExpiresAtMs,expireAt:new Date(grantExpiresAtMs)});
+        }
+        const expiresAtMs=Math.min(grantExpiresAtMs,now+FIX_MAX_AGE_MS);
         setPoint({ownerUid,viewerUid,point:{...point},expiresAtMs,
           expireAt:new Date(expiresAtMs)});
         return {stored:true,expiresAtMs};
+      });
+    },
+    // v2: explicit, deadline-bound consent to keep publishing while the app is
+    // closed. Requires the existing unexpired v1 grant + owner lease for this pair.
+    async startBackground({idToken,viewerUid,deadlineMs}) {
+      const ownerUid=await authenticate(idToken);
+      assertUid(viewerUid);
+      if(ownerUid===viewerUid)deny();
+      if(!Number.isSafeInteger(deadlineMs))invalid();
+      await limit(ownerUid,'start');
+      return tx(ownerUid,viewerUid,async ({relation,grant,publisher,setGrant,setPublisher})=>{
+        const now=time(clock);
+        verifiedPair(relation,ownerUid,viewerUid);
+        validGrant(grant,ownerUid,viewerUid,now,relation);
+        validPublisher(publisher,ownerUid,viewerUid,now,grant);
+        if(grant.sessionDigest||publisher.sessionDigest)deny();
+        if(deadlineMs<=now||deadlineMs>now+BACKGROUND_MAX_MS)invalid();
+        // Open the first background window immediately (never past the deadline).
+        const expiresAtMs=Math.min(now+BACKGROUND_GRANT_MS,deadlineMs);
+        setGrant({...grant,expiresAtMs,expireAt:new Date(expiresAtMs),background:{consentedAtMs:now,deadlineMs}});
+        setPublisher({...publisher,expiresAtMs,expireAt:new Date(expiresAtMs)});
+        return {background:true,deadlineMs};
       });
     },
     // M3 opt-in capability-bound START: the secret is generated on the

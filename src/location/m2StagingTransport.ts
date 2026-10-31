@@ -22,6 +22,8 @@ type LocationTransportPorts=Readonly<{
 type LocationTransport=SharePorts['transport']&M2FriendLocationTransport&Readonly<{
   /** Explicit owner action, independent of this handset's session capability. */
   emergencyStop:(peerUid:string)=>Promise<{enabled:false}>;
+  startBackground:(peerUid:string,deadlineMs:number)=>Promise<{background:true;deadlineMs:number}>;
+  publishBackground:(peerUid:string,fix:ShareFix)=>Promise<{stored:true;expiresAtMs:number}>;
 }>;
 const CODE=/^[A-Za-z0-9_-]{12,128}$/;
 const fields=(obj:unknown,keys:readonly string[]):boolean=>{
@@ -219,6 +221,31 @@ export function createM2StagingTransport(ports:LocationTransportPorts):LocationT
       if(row.stored!==true||!validNumber(expiresAt))
         throw Error('M2_LOCATION_TRANSPORT_UNAVAILABLE');
       return {stored:true,expiresAtMs:expiresAt};
+    },
+    /** v2 Live: explicit, deadline-bound closed-app consent. Started by a user tap in the foreground. */
+    async startBackground(peerUid:string,deadlineMs:number){
+      if(ports.useDeviceSessions===true)unavailable();
+      const viewerUid=safePeer(peerUid);
+      if(!validNumber(deadlineMs)||!Number.isSafeInteger(deadlineMs))unavailable();
+      const result=await send('/v1/locations/background/start',{viewerUid,deadlineMs},true);
+      if(!fields(result,['background','deadlineMs']))unavailable();
+      const row=result as {background:unknown;deadlineMs:unknown};
+      if(row.background!==true||row.deadlineMs!==deadlineMs)unavailable();
+      return {background:true as const,deadlineMs};
+    },
+    /** v2 Live background task publish: no foreground gate; the server requires the background block. */
+    async publishBackground(peerUid:string,fix:ShareFix){
+      if(ports.useDeviceSessions===true)unavailable();
+      if(!validFix(fix))unavailable();
+      const viewerUid=safePeer(peerUid);
+      const result=await send('/v1/locations/points/publish',{
+        viewerUid,point:fix,appInForeground:false,foregroundPermissionGranted:true
+      },false);
+      if(!fields(result,['stored','expiresAtMs']))unavailable();
+      const row=result as {stored:unknown;expiresAtMs:unknown};
+      const expiresAt=row.expiresAtMs;
+      if(row.stored!==true||!validNumber(expiresAt))return unavailable();
+      return {stored:true as const,expiresAtMs:expiresAt};
     },
     async emergencyStop(peerUid:string){
       // User-initiated owner-wide STOP intentionally uses the stable v1 route:

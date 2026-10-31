@@ -27,3 +27,14 @@ Plan → implement/test → review → PR/CI → merge → staging build → ver
 M0 — Project foundation. Repository initialized for source control; native app code, EAS credentials, CI gates, and staging distribution are configured in subsequent milestones. No production deployment.
 
 [Engineering tracker](https://github.com/chaithawat03/HereMate/issues/2)
+
+## HereMate v2 preview (Demo/Live redesign, Android)
+
+A new app root (`HereMateApp.tsx`) with a full-screen OpenStreetMap map (MapLibre + OpenFreeMap, no API key), Premium Minimal UI, and an in-app **Demo | Live** switch.
+
+- **Enable:** bundle with `EXPO_PUBLIC_ENABLE_HEREMATE_V2=true` (Android only). Without the flag every existing build is unchanged; `app.config.js` adds background-location permissions only under this flag.
+- **Demo mode:** offline simulator — 8 synthetic Bangkok friends, places/alerts, wave, background sharing. Never writes to Firebase.
+- **Live mode:** existing Staging Firebase + Cloud Run. Phone login and wave show "Coming soon"; places and closed-app sharing appear only when their routes are deployed (probed at runtime).
+- **Closed-app sharing (Live):** explicit per-friend consent, 1/4/8 h auto-stop, ongoing notification, server-enforced deadline (`POST /v1/locations/background/start`).
+- **Build:** owner-dispatched `.github/workflows/android-v2-preview-apk.yml` (input `heremate/android-v2-preview`) → 7-day APK artifact + SHA-256 manifest. Not Production.
+- **Design/plan:** `docs/superpowers/specs/2026-10-31-demo-live-redesign-design.md`, `docs/superpowers/plans/2026-10-31-demo-live-redesign.md`.

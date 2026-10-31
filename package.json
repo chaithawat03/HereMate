@@ -12,16 +12,19 @@
     "config": "expo config --json"
   },
   "dependencies": {
+    "@maplibre/maplibre-react-native": "11.5.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-google-signin/google-signin": "16.1.5",
     "expo": "~57.0.10",
     "expo-location": "57.0.12",
     "expo-status-bar": "~57.0.1",
+    "expo-task-manager": "57.0.21",
     "firebase": "^13.0.0",
     "react": "19.2.3",
     "react-native": "0.86.2"
   },
   "devDependencies": {
+    "@types/geojson": "^7946.0.16",
     "@types/react": "~19.2.2",
     "typescript": "~6.0.3"
   },

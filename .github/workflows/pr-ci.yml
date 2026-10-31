@@ -126,6 +126,45 @@ jobs:
           bash -n scripts/m0-5-inventory.sh
           node --test tests/m0-5-inventory.test.mjs
 
+  heremate-v2:
+    # HereMate v2 Demo/Live Android redesign: offline unit/contract tests + strict typecheck.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked dependencies (no network services used by tests)
+        run: npm ci --no-audit --no-fund
+      - name: v2 TypeScript strict typecheck
+        run: npm run typecheck
+      - name: v2 background client (offline)
+        run: node --test tests/v2-background-client.test.mjs
+      - name: v2 background server (offline)
+        run: node --test tests/v2-background-server.test.mjs
+      - name: v2 demo source (offline)
+        run: node --test tests/v2-demo-source.test.mjs
+      - name: v2 foundation (offline)
+        run: node --test tests/v2-foundation.test.mjs
+      - name: v2 home ui (offline)
+        run: node --test tests/v2-home-ui.test.mjs
+      - name: v2 live source (offline)
+        run: node --test tests/v2-live-source.test.mjs
+      - name: v2 mode controller (offline)
+        run: node --test tests/v2-mode-controller.test.mjs
+      - name: v2 secondary ui (offline)
+        run: node --test tests/v2-secondary-ui.test.mjs
+      - name: v2 theme strings (offline)
+        run: node --test tests/v2-theme-strings.test.mjs
+      - name: v2 types (offline)
+        run: node --test tests/v2-types.test.mjs
+
   firestore-emulator:
     needs: foundation
     runs-on: ubuntu-latest
