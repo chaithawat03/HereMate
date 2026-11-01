@@ -228,3 +228,17 @@ test('I4: "Allow all the time" denied keeps foreground sharing running', async (
   await r2.source.location.startBackground(A,1);
   assert.ok(r2.calls.includes('fg-stop'),'foreground handed over once permission is granted');
 });
+
+test('session.ready waits for the auth port to restore the persisted session', async () => {
+  let release;
+  const r=rig({auth:{current:()=>null,signInGuest:async()=>{},signInGoogle:async()=>{},signOut:async()=>{},
+    ready:()=>new Promise(res=>{release=res;})}});
+  let done=false;
+  const p=r.source.session.ready().then(()=>{done=true;});
+  await new Promise(res=>setImmediate(res));
+  assert.equal(done,false);
+  release();await p;
+  assert.equal(done,true);
+  // ports without ready() resolve immediately
+  await rig().source.session.ready();
+});

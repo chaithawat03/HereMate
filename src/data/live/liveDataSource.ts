@@ -19,6 +19,8 @@ export type LivePorts = {
   probe: () => Promise<Capabilities>;
   auth: {
     current: () => { uid: string; displayName: string } | null;
+    /** Firebase restores persisted sessions asynchronously. */
+    ready?: () => Promise<unknown>;
     signInGuest: () => Promise<unknown>;
     signInGoogle: () => Promise<unknown>;
     signOut: () => Promise<unknown>;
@@ -148,6 +150,7 @@ export function createLiveDataSource(p: LivePorts): HereMateDataSource {
     capabilities: () => (caps ??= p.probe().catch(() => ({ phoneLogin: false, geofences: false, backgroundSharing: false, wave: false }))),
     session: {
       current: () => p.auth.current(),
+      ready: async () => { await p.auth.ready?.(); },
       signInGoogle: async () => { await p.auth.signInGoogle(); },
       signInGuest: async () => { await p.auth.signInGuest(); },
       signInPhone: () => notAvailable(),

@@ -143,6 +143,7 @@ export function createLivePorts(background: BackgroundPort): LivePorts {
         if (result.kind !== 'linked' && result.kind !== 'signed-in' && result.kind !== 'already-google') throw Error('GOOGLE_' + result.kind.toUpperCase());
       },
       signOut: () => stopGuestSession(auth),
+      ready: () => auth.authStateReady(),
     },
     profile: {
       get: async () => {

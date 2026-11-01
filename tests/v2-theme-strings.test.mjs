@@ -49,3 +49,8 @@ test('palette tokens match the spec', () => {
   const d=palette('dark');
   assert.equal(d.accent,'#2F7CF6');assert.notEqual(d.ink,l.ink);
 });
+
+test('friend code placeholder does not imply a fixed HM- format', () => {
+  assert.doesNotMatch(S.th.friendCodePlaceholder,/HM-/);
+  assert.doesNotMatch(S.en.friendCodePlaceholder,/HM-/);
+});
