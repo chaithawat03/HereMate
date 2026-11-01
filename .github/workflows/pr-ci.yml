@@ -152,6 +152,8 @@ jobs:
         run: node --test tests/v2-demo-source.test.mjs
       - name: v2 foundation (offline)
         run: node --test tests/v2-foundation.test.mjs
+      - name: v2 friends APK workflow (offline)
+        run: node --test tests/v2-friends-apk-workflow.test.mjs
       - name: v2 home ui (offline)
         run: node --test tests/v2-home-ui.test.mjs
       - name: v2 live source (offline)

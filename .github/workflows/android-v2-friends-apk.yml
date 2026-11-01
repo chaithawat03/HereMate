@@ -1,0 +1,142 @@
+name: HereMate v2 friends APK — signed, manual owner dispatch
+
+# Owner-dispatched ONLY. Builds the HereMate v2 APK that the owner shares with a
+# small group of friends (sideload). Same app as the v2 preview, Staging backend,
+# but signed with the owner's HereMate upload key from repository secrets so the
+# app can be updated in place and cannot be replaced by a debug-signed APK.
+# Not Production, not Play Store. Fails closed when the signing secrets are
+# missing or the result carries the public debug certificate.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_target:
+        description: "Confirm signed friends APK on Staging (not Production): heremate/android-v2-friends"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: heremate-android-v2-friends
+  cancel-in-progress: false
+
+jobs:
+  build-v2-friends-apk:
+    if: >-
+      github.repository == 'chaithawat03/HereMate' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.confirm_target == 'heremate/android-v2-friends'
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      contents: read
+    env:
+      EXPO_PUBLIC_ENVIRONMENT: staging
+      EXPO_PUBLIC_ENABLE_HEREMATE_V2: 'true'
+      EXPO_PUBLIC_ENABLE_FIREBASE_GUEST: 'true'
+      EXPO_PUBLIC_ENABLE_LOCAL_GPS: 'true'
+      EXPO_PUBLIC_ENABLE_M1_PROFILE: 'true'
+      EXPO_PUBLIC_ENABLE_M1_FRIENDS: 'true'
+      EXPO_PUBLIC_ENABLE_GOOGLE_SIGNIN: 'true'
+      EXPO_PUBLIC_ENABLE_M2_SHARING: 'true'
+      CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Restore HereMate upload key outside the workspace
+        env:
+          KEYSTORE_B64: ${{ secrets.HEREMATE_UPLOAD_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.HEREMATE_UPLOAD_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64}" ] || [ -z "${KEYSTORE_PASSWORD}" ]; then
+            echo "FRIENDS_APK_BLOCKED: signing secrets missing (HEREMATE_UPLOAD_KEYSTORE_B64 / HEREMATE_UPLOAD_KEYSTORE_PASSWORD)"
+            exit 1
+          fi
+          umask 077
+          printf '%s' "${KEYSTORE_B64}" | tr -d ' \r\n' | base64 -d > "${RUNNER_TEMP}/heremate-upload.p12"
+          test -s "${RUNNER_TEMP}/heremate-upload.p12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: 'package-lock.json'
+      - name: Install locked Expo dependencies (no Expo billing)
+        run: npm ci --no-audit --no-fund
+      - name: Validate v2 config and TypeScript
+        run: |
+          node --test tests/v2-*.test.mjs
+          npm run typecheck
+      - name: Generate Android native Gradle project locally
+        run: npx expo prebuild --platform android --non-interactive --clean
+      - name: Compile release APK signed with the HereMate upload key
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.HEREMATE_UPLOAD_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cd android
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace \
+            -Pandroid.injected.signing.store.file="${RUNNER_TEMP}/heremate-upload.p12" \
+            -Pandroid.injected.signing.store.password="${KEYSTORE_PASSWORD}" \
+            -Pandroid.injected.signing.key.alias=heremate \
+            -Pandroid.injected.signing.key.password="${KEYSTORE_PASSWORD}"
+      - name: Verify signature is not the public debug certificate and record SHA-256
+        run: |
+          set -euo pipefail
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          test -s "$apk"
+          apksigner="$(ls -d "${ANDROID_HOME}"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$apksigner" verify --print-certs "$apk" > "${RUNNER_TEMP}/certs.txt"
+          cat "${RUNNER_TEMP}/certs.txt"
+          CERT_SHA1="$(grep -m1 'certificate SHA-1 digest' "${RUNNER_TEMP}/certs.txt" | awk '{print $NF}')"
+          CERT_SHA256="$(grep -m1 'certificate SHA-256 digest' "${RUNNER_TEMP}/certs.txt" | awk '{print $NF}')"
+          test -n "$CERT_SHA1"
+          if [ "$CERT_SHA1" = "5e8f16062ea3cd2c4a0d547876baa6f38cabf625" ]; then
+            echo "FRIENDS_APK_BLOCKED: signed with the public debug certificate"
+            exit 1
+          fi
+          export CERT_SHA1 CERT_SHA256
+          python3 - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+          from zipfile import ZipFile
+          import json,os
+          apk=Path('android/app/build/outputs/apk/release/app-release.apk')
+          with ZipFile(apk) as contents:
+            if not any(name.endswith('index.android.bundle') for name in contents.namelist()):
+              raise SystemExit('FRIENDS_APK_BLOCKED: JavaScript bundle missing from release APK')
+          colon=lambda h:':'.join(h[i:i+2] for i in range(0,len(h),2)).upper()
+          record={
+            'sourceSha':os.environ['GITHUB_SHA'],
+            'sourceRef':os.environ['GITHUB_REF'],
+            'project':'heremate',
+            'platform':'android',
+            'scope':'v2-friends-sideload-staging',
+            'certSha1':colon(os.environ['CERT_SHA1']),
+            'certSha256':colon(os.environ['CERT_SHA256']),
+            'apkSha256':sha256(apk.read_bytes()).hexdigest(),
+            'apkBytes':apk.stat().st_size,
+          }
+          Path('android-v2-friends-manifest.json').write_text(json.dumps(record,indent=2)+'\n')
+          print('FRIENDS_APK_VERIFIED: cert SHA-1 '+record['certSha1']+' sha256='+record['apkSha256'])
+          PY
+      - name: Remove the upload key from the runner
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/heremate-upload.p12"
+      - name: Retain ONE friends APK + manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: HereMate-Friends-APK
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android-v2-friends-manifest.json
+          if-no-files-found: error
+          retention-days: 7
