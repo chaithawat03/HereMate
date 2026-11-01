@@ -121,6 +121,7 @@ export function createDemoDataSource(ports: DemoPorts): HereMateDataSource {
     capabilities: async () => capabilities,
     session: {
       current: () => signedIn,
+      ready: async () => {},
       signInGoogle: async () => { signedIn = { uid: 'demo-me', displayName: 'ชัยธวัช' }; },
       signInGuest: async () => { signedIn = { uid: 'demo-guest', displayName: 'ผู้เยี่ยมชม' }; },
       signInPhone: async (phone, password) => {

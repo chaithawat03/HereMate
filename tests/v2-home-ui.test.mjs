@@ -66,3 +66,17 @@ test('friend detail: wave falls back to Coming soon and directions use the exist
   assert.match(detail,/ComingSoon/);
   assert.match(detail,/androidGeoUri/);
 });
+
+test('tab bar is laid out below the content (never overlaid by the bottom sheet)', () => {
+  const src=read('src/app/Shell.tsx');
+  assert.doesNotMatch(src,/position: 'absolute'[^\n]*\}\}>\s*<TabBar/);
+  assert.match(src,/<View style=\{\{ flex: 1 \}\}>[\s\S]*<\/View>\s*<TabBar /);
+  assert.match(src,/bottomInset=\{0\}/);
+});
+
+test('sign-in is shown only after the session is ready (no flash on cold start)', () => {
+  const src=read('src/app/Shell.tsx');
+  assert.match(src,/session\.ready\(\)/);
+  assert.match(src,/if \(!sessionReady\)/);
+  assert.ok(src.indexOf('if (!sessionReady)')<src.indexOf('if (!session)'),'ready gate comes before the sign-in gate');
+});

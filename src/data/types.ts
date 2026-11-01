@@ -40,6 +40,8 @@ export interface HereMateDataSource {
   capabilities(): Promise<Capabilities>;
   session: {
     current(): { uid: string; displayName: string } | null;
+    /** Resolves once a persisted session (if any) has been restored; current() is reliable after this. */
+    ready(): Promise<void>;
     signInGoogle(): Promise<void>;
     signInGuest(): Promise<void>;
     signInPhone(phone: string, password: string): Promise<void>;

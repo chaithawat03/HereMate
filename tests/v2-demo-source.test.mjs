@@ -176,3 +176,7 @@ test('friend requests and session work locally', async () => {
   assert.ok(r.source.session.current());
   assert.equal(r.source.mode,'demo');
 });
+
+test('demo session is ready immediately', async () => {
+  await rig().source.session.ready();
+});

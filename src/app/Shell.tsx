@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { BackHandler, StatusBar, View } from 'react-native';
+import { ActivityIndicator, BackHandler, StatusBar, View } from 'react-native';
 import { useHereMate } from '../data/ModeProvider';
 import type { LatLng, Mode, Zone } from '../data/types';
 import { useV2 } from './i18n';
@@ -16,12 +16,11 @@ import { BackgroundConsent } from './screens/BackgroundConsent';
 import { TabBar, Toast } from './components/Controls';
 import type { Snap } from './components/BottomSheet';
 
-const TAB_BAR_HEIGHT = 64;
-
 export function Shell() {
   const { t, c } = useV2();
   const { source, mode, switchTo } = useHereMate();
   const { session, refresh } = useSession();
+  const [sessionReady, setSessionReady] = useState(false);
   const [nav, dispatch] = useReducer(navReducer, initialNav);
   const [snap, setSnap] = useState<Snap>('half');
   const [toast, setToast] = useState<string | null>(null);
@@ -37,6 +36,15 @@ export function Shell() {
   const now = useNow();
 
   useEffect(() => { dispatch({ type: 'reset' }); setSnap('half'); primedForeground.current = false; }, [source]);
+  // Wait for a persisted session to be restored before choosing sign-in vs. map (no sign-in flash).
+  useEffect(() => {
+    let alive = true;
+    setSessionReady(false);
+    const done = () => { if (alive) { refresh(); setSessionReady(true); } };
+    source.session.ready().then(done, done);
+    const fallback = setTimeout(done, 5000);
+    return () => { alive = false; clearTimeout(fallback); };
+  }, [source]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (nav.stack.length) { dispatch({ type: 'pop' }); return true; }
@@ -119,6 +127,9 @@ export function Shell() {
     );
   }, [nav.tab, top, selected, selectedPoint, me, now, caps, sharing, friends, points, requests, zones, alerts, source, safely, startForeground, t]);
 
+  if (!sessionReady) {
+    return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c.page }}><ActivityIndicator color={c.accent} /></View>;
+  }
   if (!session) return <SignIn onSignedIn={refresh} />;
 
   // Full-screen overlays.
@@ -161,24 +172,25 @@ export function Shell() {
   return (
     <View style={{ flex: 1, backgroundColor: c.page }}>
       <StatusBar barStyle={c.statusBar} translucent backgroundColor="transparent" />
-      {nav.tab === 'me' ? (
-        <MeScreen caps={caps} sharing={sharing} friends={friends} onMode={onMode} onToast={setToast}
-          onPickFriendToShare={() => dispatch({ type: 'tab', tab: 'friends' })}
-          onStartBackground={startBackgroundFlow} />
-      ) : (
-        <MapScreen
-          points={points} friends={friends} connected={connected} me={me}
-          zones={zonesOnMap}
-          selectedId={selected?.id ?? null} focus={focus}
-          onSelectFriend={id => { dispatch({ type: 'tab', tab: 'friends', then: { screen: 'friend', id } }); setSnap('half'); }}
-          onRetry={() => { /* the poller retries on its own schedule */ }}
-          modeBusy={modeBusy} onMode={onMode}
-          snap={snap} onSnap={setSnap} sheet={sheet} bottomInset={TAB_BAR_HEIGHT}
-        />
-      )}
-      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
-        <TabBar tab={nav.tab} onTab={tab => dispatch({ type: 'tab', tab })} />
+      {/* Content above, tab bar below in normal layout: the bottom sheet can never cover the tabs. */}
+      <View style={{ flex: 1 }}>
+        {nav.tab === 'me' ? (
+          <MeScreen caps={caps} sharing={sharing} friends={friends} onMode={onMode} onToast={setToast}
+            onPickFriendToShare={() => dispatch({ type: 'tab', tab: 'friends' })}
+            onStartBackground={startBackgroundFlow} />
+        ) : (
+          <MapScreen
+            points={points} friends={friends} connected={connected} me={me}
+            zones={zonesOnMap}
+            selectedId={selected?.id ?? null} focus={focus}
+            onSelectFriend={id => { dispatch({ type: 'tab', tab: 'friends', then: { screen: 'friend', id } }); setSnap('half'); }}
+            onRetry={() => { /* the poller retries on its own schedule */ }}
+            modeBusy={modeBusy} onMode={onMode}
+            snap={snap} onSnap={setSnap} sheet={sheet} bottomInset={0}
+          />
+        )}
       </View>
+      <TabBar tab={nav.tab} onTab={tab => dispatch({ type: 'tab', tab })} />
       <Toast message={toast} onDone={() => setToast(null)} />
     </View>
   );
